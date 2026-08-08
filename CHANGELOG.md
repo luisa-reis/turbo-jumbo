@@ -19,6 +19,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Face — naming a repo alone lists its quantizations rather than guessing —
   and `tj copy` moves models between fast storage, cold storage and peers.
 
+  `tj audit` verifies files against Hugging Face and reports what doesn't
+  match, exiting `2` when it finds something and `1` when it couldn't check at
+  all — so a monitoring job can tell a corrupted archive from an unreachable
+  one. `--fix` puts misplaced files back where they belong; resolving
+  duplicates deletes copies, so that needs `--allow-delete` spelled out. A run
+  that repairs everything it found exits `0`, because nothing is wrong any
+  more.
+
   Nothing prompts, so it works unattended: `--dry-run` prints the plan without
   transferring, removals have to be typed (`--delete-after`), and exit codes
   are meaningful, so `tj copy … || alert` does what you would expect. Output is

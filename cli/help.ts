@@ -10,6 +10,7 @@ COMMANDS
   peers               Configured peers and whether each answers
   get <repo|url>      Download from Hugging Face
   copy <model>        Copy between local, cold storage and peers
+  audit <model>|--all Verify files against Hugging Face; exit 2 on findings
   version             Server version, and the URL this CLI is pointed at
   help                This text
 
@@ -30,6 +31,15 @@ TRANSFERS (get, copy)
   would happen first. Downloads run on the server this CLI points at; to
   fetch onto another machine, point at it with --url.
 
+AUDIT
+  --cached            Last-known verdicts from sidecars: instant, no hashing
+  --fix               Relocate misplaced files into their proper layout
+  --allow-delete      Also resolve duplicates, which DELETES extra copies
+  --cold, --peer <s>  Audit cold storage, or a peer, instead of local storage
+
+  A fresh audit reads every byte of every file it checks, so it needs a model
+  name or --all rather than defaulting to everything.
+
 OPTIONS
   --format <f>        auto (default), table, json, or quiet
   --url <url>         Server to talk to
@@ -47,7 +57,7 @@ OUTPUT
 EXIT CODES
   0  success
   1  error (bad usage, unreachable server, malformed config)
-  2  reserved for findings
+  2  the audit ran and found something — distinct from failing to run
 
 EXAMPLES
   tj ls qwen                      Models whose name contains "qwen"

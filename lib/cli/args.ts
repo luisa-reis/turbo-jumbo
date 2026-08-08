@@ -19,6 +19,7 @@ export const COMMANDS = [
   'version',
   'get',
   'copy',
+  'audit',
   'help',
 ] as const;
 export type Command = (typeof COMMANDS)[number];
@@ -40,6 +41,10 @@ export interface CliInvocation {
   from?: string;
   deleteAfter: boolean;
   dryRun: boolean;
+  // Audit (phase 3).
+  fix: boolean;
+  allowDelete: boolean;
+  cached: boolean;
 }
 
 export type ParseResult =
@@ -60,6 +65,9 @@ const OPTIONS = {
   from: {type: 'string'},
   'delete-after': {type: 'boolean'},
   'dry-run': {type: 'boolean'},
+  fix: {type: 'boolean'},
+  'allow-delete': {type: 'boolean'},
+  cached: {type: 'boolean'},
 } as const;
 
 function isCommand(s: string): s is Command {
@@ -135,5 +143,8 @@ function invocation(
     from: values.from,
     deleteAfter: values['delete-after'] ?? false,
     dryRun: values['dry-run'] ?? false,
+    fix: values.fix ?? false,
+    allowDelete: values['allow-delete'] ?? false,
+    cached: values.cached ?? false,
   };
 }

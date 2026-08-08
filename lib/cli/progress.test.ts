@@ -103,6 +103,21 @@ test('a single-file transfer still reports, by decile', () => {
   expect(m(at(990))).not.toContain('files');
 });
 
+test('the same line is never printed twice in a row', () => {
+  // Finishing the last file trips both rules at once: the closing decile and
+  // the file count.
+  const m = createMilestoneEmitter();
+  const at = (filesDone: number) => ({
+    filesDone,
+    filesTotal: 1,
+    bytesDone: 100,
+    bytesTotal: 100,
+    errors: [],
+  });
+  expect(m(at(0))).toContain('100%');
+  expect(m(at(1))).toBeNull();
+});
+
 test('the bar reports percentage, bytes and rate', () => {
   const out = renderBar(
     {

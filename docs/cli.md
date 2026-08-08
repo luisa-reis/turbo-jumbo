@@ -9,8 +9,8 @@ It's a client for a running Turbo Jumbo server, not a second implementation.
 Everything it reports comes from the same code the web UI uses, so the two can't
 disagree with each other.
 
-> **Auditing and deleting aren't here yet.** `tj` reads, downloads and copies
-> today; `audit` and `rm` are planned for later phases.
+> **Deleting isn't here yet.** `tj` reads, downloads, copies and audits today;
+> `rm` and the Lemonade commands are planned for a later phase.
 
 ## Running it
 
@@ -267,6 +267,74 @@ reports those explicitly.
 `--format json` prints one result object at the end instead, and `--format
 quiet` prints nothing on success.
 
+### `tj audit <model>` / `tj audit --all`
+
+Verifies files against Hugging Face — sizes, checksums, whether anything is
+misplaced, duplicated or incomplete — and reports what doesn't match.
+
+```console
+$ tj audit gemma-3-270m
+████████████████████████ 100%  171.8 MiB / 171.8 MiB  43.0 MiB/s  4s
+1 file(s) checked · 0 finding(s)
+```
+
+**A fresh audit reads every byte of every file it checks.** That is the point —
+it is how bit-rot gets caught — but on an archive it is hours of disk, so a bare
+`tj audit` with neither a model name nor `--all` is refused rather than
+quietly starting one.
+
+`--cached` answers instantly instead, from what the last real audit recorded in
+the sidecars. No hashing, no network. It reports history rather than truth: a
+file corrupted since the last fresh run still reads `pass`.
+
+```console
+$ tj audit --all --cached
+34 file(s) checked · 0 finding(s)
+```
+
+`--cold` audits cold storage and `--peer <slug>` audits a peer, instead of this
+machine's fast storage. `--dry-run` lists what would be hashed, and how much.
+
+When something is wrong, it says what and exits `2`:
+
+```console
+$ tj audit --all
+FILE                             STATUS     ACTION  DETAIL
+gemma-3-270m-it-UD-IQ2_XXS.gguf  misplaced          expected path unsloth/gemma-3-270m-it-GGUF/gemma-3-270m-it-UD-IQ2_XXS.gguf
+
+1 file(s) checked · 1 finding(s)
+```
+
+#### Repairing
+
+`--fix` relocates misplaced files into the layout the rest of Turbo Jumbo
+expects. That repair loses nothing, so it needs no further permission:
+
+```console
+$ tj audit --all --fix
+FILE                             STATUS     ACTION                          DETAIL
+gemma-3-270m-it-UD-IQ2_XXS.gguf  misplaced  moved to unsloth/gemma-3-…gguf  expected path …
+
+1 file(s) checked · 1 finding(s) · 1 fixed · 0 remaining
+```
+
+Note the exit code there is **0**, not 2: everything found was repaired, so
+`tj audit --fix || alert` doesn't page anyone about a problem that no longer
+exists. Findings that remain — because a repair failed, or because none exists —
+still exit 2.
+
+Resolving **duplicates** deletes copies, keeping one verified survivor. Since
+nothing here prompts, that needs its own explicit permission:
+
+```console
+$ tj audit big-model --fix --allow-delete
+```
+
+Without `--allow-delete`, duplicates are reported and left alone, with a note
+saying so. Findings with no automatic repair — a checksum mismatch, a file whose
+source can't be determined — are named and left for the web UI, which can ask
+you the questions a CLI can't.
+
 ### `tj version`
 
 ```console
@@ -316,10 +384,12 @@ unsloth/DeepSeek-V4-Flash-0731-GGUF
 | --- | ----------------------------------------------------------------- |
 | `0` | Success                                                           |
 | `1` | Error — bad usage, unreachable server, malformed config, no match |
-| `2` | Reserved for findings (used by `tj audit`, a later phase)         |
+| `2` | The audit ran and found something still wrong                     |
 
-`2` is reserved now so that scripts written against `tj audit` later don't have
-to be revised when it arrives.
+The distinction between `1` and `2` is the useful one for a monitoring job:
+`2` means "I checked, and it is bad", while `1` means "I could not check at
+all". Treating them the same would let an unreachable server look exactly like
+a clean archive.
 
 ## Recipes
 
@@ -381,6 +451,30 @@ $ while read -r repo quant; do
   done < models.txt
 ```
 
+**Nightly integrity check, for cron** — mails you only when something is wrong,
+and tells apart "found a problem" from "couldn't check":
+
+```console
+0 3 * * *  tj audit --all --cold; case $? in \
+             2) mail -s "tj: audit findings" me@example.com ;; \
+             1) mail -s "tj: audit could not run" me@example.com ;; \
+           esac
+```
+
+**Repair what can be repaired, report the rest:**
+
+```console
+$ tj audit --all --fix || echo "findings remain — see above"
+```
+
+**Which models have never been audited** (no recorded verdict at all):
+
+```console
+$ comm -13 \
+    <(tj audit --all --cached --format json | jq -r '.findings[].file' | sort) \
+    <(tj ls --local --format quiet | sort)
+```
+
 **See what a whole download would cost before starting it:**
 
 ```console
@@ -390,9 +484,9 @@ $ tj get unsloth/DeepSeek-V4-Flash-0731-GGUF --quant UD-Q4_K_XL --dry-run \
 
 ## What isn't here yet
 
-- **Phase 3** — `audit`, `audit --fix`, where exit code `2` starts being used.
-- **Phase 4** — `lemonade ls/sync`, `rm`.
+- **Phase 4** — `lemonade ls/sync`, and `rm`.
 
 The designs are written up in
 [phase 1](specs/2026-08-08-tj-cli-phase-1-design.md) (conventions and the read
-commands) and [phase 2](specs/2026-08-08-tj-cli-phase-2-design.md) (transfers).
+commands), [phase 2](specs/2026-08-08-tj-cli-phase-2-design.md) (transfers) and
+[phase 3](specs/2026-08-08-tj-cli-phase-3-design.md) (audit).

@@ -160,6 +160,7 @@ export function renderBar(
 export function createMilestoneEmitter(decile = 10) {
   let lastDone = -1;
   let lastBucket = -1;
+  let lastLine = '';
   return (p: TransferProgress): string | null => {
     const pct =
       p.bytesTotal > 0 ? Math.floor((p.bytesDone / p.bytesTotal) * 100) : 0;
@@ -172,9 +173,13 @@ export function createMilestoneEmitter(decile = 10) {
 
     const files =
       p.filesTotal > 1 ? `${p.filesDone}/${p.filesTotal} files  ` : '';
-    return (
+    const line =
       `${files}${String(pct).padStart(3)}%  ` +
-      `${formatSize(p.bytesDone)} / ${formatSize(p.bytesTotal)}`
-    );
+      `${formatSize(p.bytesDone)} / ${formatSize(p.bytesTotal)}`;
+    // The last file finishing trips both rules at once — the closing decile and
+    // the file count — which would otherwise print the same line twice.
+    if (line === lastLine) return null;
+    lastLine = line;
+    return line;
   };
 }

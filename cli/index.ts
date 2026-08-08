@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-import {parseCli} from '@/lib/cli/args';
+import {parseCli, type CliInvocation} from '@/lib/cli/args';
 import {resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {resolveServerUrl} from '@/lib/cli/server-url';
-import {CliError, createClient} from '@/cli/client';
+import {CliError, createClient, type Client} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
 import {HELP} from '@/cli/help';
 import {ls} from '@/cli/commands/ls';
@@ -12,6 +12,7 @@ import {peers} from '@/cli/commands/peers';
 import {version} from '@/cli/commands/version';
 import {get, type TransferContext} from '@/cli/commands/get';
 import {copy} from '@/cli/commands/copy';
+import {audit, AuditFindings} from '@/cli/commands/audit';
 
 /**
  * `tj` entry point: parse, resolve the server, dispatch, print. Every exit code
@@ -21,6 +22,8 @@ import {copy} from '@/cli/commands/copy';
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 1;
+/** The audit ran and found something. Distinct from the audit failing to run. */
+const EXIT_FINDINGS = 2;
 
 /**
  * The local peer's address from config.yaml, if this machine is a peer and the
@@ -75,33 +78,52 @@ async function main(argv: string[]): Promise<number> {
   );
 
   let out: CommandOutput;
-  switch (inv.command) {
-    case 'ls':
-      out = await ls(client, inv, color);
-      break;
-    case 'where':
-      out = await where(client, inv, color);
-      break;
-    case 'disk':
-      out = await disk(client, inv, color);
-      break;
-    case 'peers':
-      out = await peers(client, color);
-      break;
-    case 'version':
-      out = await version(client, color);
-      break;
-    case 'get':
-      out = await get(client, inv, transferContext(format));
-      break;
-    case 'copy':
-      out = await copy(client, inv, transferContext(format));
-      break;
+  // Findings are a successful audit with bad news, so they print their report
+  // like any other result and only differ in the exit code — a script can then
+  // tell "checked, and it is bad" from "could not check at all".
+  let exitCode = EXIT_OK;
+  try {
+    out = await run(client, inv, format, color);
+  } catch (e) {
+    if (!(e instanceof AuditFindings)) throw e;
+    out = e.output;
+    exitCode = EXIT_FINDINGS;
   }
 
   const text = render(out, format);
   if (text) process.stdout.write(`${text}\n`);
-  return EXIT_OK;
+  return exitCode;
+}
+
+/** Dispatch one command. `color` follows the same TTY rule as the format. */
+async function run(
+  client: Client,
+  inv: CliInvocation,
+  format: OutputFormat,
+  color: boolean,
+): Promise<CommandOutput> {
+  switch (inv.command) {
+    case 'ls':
+      return ls(client, inv, color);
+    case 'where':
+      return where(client, inv, color);
+    case 'disk':
+      return disk(client, inv, color);
+    case 'peers':
+      return peers(client, color);
+    case 'version':
+      return version(client, color);
+    case 'get':
+      return get(client, inv, transferContext(format));
+    case 'copy':
+      return copy(client, inv, transferContext(format));
+    case 'audit':
+      return audit(client, inv, transferContext(format));
+    case 'help':
+      // Handled before dispatch; listed so the switch stays exhaustive and a
+      // new command can't be added without being wired up here.
+      throw new CliError(HELP);
+  }
 }
 
 try {
@@ -109,7 +131,11 @@ try {
 } catch (e) {
   // A CliError is already phrased for a human; anything else is a bug, and its
   // stack is the useful part.
-  if (e instanceof CliError) process.stderr.write(`${e.message}\n`);
-  else process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
-  process.exitCode = EXIT_ERROR;
+  if (e instanceof CliError) {
+    process.stderr.write(`${e.message}\n`);
+    process.exitCode = EXIT_ERROR;
+  } else {
+    process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+    process.exitCode = EXIT_ERROR;
+  }
 }
