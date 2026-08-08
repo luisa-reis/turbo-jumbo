@@ -14,7 +14,7 @@ import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {
   DownloadModal,
-  buildHfCommand,
+  buildDownloadScript,
   useDownloadRunner,
 } from '@/components/hf-download/download-runner';
 import {copyToClipboard} from '@/lib/util/clipboard';
@@ -302,7 +302,7 @@ export function HfDownloadPicker({
 
   const command = useMemo(() => {
     if (!parsed || !files || selectedFiles.length === 0) return null;
-    return buildHfCommand(
+    return buildDownloadScript(
       {
         repoId: parsed.repoId,
         branch: parsed.branch,

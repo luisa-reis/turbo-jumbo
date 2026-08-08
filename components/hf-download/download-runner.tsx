@@ -17,6 +17,7 @@ import {
   parseSize,
   type DownloadProgress,
 } from '@/lib/hf/download-output';
+import {buildDownloadScript} from '@/lib/hf/download-command';
 
 // Padding for the pinned status region in the dialog header, matching
 // LayoutContent's inset so the banners and progress bars align with the body.
@@ -45,15 +46,14 @@ export type DownloadRequest = {
 };
 
 /**
- * The `hf` command line the server runs for a download request, mirroring the
- * `/api/v1/hf-download` route (`--local-dir`, an explicit `--revision`; env
- * like HF_XET_HIGH_PERFORMANCE is inherited from the server's environment).
- * Shown so a user can copy and reproduce a run.
+ * The shell script that reproduces a download request by hand, mirroring what
+ * the `/api/v1/hf-download` route does (env like HF_XET_HIGH_PERFORMANCE is
+ * inherited from the server's environment, so it doesn't appear here). Shown in
+ * the modal's Command section so a run can be copied and re-run. Lives in
+ * `@/lib/hf/download-command`; re-exported here because this has been its
+ * address since the modal first disclosed a command.
  */
-export function buildHfCommand(req: DownloadRequest, localDir: string): string {
-  const includes = req.filePaths.map((fp) => `--include "${fp}"`).join(' ');
-  return `hf download ${req.repoId} ${includes} --local-dir ${localDir} --revision ${req.branch}`;
-}
+export {buildDownloadScript};
 
 // Apply a raw output chunk to the terminal buffer, honouring \r (carriage
 // return) so progress lines redraw in place rather than stacking.
@@ -90,10 +90,10 @@ function applyChunk(state: TermState, chunk: string): TermState {
  * Drives a streaming `/api/v1/hf-download` run: posts the request, parses the
  * terminal output into a redrawing buffer and structured progress, and exposes
  * cancel/reset. Reused by the HF download box and the audit "Redownload" action.
- * `displayPath` is the `--local-dir` surfaced back in the `command` string so
- * every caller's modal can disclose the `hf` command line; `downloadUrl` is the
- * endpoint each run POSTs to — the local route by default, or a peer proxy when
- * the download targets a remote machine.
+ * `displayPath` is the models directory the disclosed script changes into, so
+ * every caller's modal can show a runnable equivalent of the request;
+ * `downloadUrl` is the endpoint each run POSTs to — the local route by default,
+ * or a peer proxy when the download targets a remote machine.
  */
 export function useDownloadRunner(
   displayPath: string,
@@ -102,8 +102,8 @@ export function useDownloadRunner(
   const [term, setTerm] = useState<TermState | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [running, setRunning] = useState(false);
-  // The `hf` command line(s) for the active run — one per repo, joined by a
-  // blank line for a multi-repo plan. Cleared on reset.
+  // The reproducing script for the active run — one self-contained block per
+  // repo, joined by a blank line for a multi-repo plan. Cleared on reset.
   const [command, setCommand] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -149,7 +149,7 @@ export function useDownloadRunner(
     setRunning(true);
     setTerm({lines: [''], col: 0});
     setProgress(null);
-    setCommand(buildHfCommand(req, displayPath));
+    setCommand(buildDownloadScript(req, displayPath));
 
     try {
       await runOne(req, abort, {lines: [''], col: 0});
@@ -177,7 +177,9 @@ export function useDownloadRunner(
     let state: TermState = {lines: [''], col: 0};
     setTerm(state);
     setProgress(null);
-    setCommand(reqs.map((r) => buildHfCommand(r, displayPath)).join('\n\n'));
+    setCommand(
+      reqs.map((r) => buildDownloadScript(r, displayPath)).join('\n\n'),
+    );
 
     try {
       for (let i = 0; i < reqs.length; i++) {

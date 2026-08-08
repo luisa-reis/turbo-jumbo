@@ -47,6 +47,19 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The Command section of the download dialog now shows a script you can
+  actually run, rather than a lone `hf` line: it changes into the models
+  directory first, and then writes the provenance sidecar the app would have
+  written, staging it in `/tmp` and copying it into place so the only step
+  needing write access to the models directory is a single `cp`. Run an audit
+  afterwards and the hand-placed model is indistinguishable from a downloaded
+  one.
+
+  This also corrects the `hf` line itself. It named the models directory as
+  `--local-dir`, but the app downloads into `<models>/<org>/<repo>` — so
+  copying the old command put files a couple of directories above where the app
+  looks for them, under a name derived from the filename instead of the repo.
+
 - The check that runs before a copy — the one that finds files already present
   at the destination — no longer re-reads both copies of every file to compare
   them. Turbo Jumbo already records each file's SHA256 when it downloads it, so
