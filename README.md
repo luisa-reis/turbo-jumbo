@@ -75,6 +75,16 @@ bun dev                             # http://localhost:3000
 Configuration, container deployment, and Lemonade sync setup are covered in
 [docs/setup.md](docs/setup.md).
 
+There's also a companion CLI for asking what you have without opening a browser
+— handy over ssh, and scriptable:
+
+```bash
+tj ls qwen          # models matching "qwen", and where each one lives
+tj disk --all       # free space here and on every peer
+```
+
+See [docs/cli.md](docs/cli.md).
+
 ## License
 
 Turbo Jumbo is released under the [MIT License](LICENSE).
