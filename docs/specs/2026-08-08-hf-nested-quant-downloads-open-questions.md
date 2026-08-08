@@ -74,7 +74,35 @@ picker: a repo with more files than one page would list partially and silently.
 Fixing it means threading pagination through every recursive caller — a separate
 change.
 
-## 6. Multi-select is still allowed
+## 6. Cold-storage marking is informational only
+
+**Assumed:** the badge never changes what's selected.
+
+A cold copy isn't at the download target, so deselecting it would quietly build
+an incomplete model at the destination. Getting it back is a cold→local copy —
+a different workflow the picker doesn't reach.
+
+That leaves the obvious follow-up unbuilt: when everything you've selected is
+already in cold storage, the picker could say so and point at the copy
+workflow instead of letting you spend hours re-fetching it from Hugging Face.
+It knows enough to do that now; it just doesn't.
+
+Smaller assumptions inside it:
+
+- **Only cold storage is marked, not the target's own models directory.** A
+  file already at the destination isn't flagged, though `hf` would skip it
+  anyway. Marking those too would be a small extension of the same join.
+- **An undersized cold copy doesn't count as present.** An interrupted transfer
+  must stay re-fetchable rather than read as done, matching what the copy
+  workflow's presence check already does. Such a file is simply unmarked, so a
+  partial cold copy is currently indistinguishable from no copy at all.
+- **The join is by basename, qualified by model name for generic and mmproj
+  filenames.** This is `fileJoinKey`, the same join the copy workflow uses, and
+  it inherits the same limitation: a cold copy with no sidecar is named for its
+  filename rather than its repo, so a generic or mmproj file won't match. GGUF
+  quants, which carry specific basenames, match regardless.
+
+## 7. Multi-select is still allowed
 
 **Assumed:** quant rows stay checkboxes, so several quantizations can be
 downloaded at once.

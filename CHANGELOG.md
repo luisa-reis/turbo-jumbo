@@ -20,6 +20,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   single file — refetching one shard of a set whose siblings you moved off to
   free space — an "Individual files" switch lets you open a quantization and
   pick from inside it. A part-selected quantization says so on its row.
+- The download modal now marks what the target machine already has in cold
+  storage, so you can see before starting that a quantization you were about to
+  pull down is sitting on an archive disk you already own. A partly-archived
+  set says how much of it is there. Nothing is selected or deselected on your
+  behalf — a cold copy isn't at the download target, and fetching it back is a
+  copy rather than a download. Downloads aimed at another peer are checked
+  against that peer's cold storage, not this machine's.
+
 - Repos that keep each quantization in its own directory can now be downloaded
   at all. `unsloth/DeepSeek-V4-Flash-0731-GGUF` and its kin previously showed a
   single file, because the modal only ever looked at the repo's top level — all

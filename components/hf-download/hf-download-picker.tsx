@@ -10,6 +10,7 @@ import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
 import {List, ListItem} from '@astryxdesign/core/List';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {Icon} from '@astryxdesign/core/Icon';
+import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {
   DownloadModal,
@@ -25,7 +26,9 @@ import {
 import {formatSize} from '@/lib/format/bytes';
 import {defaultDownloadSelection, repoDownloadKind} from '@/lib/hf/hf-download';
 import {quantGroups, type QuantGroup} from '@/lib/hf/quant-groups';
+import {coldStoredPaths} from '@/lib/hf/cold-presence';
 import {parseHfUrl} from '@/lib/hf/hf-url';
+import type {Model} from '@/lib/models/model-types';
 
 type HfFile = {path: string; size: number};
 
@@ -42,6 +45,22 @@ function groupDetail(g: QuantGroup, selectedCount: number): string | undefined {
     );
   if (g.folder) parts.push(`${g.folder}/`);
   return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+/**
+ * How much of a row the target machine already has archived. Silent when it
+ * holds none, which is the usual case — the badge is there to catch the
+ * expensive mistake of re-fetching gigabytes that are already on a local disk,
+ * so it should only speak up when there's something to say.
+ */
+function ColdBadge({held, total}: {held: number; total: number}) {
+  if (held === 0) return null;
+  return (
+    <Badge
+      variant="green"
+      label={held === total ? 'In cold storage' : `${held} of ${total} in cold`}
+    />
+  );
 }
 
 const styles = stylex.create({
@@ -73,6 +92,9 @@ export function HfDownloadPicker({
   // to warn before a transfer that wouldn't fit. Null while unknown (loading or
   // unreadable) — no warning.
   const [disk, setDisk] = useState<DownloadDiskUsage | null>(null);
+  // The target machine's cold storage, fetched once, to mark files it has
+  // already archived. Null while unknown (loading or unreadable) — no marks.
+  const [coldModels, setColdModels] = useState<Model[] | null>(null);
   const {
     term,
     progress,
@@ -113,6 +135,23 @@ export function HfDownloadPicker({
       cancelled = true;
     };
   }, [target.diskUsageUrl]);
+
+  // Read the target's cold storage once (best-effort: a peer that's down, or a
+  // host with no cold storage configured, simply gets no marks).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(target.coldStorageUrl)
+      .then((r) => (r.ok ? (r.json() as Promise<Model[]>) : null))
+      .then((m) => {
+        if (!cancelled && m) setColdModels(m);
+      })
+      .catch(() => {
+        /* unreachable: no cold-storage marks */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target.coldStorageUrl]);
 
   const parsed = useMemo(
     () => (debouncedUrl.trim() ? parseHfUrl(debouncedUrl.trim()) : null),
@@ -202,6 +241,17 @@ export function HfDownloadPicker({
       return null;
     return quantGroups(files);
   }, [files]);
+
+  // Files the target already has archived. Informational only — a cold copy
+  // isn't at the download target, so it never changes what's selected; getting
+  // it back is a copy, not a download.
+  const inCold = useMemo(() => {
+    if (!files || !coldModels || !parsed) return new Set<string>();
+    return coldStoredPaths(coldModels, parsed.repoId, files);
+  }, [files, coldModels, parsed]);
+
+  const coldCount = (g: QuantGroup) =>
+    g.paths.filter((p) => inCold.has(p)).length;
 
   // The picker shows the rows matching the filter; selection is by path, so
   // rows selected and then filtered out of view stay selected (the footer
@@ -409,6 +459,7 @@ export function HfDownloadPicker({
                 description={groupDetail(g, groupSelectedCount(g))}
                 endContent={
                   <HStack gap={2} vAlign="center">
+                    <ColdBadge held={coldCount(g)} total={g.fileCount} />
                     <Text type="supporting">{formatSize(g.size)}</Text>
                     {expandable && g.fileCount > 1 && (
                       <IconButton
@@ -445,11 +496,14 @@ export function HfDownloadPicker({
                       }
                       label={p.split('/').pop()}
                       endContent={
-                        <Text type="supporting">
-                          {formatSize(
-                            files!.find((f) => f.path === p)?.size ?? 0,
-                          )}
-                        </Text>
+                        <HStack gap={2} vAlign="center">
+                          <ColdBadge held={inCold.has(p) ? 1 : 0} total={1} />
+                          <Text type="supporting">
+                            {formatSize(
+                              files!.find((f) => f.path === p)?.size ?? 0,
+                            )}
+                          </Text>
+                        </HStack>
                       }
                     />
                   ))
@@ -474,7 +528,12 @@ export function HfDownloadPicker({
                   />
                 }
                 label={f.path}
-                endContent={<Text type="supporting">{formatSize(f.size)}</Text>}
+                endContent={
+                  <HStack gap={2} vAlign="center">
+                    <ColdBadge held={inCold.has(f.path) ? 1 : 0} total={1} />
+                    <Text type="supporting">{formatSize(f.size)}</Text>
+                  </HStack>
+                }
               />
             ))}
             {visibleFiles.length === 0 && (

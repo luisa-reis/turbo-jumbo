@@ -21,6 +21,7 @@ test('All tab targets the local download endpoint', () => {
     url: '/api/v1/hf-download',
     displayPath: '/local/models',
     diskUsageUrl: '/api/v1/disk-usage',
+    coldStorageUrl: '/api/v1/cold-storage',
   });
 });
 
@@ -29,6 +30,7 @@ test('local peer targets the local download endpoint', () => {
     url: '/api/v1/hf-download',
     displayPath: '/local/models',
     diskUsageUrl: '/api/v1/disk-usage',
+    coldStorageUrl: '/api/v1/cold-storage',
   });
 });
 
@@ -37,6 +39,7 @@ test('remote peer targets its proxy and resolved models dir', () => {
     url: '/api/v1/peers/box-b/hf-download',
     displayPath: '/mnt/b/turbo-jumbo',
     diskUsageUrl: '/api/v1/peers/box-b/disk-usage',
+    coldStorageUrl: '/api/v1/peers/box-b/cold-storage',
   });
 });
 
@@ -45,6 +48,7 @@ test('remote peer without base_path falls back to a placeholder path', () => {
     url: '/api/v1/peers/box-c/hf-download',
     displayPath: 'box-c models directory',
     diskUsageUrl: '/api/v1/peers/box-c/disk-usage',
+    coldStorageUrl: '/api/v1/peers/box-c/cold-storage',
   });
 });
 
@@ -59,6 +63,7 @@ test('a peer with a Unicode name targets its proxy by slug', () => {
     url: '/api/v1/peers/zurich/hf-download',
     displayPath: '/mnt/g/turbo-jumbo',
     diskUsageUrl: '/api/v1/peers/zurich/disk-usage',
+    coldStorageUrl: '/api/v1/peers/zurich/cold-storage',
   });
 });
 

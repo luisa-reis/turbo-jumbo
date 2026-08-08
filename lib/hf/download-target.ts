@@ -8,6 +8,10 @@ export interface DownloadTarget {
   // Endpoint reporting free/total disk bytes at the target, to warn before a
   // download that wouldn't fit.
   diskUsageUrl: string;
+  // Endpoint listing the target machine's cold storage, to mark files it has
+  // already archived. Must answer for the machine being downloaded to, not
+  // whichever one is serving the UI.
+  coldStorageUrl: string;
 }
 
 function joinPath(base: string, sub: string): string {
@@ -35,6 +39,7 @@ export function downloadTarget(
       url: '/api/v1/hf-download',
       displayPath: localModelsPath,
       diskUsageUrl: '/api/v1/disk-usage',
+      coldStorageUrl: '/api/v1/cold-storage',
     };
   }
   const slug = peerSlug(peer);
@@ -42,5 +47,6 @@ export function downloadTarget(
     url: `/api/v1/peers/${slug}/hf-download`,
     displayPath: peerModelsDir(peer) ?? `${peer.name} models directory`,
     diskUsageUrl: `/api/v1/peers/${slug}/disk-usage`,
+    coldStorageUrl: `/api/v1/peers/${slug}/cold-storage`,
   };
 }
