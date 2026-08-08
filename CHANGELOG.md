@@ -16,7 +16,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   download — a single weight, or the whole shard set of a split one — with its
   total size, so picking `UD-IQ3_S` is one click instead of ticking four
   shards. Repos that aren't a pick-one-quant choice, like a safetensors model
-  and its config and tokenizer, still list their files.
+  and its config and tokenizer, still list their files. When you do need a
+  single file — refetching one shard of a set whose siblings you moved off to
+  free space — an "Individual files" switch lets you open a quantization and
+  pick from inside it. A part-selected quantization says so on its row.
 - Repos that keep each quantization in its own directory can now be downloaded
   at all. `unsloth/DeepSeek-V4-Flash-0731-GGUF` and its kin previously showed a
   single file, because the modal only ever looked at the repo's top level — all

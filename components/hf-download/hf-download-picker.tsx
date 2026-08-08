@@ -8,6 +8,8 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {Button} from '@astryxdesign/core/Button';
 import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
 import {List, ListItem} from '@astryxdesign/core/List';
+import {IconButton} from '@astryxdesign/core/IconButton';
+import {Icon} from '@astryxdesign/core/Icon';
 import {Banner} from '@astryxdesign/core/Banner';
 import {
   DownloadModal,
@@ -27,11 +29,17 @@ import {parseHfUrl} from '@/lib/hf/hf-url';
 
 type HfFile = {path: string; size: number};
 
-// The secondary line on a quantization row: how many files it spans (only when
-// sharded) and which folder holds them (only when it isn't the repo root).
-function groupDetail(g: QuantGroup): string | undefined {
+// The secondary line on a quantization row: how many of its files are selected
+// (a partial set is the whole point of picking files individually, so it's
+// spelled out), and which folder holds them when it isn't the repo root.
+function groupDetail(g: QuantGroup, selectedCount: number): string | undefined {
   const parts: string[] = [];
-  if (g.fileCount > 1) parts.push(`${g.fileCount} files`);
+  if (g.fileCount > 1)
+    parts.push(
+      selectedCount > 0 && selectedCount < g.fileCount
+        ? `${selectedCount} of ${g.fileCount} files`
+        : `${g.fileCount} files`,
+    );
   if (g.folder) parts.push(`${g.folder}/`);
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
@@ -41,6 +49,8 @@ const styles = stylex.create({
   // resize as the file list loads or the filter narrows.
   pickerBody: {height: '55vh', minHeight: 0},
   fileList: {flexGrow: 1, minHeight: 0, overflowY: 'auto'},
+  // A quantization's own files, shown only when it's expanded.
+  shardRow: {paddingInlineStart: 'var(--spacing-8)'},
 });
 
 /**
@@ -77,6 +87,9 @@ export function HfDownloadPicker({
   const [filesError, setFilesError] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
+  // Off by default: quantization rows are the whole story for a normal download.
+  const [showFiles, setShowFiles] = useState(false);
+  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
 
   // Debounce so we don't hit the HF API on every keypress
   const [debouncedUrl, setDebouncedUrl] = useState('');
@@ -120,12 +133,16 @@ export function HfDownloadPicker({
       setFilesLoading(false);
       setSelectedPaths(new Set());
       setFilter('');
+      setShowFiles(false);
+      setOpenKeys(new Set());
       return;
     }
     setFiles(null);
     setFilesError(null);
     setFilesLoading(true);
     setFilter('');
+    setShowFiles(false);
+    setOpenKeys(new Set());
 
     const params = new URLSearchParams({
       repoId: parsed.repoId,
@@ -206,9 +223,32 @@ export function HfDownloadPicker({
     );
   }, [groups, filter]);
 
+  const groupSelectedCount = (g: QuantGroup) =>
+    g.paths.filter((p) => selectedPaths.has(p)).length;
   const isGroupSelected = (g: QuantGroup) =>
-    g.paths.every((p) => selectedPaths.has(p));
+    groupSelectedCount(g) === g.fileCount;
+  // A part-selected quantization reads as indeterminate rather than unchecked,
+  // so a collapsed row still admits it holds a partial download.
+  const groupCheckState = (g: QuantGroup): boolean | 'indeterminate' => {
+    const n = groupSelectedCount(g);
+    return n === 0 ? false : n === g.fileCount ? true : 'indeterminate';
+  };
   const selectedGroupCount = groups?.filter(isGroupSelected).length ?? 0;
+  // Once a quantization is only part-selected the footer can't honestly count in
+  // quantizations any more, so it counts files instead.
+  const hasPartialGroup =
+    groups?.some((g) => {
+      const n = groupSelectedCount(g);
+      return n > 0 && n < g.fileCount;
+    }) ?? false;
+
+  // Whole quantizations are the default and cover almost every download. Files
+  // are picked individually only to work around what's already on disk —
+  // re-fetching one shard of a set whose siblings were moved to cold storage to
+  // free space — so the ability is here, behind a switch, rather than in the way.
+  // Only sharded quantizations have anything to expand.
+  const canPickFiles = groups?.some((g) => g.fileCount > 1) ?? false;
+  const expandable = showFiles && canPickFiles;
 
   const command = useMemo(() => {
     if (!parsed || !files || selectedFiles.length === 0) return null;
@@ -227,6 +267,15 @@ export function HfDownloadPicker({
       const next = new Set(prev);
       if (checked) next.add(path);
       else next.delete(path);
+      return next;
+    });
+  };
+
+  const toggleOpen = (key: string) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -325,6 +374,17 @@ export function HfDownloadPicker({
                 placeholder={groups ? 'Filter quantizations…' : 'Filter files…'}
               />
             </StackItem>
+            {canPickFiles && (
+              <CheckboxInput
+                label="Individual files"
+                size="sm"
+                value={showFiles}
+                onChange={(checked) => {
+                  setShowFiles(checked);
+                  if (!checked) setOpenKeys(new Set());
+                }}
+              />
+            )}
             <Text type="supporting">
               {groups
                 ? `${visibleGroups.length} / ${groups.length} quantizations`
@@ -334,22 +394,67 @@ export function HfDownloadPicker({
         )}
         {hasFiles && groups && (
           <List hasDividers xstyle={styles.fileList}>
-            {visibleGroups.map((g) => (
+            {visibleGroups.flatMap((g) => [
               <ListItem
                 key={g.key}
                 startContent={
                   <CheckboxInput
                     label={g.label}
                     isLabelHidden
-                    value={isGroupSelected(g)}
+                    value={groupCheckState(g)}
                     onChange={(checked) => toggleGroup(g, checked)}
                   />
                 }
                 label={g.label}
-                description={groupDetail(g)}
-                endContent={<Text type="supporting">{formatSize(g.size)}</Text>}
-              />
-            ))}
+                description={groupDetail(g, groupSelectedCount(g))}
+                endContent={
+                  <HStack gap={2} vAlign="center">
+                    <Text type="supporting">{formatSize(g.size)}</Text>
+                    {expandable && g.fileCount > 1 && (
+                      <IconButton
+                        label={`Show the files in ${g.label}`}
+                        variant="ghost"
+                        size="sm"
+                        icon={
+                          <Icon
+                            icon={
+                              openKeys.has(g.key)
+                                ? 'chevronDown'
+                                : 'chevronRight'
+                            }
+                          />
+                        }
+                        onClick={() => toggleOpen(g.key)}
+                      />
+                    )}
+                  </HStack>
+                }
+              />,
+              ...(expandable && openKeys.has(g.key)
+                ? g.paths.map((p) => (
+                    <ListItem
+                      key={p}
+                      xstyle={styles.shardRow}
+                      startContent={
+                        <CheckboxInput
+                          label={p}
+                          isLabelHidden
+                          value={selectedPaths.has(p)}
+                          onChange={(checked) => toggleFile(p, checked)}
+                        />
+                      }
+                      label={p.split('/').pop()}
+                      endContent={
+                        <Text type="supporting">
+                          {formatSize(
+                            files!.find((f) => f.path === p)?.size ?? 0,
+                          )}
+                        </Text>
+                      }
+                    />
+                  ))
+                : []),
+            ])}
             {visibleGroups.length === 0 && (
               <ListItem label="No quantizations match the filter." />
             )}
@@ -407,7 +512,7 @@ export function HfDownloadPicker({
         <Text type="supporting">
           {selectedFiles.length === 0
             ? 'Nothing selected'
-            : groups
+            : groups && !hasPartialGroup
               ? `${selectedGroupCount} quantization${
                   selectedGroupCount !== 1 ? 's' : ''
                 } · ${formatSize(totalSize)}`

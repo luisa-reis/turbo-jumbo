@@ -14,16 +14,26 @@ alternative is HF's own listing order (roughly alphabetical), which would put
 `UD-IQ1_M` before `UD-IQ1_S` and scatter the root-level weights among the
 folders. Worth revisiting if you'd rather the list mirror what the HF site shows.
 
-## 2. A quantization is all-or-nothing
+## 2. A quantization is all-or-nothing — resolved
 
-**Assumed:** ticking a row selects its whole shard set; individual shards can't
-be selected in a grouped repo.
+**Resolved:** an "Individual files" switch beside the filter, off by default,
+makes sharded rows expandable so their files can be ticked one at a time.
 
-Re-running a download resumes by skipping files already on disk, so picking a
-single shard has no established use. This does remove an ability that existed
-before — the flat list let you tick one shard — so if you ever hand-repair a
-partial download through the picker, say so and the rows can gain a disclosure
-that reveals their files.
+The default view is unchanged — no chevrons, no extra column — and the switch
+only appears for repos that actually have a sharded quantization to expand. A
+part-selected quantization reads as an indeterminate checkbox and says "3 of 4
+files", so a collapsed row still admits it holds a partial download, and the
+footer counts files rather than quantizations once any group is partial.
+
+Two follow-on assumptions inside that, both cheap to change:
+
+- **Selections survive turning the switch off.** Flipping it off collapses the
+  rows and hides the chevrons but keeps whatever is ticked, so a partial
+  selection can leave you with an indeterminate row and no visible way to
+  inspect it until you flip the switch back on. Clearing partial selections on
+  switch-off would be tidier but would silently discard deliberate work.
+- **Switch state resets when the URL changes.** Pasting a new repo returns to
+  the default. It could persist for the session instead.
 
 ## 3. The row's click target is the checkbox, not the whole row
 
