@@ -1,6 +1,7 @@
 import {test, expect} from 'bun:test';
 import {
   repoDownloadFiles,
+  repoDownloadKind,
   defaultDownloadSelection,
   isPickOneSafetensorsRepo,
 } from '@/lib/hf/hf-download';
@@ -156,4 +157,35 @@ test('defaultDownloadSelection picks a single named GGUF file', () => {
   expect([...defaultDownloadSelection(files, 'a-Q8_0.gguf')]).toEqual([
     'a-Q8_0.gguf',
   ]);
+});
+
+test('defaultDownloadSelection takes the whole folder for a folder URL', () => {
+  // Pasting .../tree/main/UD-IQ3_S points at one quantization deliberately, so
+  // the (already curated) folder listing is taken whole.
+  const files = asFiles([
+    'UD-IQ3_S/DeepSeek-V4-Flash-0731-UD-IQ3_S-00001-of-00004.gguf',
+    'UD-IQ3_S/DeepSeek-V4-Flash-0731-UD-IQ3_S-00002-of-00004.gguf',
+  ]);
+  const sel = defaultDownloadSelection(files, null, 'UD-IQ3_S');
+  expect(sel.size).toBe(2);
+});
+
+test('repoDownloadKind reads a repo layout', () => {
+  expect(repoDownloadKind(safetensorsRepo)).toBe('safetensors');
+  expect(repoDownloadKind(['a-Q4_K_M.gguf', 'README.md'])).toBe('pick-one');
+  expect(repoDownloadKind(['ggml-tiny.bin', 'ggml-base.bin'])).toBe('pick-one');
+  // Kokoro-style ONNX: not self-contained, not a pick-one format.
+  expect(repoDownloadKind(['kokoro-v1.0.onnx', 'config.json'])).toBe(
+    'whole-repo',
+  );
+});
+
+test('repoDownloadKind calls a nested-quant GGUF repo pick-one', () => {
+  expect(
+    repoDownloadKind([
+      'README.md',
+      'UD-IQ3_S/DeepSeek-V4-Flash-0731-UD-IQ3_S-00001-of-00004.gguf',
+      'dspark/dspark-DeepSeek-V4-Flash-0731-BF16.gguf',
+    ]),
+  ).toBe('pick-one');
 });

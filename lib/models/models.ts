@@ -18,14 +18,14 @@ import type {
   TjModel,
   TjModelFile,
 } from '@/lib/models/model-sidecar';
-import {
-  WEIGHT_EXT_RE,
-  ggmlModelVariant,
-  isWeightFile,
-} from '@/lib/models/weight-files';
+import {ggmlModelVariant, isWeightFile} from '@/lib/models/weight-files';
+import {SPLIT_RE, extractModelName, extractQuant} from '@/lib/models/quant';
 
 // Re-exported so existing `@/lib/models` importers keep working.
 export {isWeightFile};
+// Quant/shard parsing lives in the fs-free lib/models/quant.ts so client code
+// can import it; re-exported here because this has always been its address.
+export {extractModelName, extractQuant};
 
 export type {
   Model,
@@ -111,40 +111,6 @@ function modelSidecarFiles(
 ): TjModelFile[] | null {
   const m = readSidecarFor(fullPath, storagePath);
   return m && Array.isArray(m.files) ? m.files : null;
-}
-
-// A quantization token: IQ2_XS, Q4_K_M, MXFP4 (Microscaling FP4), BF16, F16, …
-const QUANT_TOKEN =
-  '(?:UD-)?(?:IQ\\d+_(?:XXS|XS|NL|[SML])|Q\\d+(?:_K(?:_(?:XL|XS|[SML]))?|_[01])?|MXFP4|BF16|F16|F32)';
-
-// Match a quant token delimited by - _ . and followed by another delimiter or
-// end of name. Global so callers take the LAST occurrence: the quant is usually
-// the final token, but may be followed by descriptor suffixes — e.g.
-// "GPT-OSS-20B-…-MXFP4-Aggressive" carries the quant before "-Aggressive".
-const QUANT_RE = new RegExp(`[-_.](${QUANT_TOKEN})(?=[-_.]|$)`, 'gi');
-const SPLIT_RE = /^(.+)-(\d+)-of-(\d+)\.(gguf|safetensors|bin)$/i;
-
-function stripExtension(filename: string): string {
-  return filename.replace(WEIGHT_EXT_RE, '');
-}
-
-function lastQuantMatch(base: string): RegExpMatchArray | null {
-  const matches = [...base.matchAll(QUANT_RE)];
-  return matches.length > 0 ? matches[matches.length - 1] : null;
-}
-
-export function extractModelName(filename: string): string {
-  const base = stripExtension(filename);
-  const m = lastQuantMatch(base);
-  if (m?.index == null) return base;
-  // Remove the matched token along with its leading delimiter, leaving any
-  // descriptor suffix (and its own delimiter) intact.
-  return base.slice(0, m.index) + base.slice(m.index + m[0].length);
-}
-
-export function extractQuant(filename: string): string {
-  const m = lastQuantMatch(stripExtension(filename));
-  return m ? m[1].toUpperCase() : 'unknown';
 }
 
 /**

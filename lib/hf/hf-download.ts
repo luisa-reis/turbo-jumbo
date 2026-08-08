@@ -15,30 +15,46 @@ function isNonEssential(p: string): boolean {
 }
 
 /**
- * The files to offer from a repo's root listing for download.
+ * How a repo is downloaded, read off its file list:
  *
- *  - A GGUF repo is self-contained: list only its weight files and let the user
- *    pick a quant.
- *  - A safetensors model is unusable without its companion config/tokenizer/
- *    index files, but its repo is often cluttered with alternate-format weights,
- *    docs and images, so list everything except that clutter.
- *  - Any other model repo (ONNX/Kokoro TTS, Ryzen AI, …) isn't self-contained
- *    and its weights aren't a recognized pick-one format, so take the whole repo
- *    — matching Lemonade's "non-GGUF → download all files" rule (see
+ *  - `safetensors` — a safetensors model, unusable without its companion
+ *    config/tokenizer/index files, so it's taken whole minus the clutter.
+ *  - `pick-one` — the repo holds independent, self-contained weights the user
+ *    chooses among: GGUF quants, or standalone ggml `.bin` models.
+ *  - `whole-repo` — anything else (ONNX/Kokoro TTS, Ryzen AI, …): not
+ *    self-contained and not a recognized pick-one format, so take everything,
+ *    matching Lemonade's "non-GGUF → download all files" rule (see
  *    model_manager.cpp). This is what was dropping Kokoro's `.onnx`, which
  *    `isWeightFile` doesn't recognize.
+ *
+ * Shared by `repoDownloadFiles` and the download picker, which groups a
+ * pick-one repo's listing by quantization instead of listing bare files — so
+ * the two can't drift apart on what counts as pick-one.
  */
-export function repoDownloadFiles(paths: string[]): string[] {
+export type RepoDownloadKind = 'safetensors' | 'pick-one' | 'whole-repo';
+
+export function repoDownloadKind(paths: string[]): RepoDownloadKind {
   // Safetensors first: such a repo is a safetensors model even when it also
   // carries a stray alternate-format weight (a .gguf/.onnx among the clutter).
-  if (paths.some((p) => /\.safetensors$/i.test(p)))
-    return paths.filter((p) => !isNonEssential(p));
-  if (paths.some((p) => /\.gguf$/i.test(p))) return paths.filter(isWeightFile);
+  if (paths.some((p) => /\.safetensors$/i.test(p))) return 'safetensors';
+  if (paths.some((p) => /\.gguf$/i.test(p))) return 'pick-one';
   // A repo of standalone .bin weights (ggml whisper.cpp-style) is pick-one like
-  // GGUF — each .bin is a complete model, addressed one at a time. List the
-  // weights individually rather than the whole repo. See isPickOneBinRepo.
-  if (isPickOneBinRepo(paths)) return paths.filter(isWeightFile);
-  return paths;
+  // GGUF — each .bin is a complete model, addressed one at a time. See
+  // isPickOneBinRepo.
+  if (isPickOneBinRepo(paths)) return 'pick-one';
+  return 'whole-repo';
+}
+
+/** The files to offer from a repo's listing for download, per its kind. */
+export function repoDownloadFiles(paths: string[]): string[] {
+  switch (repoDownloadKind(paths)) {
+    case 'safetensors':
+      return paths.filter((p) => !isNonEssential(p));
+    case 'pick-one':
+      return paths.filter(isWeightFile);
+    case 'whole-repo':
+      return paths;
+  }
 }
 
 /**
@@ -83,15 +99,22 @@ export function isPickOneBinRepo(paths: string[]): boolean {
  * whole — the list is already curated to its weights + companions. For a GGUF
  * repo: the named file's shard set or exact match, the full list when a pasted
  * file matches nothing, or nothing for a bare repo URL (the user picks a quant).
+ *
+ * `folder` is set when the listing is scoped to one directory (a `tree` URL, or
+ * the directory a pasted file lives in). Pointing at a folder is a deliberate
+ * choice of one quantization, so its listing — already curated — is taken whole.
  */
 export function defaultDownloadSelection(
   files: Array<{path: string}>,
   filename: string | null,
+  folder: string | null = null,
 ): Set<string> {
   if (files.some((f) => /\.safetensors$/i.test(f.path))) {
     return new Set(files.map((f) => f.path));
   }
-  if (!filename) return new Set();
+  if (!filename) {
+    return folder ? new Set(files.map((f) => f.path)) : new Set();
+  }
   const shardMatch = filename.match(
     /^(.+)-(\d{5})-of-(\d{5})(\.(?:gguf|bin))$/i,
   );

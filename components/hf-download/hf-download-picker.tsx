@@ -21,10 +21,20 @@ import {
   type DownloadDiskUsage,
 } from '@/lib/storage/disk-space';
 import {formatSize} from '@/lib/format/bytes';
-import {defaultDownloadSelection} from '@/lib/hf/hf-download';
+import {defaultDownloadSelection, repoDownloadKind} from '@/lib/hf/hf-download';
+import {quantGroups, type QuantGroup} from '@/lib/hf/quant-groups';
 import {parseHfUrl} from '@/lib/hf/hf-url';
 
 type HfFile = {path: string; size: number};
+
+// The secondary line on a quantization row: how many files it spans (only when
+// sharded) and which folder holds them (only when it isn't the repo root).
+function groupDetail(g: QuantGroup): string | undefined {
+  const parts: string[] = [];
+  if (g.fileCount > 1) parts.push(`${g.fileCount} files`);
+  if (g.folder) parts.push(`${g.folder}/`);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
 
 const styles = stylex.create({
   // Fixed-height body, matching the Lemonade browser: the dialog must not
@@ -132,7 +142,9 @@ export function HfDownloadPicker({
       .then((data) => {
         if (!cancelled) {
           setFiles(data);
-          setSelectedPaths(defaultDownloadSelection(data, parsed.filename));
+          setSelectedPaths(
+            defaultDownloadSelection(data, parsed.filename, parsed.folder),
+          );
           setFilesLoading(false);
         }
       })
@@ -162,17 +174,41 @@ export function HfDownloadPicker({
   );
   const notEnoughSpace = spaceWarnings.length > 0;
 
+  // A repo whose weights are independent, self-contained picks (GGUF quants,
+  // ggml .bin models) is offered as quantizations rather than files: the user is
+  // choosing a quant, and a sharded one spans several files they'd otherwise
+  // have to tick individually. Everything else — a safetensors model and its
+  // companions, a whole-repo ONNX model — is a file list, since its files aren't
+  // alternatives to each other.
+  const groups = useMemo(() => {
+    if (!files || repoDownloadKind(files.map((f) => f.path)) !== 'pick-one')
+      return null;
+    return quantGroups(files);
+  }, [files]);
+
   // The picker shows the rows matching the filter; selection is by path, so
-  // files selected and then filtered out of view stay selected (the footer
+  // rows selected and then filtered out of view stay selected (the footer
   // count always tells the whole story).
   const visibleFiles = useMemo(() => {
     if (!files) return [];
     const needle = filter.trim().toLowerCase();
     if (!needle) return files;
-    return files.filter((f) =>
-      (f.path.split('/').pop() ?? f.path).toLowerCase().includes(needle),
-    );
+    // Match the whole relative path so a folder name narrows the list too.
+    return files.filter((f) => f.path.toLowerCase().includes(needle));
   }, [files, filter]);
+
+  const visibleGroups = useMemo(() => {
+    if (!groups) return [];
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return groups;
+    return groups.filter((g) =>
+      `${g.label} ${g.folder ?? ''}`.toLowerCase().includes(needle),
+    );
+  }, [groups, filter]);
+
+  const isGroupSelected = (g: QuantGroup) =>
+    g.paths.every((p) => selectedPaths.has(p));
+  const selectedGroupCount = groups?.filter(isGroupSelected).length ?? 0;
 
   const command = useMemo(() => {
     if (!parsed || !files || selectedFiles.length === 0) return null;
@@ -191,6 +227,19 @@ export function HfDownloadPicker({
       const next = new Set(prev);
       if (checked) next.add(path);
       else next.delete(path);
+      return next;
+    });
+  };
+
+  // A quantization is taken whole — its shards are one download, not a set of
+  // independently useful files.
+  const toggleGroup = (g: QuantGroup, checked: boolean) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      for (const p of g.paths) {
+        if (checked) next.add(p);
+        else next.delete(p);
+      }
       return next;
     });
   };
@@ -247,7 +296,7 @@ export function HfDownloadPicker({
           isLabelHidden
           value={url}
           onChange={setUrl}
-          placeholder="org/repo  or  https://huggingface.co/org/repo/blob/main/folder/file.gguf"
+          placeholder="org/repo  or  a file, or folder, URL from the repo"
           status={
             isInvalid
               ? {type: 'error', message: 'Not a valid Hugging Face file URL.'}
@@ -269,19 +318,44 @@ export function HfDownloadPicker({
           <HStack gap={3} vAlign="center">
             <StackItem size="fill">
               <TextInput
-                label="Filter files"
+                label={groups ? 'Filter quantizations' : 'Filter files'}
                 isLabelHidden
                 value={filter}
                 onChange={setFilter}
-                placeholder="Filter files…"
+                placeholder={groups ? 'Filter quantizations…' : 'Filter files…'}
               />
             </StackItem>
             <Text type="supporting">
-              {visibleFiles.length} / {files!.length} files
+              {groups
+                ? `${visibleGroups.length} / ${groups.length} quantizations`
+                : `${visibleFiles.length} / ${files!.length} files`}
             </Text>
           </HStack>
         )}
-        {hasFiles && (
+        {hasFiles && groups && (
+          <List hasDividers xstyle={styles.fileList}>
+            {visibleGroups.map((g) => (
+              <ListItem
+                key={g.key}
+                startContent={
+                  <CheckboxInput
+                    label={g.label}
+                    isLabelHidden
+                    value={isGroupSelected(g)}
+                    onChange={(checked) => toggleGroup(g, checked)}
+                  />
+                }
+                label={g.label}
+                description={groupDetail(g)}
+                endContent={<Text type="supporting">{formatSize(g.size)}</Text>}
+              />
+            ))}
+            {visibleGroups.length === 0 && (
+              <ListItem label="No quantizations match the filter." />
+            )}
+          </List>
+        )}
+        {hasFiles && !groups && (
           <List hasDividers xstyle={styles.fileList}>
             {visibleFiles.map((f) => (
               <ListItem
@@ -294,7 +368,7 @@ export function HfDownloadPicker({
                     onChange={(checked) => toggleFile(f.path, checked)}
                   />
                 }
-                label={f.path.split('/').pop()}
+                label={f.path}
                 endContent={<Text type="supporting">{formatSize(f.size)}</Text>}
               />
             ))}
@@ -333,9 +407,13 @@ export function HfDownloadPicker({
         <Text type="supporting">
           {selectedFiles.length === 0
             ? 'Nothing selected'
-            : `${selectedFiles.length} file${
-                selectedFiles.length !== 1 ? 's' : ''
-              } · ${formatSize(totalSize)}`}
+            : groups
+              ? `${selectedGroupCount} quantization${
+                  selectedGroupCount !== 1 ? 's' : ''
+                } · ${formatSize(totalSize)}`
+              : `${selectedFiles.length} file${
+                  selectedFiles.length !== 1 ? 's' : ''
+                } · ${formatSize(totalSize)}`}
         </Text>
         <HStack gap={2} hAlign="end">
           <Button

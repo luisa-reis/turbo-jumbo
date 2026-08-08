@@ -11,6 +11,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Hugging Face download modal now offers a GGUF repo as a list of
+  **quantizations** rather than a list of files. Each row is one thing you can
+  download — a single weight, or the whole shard set of a split one — with its
+  total size, so picking `UD-IQ3_S` is one click instead of ticking four
+  shards. Repos that aren't a pick-one-quant choice, like a safetensors model
+  and its config and tokenizer, still list their files.
+- Repos that keep each quantization in its own directory can now be downloaded
+  at all. `unsloth/DeepSeek-V4-Flash-0731-GGUF` and its kin previously showed a
+  single file, because the modal only ever looked at the repo's top level — all
+  thirteen of its quantizations were invisible. The file list now reaches the
+  whole repo, and pasting a folder's own URL
+  (`…/tree/main/UD-IQ3_S`) — which used to be rejected as "not a valid Hugging
+  Face file URL" — jumps straight to that quantization with its files selected.
+
 - Peers can now set a `slug` in `config.yaml` — the short, URL-safe name that
   identifies a machine in its tab's address (`/zurich`) and in the endpoints
   that address it. It was previously derived from the peer's name, which broke
