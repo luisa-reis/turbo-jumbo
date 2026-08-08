@@ -17,6 +17,8 @@ export const COMMANDS = [
   'disk',
   'peers',
   'version',
+  'get',
+  'copy',
   'help',
 ] as const;
 export type Command = (typeof COMMANDS)[number];
@@ -31,6 +33,13 @@ export interface CliInvocation {
   cold: boolean;
   all: boolean;
   help: boolean;
+  // Transfers (phase 2).
+  quant: string[];
+  file: string[];
+  to?: string;
+  from?: string;
+  deleteAfter: boolean;
+  dryRun: boolean;
 }
 
 export type ParseResult =
@@ -44,6 +53,13 @@ const OPTIONS = {
   cold: {type: 'boolean'},
   all: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
+  // Repeatable: several quantizations, or several files, in one transfer.
+  quant: {type: 'string', multiple: true},
+  file: {type: 'string', multiple: true},
+  to: {type: 'string'},
+  from: {type: 'string'},
+  'delete-after': {type: 'boolean'},
+  'dry-run': {type: 'boolean'},
 } as const;
 
 function isCommand(s: string): s is Command {
@@ -113,5 +129,11 @@ function invocation(
     cold: values.cold ?? false,
     all: values.all ?? false,
     help: values.help ?? false,
+    quant: values.quant ?? [],
+    file: values.file ?? [],
+    to: values.to,
+    from: values.from,
+    deleteAfter: values['delete-after'] ?? false,
+    dryRun: values['dry-run'] ?? false,
   };
 }

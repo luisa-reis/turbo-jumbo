@@ -17,15 +17,18 @@ import {
 } from '@/lib/storage/check-progress';
 import {type CopyDestinations} from '@/components/models/copy-modal';
 import {type ConflictItem} from '@/components/models/conflicts-modal';
-
-type SourceFile = {path: string; from: string; size: number};
+import {
+  buildSourceFiles,
+  resolveSources,
+  type SourceFile,
+} from '@/lib/copy/source-files';
 
 /**
  * The copy workflow: the conflict-check → optional conflicts-modal → copy
- * pipeline, the cold-storage-resume fix, and the copy progress state. Owns the
- * per-path source resolution (`pathPresence`/`buildSourceFiles`), which nothing
- * else uses. The shared pieces it touches — the selection, the audit reset and
- * the models refresh — are passed in.
+ * pipeline, the cold-storage-resume fix, and the copy progress state. Per-path
+ * source resolution lives in `lib/copy/source-files`, shared with `tj copy`.
+ * The shared pieces this touches — the selection, the audit reset and the
+ * models refresh — are passed in.
  */
 export function useCopyWorkflow({
   selected,
@@ -66,61 +69,40 @@ export function useCopyWorkflow({
   const [pendingFiles, setPendingFiles] = useState<SourceFile[] | null>(null);
 
   // Per-path presence + size across cold storage, local, and remote peers, so
-  // a mixed selection can name each file's own source. When a path exists in
-  // several places the most complete (largest) copy wins, tie-broken by the
-  // index order cold → local → remote (see `record`).
+  // a mixed selection can name each file's own source. The resolution rules
+  // (largest copy wins; cold → local → remote on a tie) live in
+  // `lib/copy/source-files`, shared with `tj copy` so the CLI and the UI can't
+  // disagree about which copy of a file is authoritative.
   const pathPresence = useMemo(() => {
-    const sources = new Map<string, {from: string; size: number}>();
-    // Prefer the most complete copy when a path exists in several places: a
-    // larger copy wins, so an incomplete cold/peer copy (e.g. a transfer
-    // truncated partway) is never chosen as the source for completing it
-    // elsewhere — copying a smaller cold copy back over itself would just be
-    // skipped. Equal sizes keep the first indexed, preserving the cold → local
-    // → remote order (cold is a local mount, the cheapest source).
-    const record = (path: string, size: number, from: string) => {
-      const prev = sources.get(path);
-      if (!prev || size > prev.size) sources.set(path, {from, size});
+    const value = (address: string) => {
+      const lo = seededPeerModels.get(address);
+      return lo?.type === 'value' ? lo.value : null;
     };
-    const indexModels = (list: Model[], from: string) => {
-      for (const m of list) {
-        for (const f of m.files) {
-          if (f.isSplit) {
-            for (const shard of f.files) record(shard.path, shard.size, from);
-          } else {
-            record(f.path, f.size, from);
-          }
-        }
-      }
-    };
-    indexModels(coldModels, 'cold-storage');
     // The local peer resolves from the same polled map the table renders
     // from (seeded from server data until the first poll lands), so anything
     // selectable is copyable — server-rendered props alone go stale the
     // moment a download finishes, and copies would silently resolve to zero
     // source files.
-    if (localPeerAddress) {
-      const lo = seededPeerModels.get(localPeerAddress);
-      if (lo?.type === 'value') indexModels(lo.value, localPeerAddress);
-    }
-    for (const [addr, lo] of seededPeerModels) {
-      if (addr === localPeerAddress) continue;
-      if (lo.type !== 'value') continue;
-      indexModels(lo.value, addr);
-    }
-    return sources;
+    const localModels = localPeerAddress ? value(localPeerAddress) : null;
+    return resolveSources({
+      cold: coldModels,
+      local:
+        localPeerAddress && localModels
+          ? {address: localPeerAddress, models: localModels}
+          : undefined,
+      peers: [...seededPeerModels]
+        .filter(([addr]) => addr !== localPeerAddress)
+        .flatMap(([address, lo]) =>
+          lo.type === 'value' ? [{address, models: lo.value}] : [],
+        ),
+    });
   }, [coldModels, localPeerAddress, seededPeerModels]);
 
   function buildSourceFilesFor(paths: Iterable<string>): SourceFile[] {
-    const out: SourceFile[] = [];
-    for (const p of paths) {
-      const entry = pathPresence.get(p);
-      if (!entry) continue;
-      out.push({path: p, from: entry.from, size: entry.size});
-    }
-    return out;
+    return buildSourceFiles(pathPresence, paths);
   }
 
-  function buildSourceFiles() {
+  function sourceFilesForSelection() {
     return buildSourceFilesFor(selected);
   }
 
@@ -128,7 +110,7 @@ export function useCopyWorkflow({
     setConfirmingCopy(false);
     // Refuse rather than quietly copy a subset (or nothing): every selected
     // path must resolve to a source.
-    const sourceFiles = buildSourceFiles();
+    const sourceFiles = sourceFilesForSelection();
     if (sourceFiles.length < selected.size) {
       setError(
         'Some selected files have no known source yet — wait for the table to refresh and retry.',
@@ -199,7 +181,7 @@ export function useCopyWorkflow({
   ) {
     if (!pendingDestinations) return;
     const dest = pendingDestinations;
-    const files = pendingFiles ?? buildSourceFiles();
+    const files = pendingFiles ?? sourceFilesForSelection();
     setPendingConflicts([]);
     setPendingDestinations(null);
     setPendingFiles(null);

@@ -57,9 +57,18 @@ one command with filters beats several near-identical ones.
   then cold, then any peer. Being explicit overrides that.
 - `--to` accepts `cold` or a peer slug. Slugs are resolved to the addresses
   `/api/v1/copy` expects via `/api/v1/peers`.
-- `/api/v1/copy/check` runs first, and files already complete at the destination
-  are passed as `skip`, exactly as the UI does — so a re-run after an
-  interruption transfers only what is missing.
+- **`/api/v1/copy/check` is deliberately not used.** It was in the first draft
+  of this spec, on the assumption it reported which files were already present.
+  It doesn't: it is a streaming _conflict_ detector that hashes both copies so
+  the UI can ask which differing files to overwrite — a question a CLI with no
+  prompts cannot delegate to anyone. Meanwhile `/api/v1/copy` already resumes
+  from whatever prefix matches, so a file that is already at the destination
+  transfers almost nothing. Running the check first would add a full read of
+  every byte in order to save that same read.
+
+  The consequence, stated plainly: `tj copy` overwrites a differing file at the
+  destination rather than asking. That is what copying means, and `--dry-run`
+  shows the file list first.
 
 ### `--dry-run`
 
@@ -81,10 +90,10 @@ has to be typed, and `--dry-run` shows exactly what would happen first.
 
 Two endpoints, two stream formats, one renderer.
 
-| Endpoint | Format | Parsed by |
-| --- | --- | --- |
+| Endpoint              | Format                        | Parsed by                                                                                  |
+| --------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
 | `/api/v1/hf-download` | terminal text, `\r`-redrawing | `parseProgress` / `parseNotices` (`lib/hf/download-output.ts`, already used by the web UI) |
-| `/api/v1/copy` | newline-delimited JSON frames | new, small: `{filesDone, filesTotal, bytesDone, bytesTotal, phase, errors, …}` |
+| `/api/v1/copy`        | newline-delimited JSON frames | new, small: `{filesDone, filesTotal, bytesDone, bytesTotal, phase, errors, …}`             |
 
 Both normalise to one `TransferProgress` shape, and the renderer chosen depends
 on whether stdout is a terminal — the same TTY rule phase 1 established for
@@ -93,9 +102,15 @@ colour.
 **On a terminal:** a redrawing bar with percentage, transferred and total bytes,
 rate and elapsed time.
 
-**Redirected (cron, a log file):** a line each time the completed-file count
-advances, plus a final summary. No bar, no repetition, so a log stays readable
-and greppable weeks later.
+**Redirected (cron, a log file):** a line when the completed-file count advances
+**or** the byte percentage crosses a new tenth, plus a final summary. No bar, no
+repetition, so a log stays readable and greppable weeks later.
+
+The decile rule is not decoration. A single-file transfer reports no file count
+at all — the download server only appends `(done/total files)` when there is
+more than one file — so a count-driven milestone alone would leave a multi-hour
+single-file download completely silent, and its summary reading `? files`. Both
+were real defects found by running a download rather than reasoning about one.
 
 A deliberate limitation: those milestone lines report **counts, not filenames**.
 Neither stream says which file is currently in flight — `hf-download` emits
@@ -108,11 +123,14 @@ carry an `errors` array, so failures are named.
 Sample redirected output:
 
 ```
-2/4 files  50.6 GiB / 108.1 GiB
-3/4 files  96.8 GiB / 108.1 GiB
-4/4 files  108.1 GiB / 108.1 GiB
-copied 4 files · 108.1 GiB · 42m18s
+2/4 files   47%  50.6 GiB / 108.1 GiB
+3/4 files   89%  96.8 GiB / 108.1 GiB
+4/4 files  100%  108.1 GiB / 108.1 GiB
+copied 4/4 files · 108.1 GiB · 42m18s
 ```
+
+The file count in the summary comes from the request, not the stream, for the
+same reason: a single-file transfer never reports one.
 
 `--format json` prints a single result object when the transfer ends rather than
 streaming frames, so it stays parseable by `jq` without a streaming reader.
@@ -122,11 +140,11 @@ streaming frames, so it stays parseable by `jq` without a streaming reader.
 
 Phase 1's codes, unchanged:
 
-| | |
-| --- | --- |
+|     |                                                                              |
+| --- | ---------------------------------------------------------------------------- |
 | `0` | Everything transferred (or `--dry-run` printed a plan, or a menu was listed) |
 | `1` | Any shortfall: nothing ran, some files failed, bad usage, unreachable server |
-| `2` | Still reserved for audit findings |
+| `2` | Still reserved for audit findings                                            |
 
 A partly-successful copy exits `1`. `/api/v1/copy` collects per-file errors
 instead of aborting, so a run can end with most files moved and some not; that
@@ -143,8 +161,9 @@ Pure and tested under `lib/cli/`:
 - frame parsing for the copy stream, including partial lines split across chunk
   boundaries, which a naive `split('\n')` gets wrong;
 - normalisation of both formats into `TransferProgress`;
-- bar rendering and milestone-line emission (that a line appears only when the
-  count advances);
+- bar rendering and milestone-line emission: that a line appears when the count
+  advances, that a single-file transfer still reports by decile, and that
+  neither repeats itself;
 - selection for `get`: quant labels, `--file`, folder URLs, and the
   no-selection-lists-the-menu path;
 - source and destination resolution for `copy`, including slug → address and the

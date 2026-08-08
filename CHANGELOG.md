@@ -11,6 +11,23 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`tj`, a companion command-line tool.** It answers the questions you would
+  otherwise open a browser for, and it fits in a shell script: `tj ls` shows
+  every model and quantization and where each one is held, `tj where` locates
+  one, `tj disk --all` reports free space here and on every peer, and
+  `tj peers` says which machines are answering. `tj get` downloads from Hugging
+  Face — naming a repo alone lists its quantizations rather than guessing —
+  and `tj copy` moves models between fast storage, cold storage and peers.
+
+  Nothing prompts, so it works unattended: `--dry-run` prints the plan without
+  transferring, removals have to be typed (`--delete-after`), and exit codes
+  are meaningful, so `tj copy … || alert` does what you would expect. Output is
+  a table for people and `--format json` for `jq`; piping never silently
+  changes the format. It talks to a running Turbo Jumbo server, so what it
+  reports and what the web UI shows cannot drift apart.
+
+  Documented with worked examples in [docs/cli.md](docs/cli.md).
+
 - The Hugging Face download modal now offers a GGUF repo as a list of
   **quantizations** rather than a list of files. Each row is one thing you can
   download — a single weight, or the whole shard set of a split one — with its

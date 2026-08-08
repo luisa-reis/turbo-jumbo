@@ -75,12 +75,15 @@ bun dev                             # http://localhost:3000
 Configuration, container deployment, and Lemonade sync setup are covered in
 [docs/setup.md](docs/setup.md).
 
-There's also a companion CLI for asking what you have without opening a browser
-— handy over ssh, and scriptable:
+There's also a companion CLI, for when a browser is the wrong shape — over ssh,
+or in a shell script:
 
 ```bash
-tj ls qwen          # models matching "qwen", and where each one lives
-tj disk --all       # free space here and on every peer
+tj ls qwen                              # what you have, and where it lives
+tj disk --all                           # free space here and on every peer
+tj get unsloth/Qwen3-8B-GGUF            # list a repo's quantizations
+tj get unsloth/Qwen3-8B-GGUF --quant Q4_K_M
+tj copy Qwen3-8B --to cold --dry-run    # nothing prompts; --dry-run shows the plan
 ```
 
 See [docs/cli.md](docs/cli.md).

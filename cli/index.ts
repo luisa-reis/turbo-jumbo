@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import {parseCli} from '@/lib/cli/args';
-import {resolveFormat} from '@/lib/cli/format';
+import {resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {resolveServerUrl} from '@/lib/cli/server-url';
 import {CliError, createClient} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
@@ -10,6 +10,8 @@ import {where} from '@/cli/commands/where';
 import {disk} from '@/cli/commands/disk';
 import {peers} from '@/cli/commands/peers';
 import {version} from '@/cli/commands/version';
+import {get, type TransferContext} from '@/cli/commands/get';
+import {copy} from '@/cli/commands/copy';
 
 /**
  * `tj` entry point: parse, resolve the server, dispatch, print. Every exit code
@@ -35,6 +37,19 @@ async function localPeerAddress(): Promise<string | undefined> {
     // to find the server — and by then --url and TJ_URL have had their turn.
     return undefined;
   }
+}
+
+/**
+ * How a transfer reports itself while it runs. Live progress is for a human
+ * watching; `--format json` and `--format quiet` stay silent so their output is
+ * exactly the result and nothing else.
+ */
+function transferContext(format: OutputFormat): TransferContext {
+  return {
+    isTty: Boolean(process.stdout.isTTY),
+    showProgress: format === 'table',
+    write: (s) => process.stdout.write(s),
+  };
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -75,6 +90,12 @@ async function main(argv: string[]): Promise<number> {
       break;
     case 'version':
       out = await version(client, color);
+      break;
+    case 'get':
+      out = await get(client, inv, transferContext(format));
+      break;
+    case 'copy':
+      out = await copy(client, inv, transferContext(format));
       break;
   }
 

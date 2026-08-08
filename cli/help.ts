@@ -8,6 +8,8 @@ COMMANDS
   where <model>       Show one model's quantizations and their locations
   disk [--all]        Free and total space on the model filesystems
   peers               Configured peers and whether each answers
+  get <repo|url>      Download from Hugging Face
+  copy <model>        Copy between local, cold storage and peers
   version             Server version, and the URL this CLI is pointed at
   help                This text
 
@@ -15,6 +17,18 @@ FILTERS (ls)
   --local             Only what this machine holds on fast storage
   --cold              Only what is in cold storage
   --peer <slug>       Only what the named peer holds
+
+TRANSFERS (get, copy)
+  --quant <label>     Which quantization; repeatable. Omit on get to list them
+  --file <path>       Individual repo files instead of a whole quantization
+  --to cold|<peer>    Where it ends up. get takes cold; copy takes either
+  --from local|cold|<peer>   Where copy reads from (default: wherever it is)
+  --delete-after      Remove the source once the copy is verified
+  --dry-run           Print the plan and stop
+
+  Nothing prompts. --delete-after must be typed, and --dry-run shows what
+  would happen first. Downloads run on the server this CLI points at; to
+  fetch onto another machine, point at it with --url.
 
 OPTIONS
   --format <f>        auto (default), table, json, or quiet
@@ -40,5 +54,8 @@ EXAMPLES
   tj ls --cold                    Everything in cold storage
   tj where DeepSeek-V4-Flash      Where each quantization of it lives
   tj disk --all                   Space on this machine and every peer
+  tj get unsloth/Qwen3-8B-GGUF    List that repo's quantizations
+  tj get unsloth/Qwen3-8B-GGUF --quant Q4_K_M
+  tj copy Qwen3-8B --to cold --dry-run
   tj ls --format json | jq -r '.[] | select(.locations | length == 1) | .model'
 `;
