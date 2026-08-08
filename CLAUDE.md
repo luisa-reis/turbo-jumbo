@@ -18,12 +18,14 @@ bun test --test-name-pattern <re>   # Run tests whose name matches a regex
 bun lint          # ESLint
 bun format        # Prettier write
 bun format:check  # Prettier check
-bun typecheck       # tsc --noEmit
-bun typecheck:watch # tsc --noEmit --watch
+bun typecheck       # tsc --noEmit (TypeScript 7)
+bun typecheck:watch # tsc --noEmit --watch (TypeScript 7)
 jj commit -m "<message>"  # Commit (this repo uses Jujutsu, not git)
 ```
 
 **Package manager is Bun** (not npm/yarn). Run JS/TS with `bun` (`bun -e "…"`, `bun run …`), never `node`; use `bunx`, not `npx`. **Version control is Jujutsu** (`jj`, not `git`).
+
+**Two TypeScripts are installed on purpose.** TypeScript 7 ships no JS compiler API, which typescript-eslint, Next and editors all need, so the `typescript` package stays at 6.x to serve that API while TS 7 is installed as `@typescript/native` and does the actual typechecking. Both packages provide a `tsc` binary, so `node_modules/.bin/tsc` is ambiguous — the typecheck scripts call `node_modules/@typescript/native/bin/tsc` by path, and anything else wanting a specific compiler should too. Collapse this back to a single `typescript` once typescript-eslint supports TS 7 (upstream issue 10940).
 
 ## Releases and the changelog
 
