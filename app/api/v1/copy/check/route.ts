@@ -1,4 +1,4 @@
-import {localModelsDir, coldStorageDir, localPeer} from '@/lib/config';
+import {config, localModelsDir, coldStorageDir, localPeer} from '@/lib/config';
 import {
   resolveSupportFiles,
   supportFileSources,
@@ -94,6 +94,36 @@ export async function POST(req: Request) {
   const localPeerAddr = localPeer?.address ?? '';
   const localBase = localModelsDir ? nodePath.resolve(localModelsDir) : '';
   const coldBase = coldStorageDir ? nodePath.resolve(coldStorageDir) : '';
+
+  // Same up-front validation as /api/v1/copy, and for the same reason: every
+  // host this talks to arrives in the request body (`toPeers`, and each file's
+  // `from`) and is fetched as `http://<host>/…`, so an unconfined caller could
+  // aim the server at an arbitrary host. Checking a file also reads it — an md5
+  // of both copies when neither side has a trustworthy recorded digest — so the
+  // paths are confined to their base too, or a local source could be made to
+  // hash a file outside the model tree and report the digest back.
+  const knownPeers = new Set(config.peers.map((p) => p.address));
+  if (toPeers.some((p) => !knownPeers.has(p))) {
+    return new Response('Unknown peer', {status: 400});
+  }
+  if (files.some((f) => f.from !== 'cold-storage' && !knownPeers.has(f.from))) {
+    return new Response('Unknown source', {status: 400});
+  }
+  for (const f of files) {
+    const base =
+      f.from === 'cold-storage'
+        ? coldBase
+        : f.from === localPeerAddr
+          ? localBase
+          : null;
+    if (base === null) continue; // a remote source resolves the path itself
+    // An unconfigured tier has no base to confine against, and `resolve('', p)`
+    // would land wherever the process happens to be running.
+    if (!base) return new Response('Invalid path', {status: 400});
+    if (!nodePath.resolve(base, f.path).startsWith(base + nodePath.sep)) {
+      return new Response('Invalid path', {status: 400});
+    }
+  }
 
   // Expand the selected weight files with the support files sitting in the
   // same model directories (config.json, tokenizer files, a safetensors

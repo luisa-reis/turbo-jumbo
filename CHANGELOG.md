@@ -139,25 +139,6 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Copying a whole-repo model — a safetensors checkpoint and anything else that
-  isn't a single self-contained file — now brings its config, tokenizer and
-  safetensors index along even when the model is already in cold storage.
-  Those support files sit outside the weight scan, so a copy has to go and
-  look for them, and it only ever looked in the one place each weight file was
-  read from. A model held both locally and in cold storage reads from cold
-  storage — it's the cheaper disk — and an archive written before support
-  files travelled at all holds the weights alone, so the search came back
-  empty and the copy carried bare weights. The destination got a model that
-  no loader would open, with nothing to say anything was missing. Every tier
-  is now asked, and each support file is taken from whichever one actually
-  has it.
-
-  `tj copy` never carried them at all: the search lived in the pre-copy
-  conflict check, which the command skips on purpose because it has no way to
-  ask a human what to overwrite. It has moved into the copy itself, so every
-  way of starting one — the button, the command, and the cold-storage
-  resume — carries the same files.
-
 - An interrupted download of a split model can now be finished from the audit
   hovercard. A quantization missing some of its shards reported which ones were
   absent and stopped there, offering nothing to press — the same hovercard
@@ -223,6 +204,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   the table were copied, so a safetensors model arrived at its destination
   unloadable. The pre-copy conflict check reports on the full list, so an
   existing support file at the destination shows up before any bytes move.
+
+  They are looked for everywhere a copy of the model is held, not only where
+  its weights are being read from. A model kept both locally and in cold
+  storage is read from cold storage, that being the cheaper disk, and an
+  archive of one is often the weights and nothing else — so the files have to
+  be fetched from whichever machine or disk still has them. Every way of
+  starting a copy does this: the button, `tj copy`, and completing a partial
+  archive.
 
 ### Added
 
@@ -310,7 +299,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
   words — "exited with code 137" becomes "killed by signal 9 (SIGKILL),
   usually the out-of-memory killer".
 
-## [0.1.0] - 2026-07-05
+### Security
+
+- The pre-copy conflict check now refuses machines that aren't configured
+  peers, and file paths that point outside the model and cold-storage
+  directories. It took both from the request and acted on them unchecked: a
+  request naming any host would make the server call out to it, and a path
+  climbing out of its directory would make it read and hash a file elsewhere
+  on disk and report the result back. The copy itself has always rejected
+  both; the check that runs first did not.
 
 The first release: mission control for your hoard of AI models.
 
