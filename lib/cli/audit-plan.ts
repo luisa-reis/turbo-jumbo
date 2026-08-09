@@ -96,12 +96,13 @@ export function findings(results: AuditResult[]): AuditResult[] {
 }
 
 /**
- * `0` when everything passed, `2` when the audit found something. `1` is left
- * for the command itself failing — an unreachable server, bad usage — so a
- * script can tell "I could not check" from "I checked, and it is bad".
+ * Whether the audit checked successfully and still found something.
+ *
+ * A predicate rather than an exit code: the entry point owns every code, so
+ * this module doesn't need to know which number the outcome is spelled as.
  */
-export function auditExitCode(results: AuditResult[]): 0 | 2 {
-  return findings(results).length > 0 ? 2 : 0;
+export function hasUnresolvedFindings(results: AuditResult[]): boolean {
+  return findings(results).length > 0;
 }
 
 /** Fix outcomes that leave the file correct; anything else is still a problem. */

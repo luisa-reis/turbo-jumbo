@@ -11,7 +11,7 @@ import {
 import type {CliInvocation} from '@/lib/cli/args';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
-  auditExitCode,
+  hasUnresolvedFindings,
   auditTargets,
   createAuditAggregator,
   findings,
@@ -28,7 +28,7 @@ import {formatSize} from '@/lib/format/bytes';
 import type {AuditResult} from '@/lib/audit/audit';
 import type {Model} from '@/lib/models/model-types';
 
-/** Thrown when the audit ran fine but found something. Carries exit code 2. */
+/** Thrown when the audit ran fine but found something. Carries exit code 3. */
 export class AuditFindings extends Error {
   constructor(readonly output: CommandOutput) {
     super('audit findings');
@@ -91,8 +91,8 @@ export async function audit(
   };
 
   // Findings are not a command failure, so they leave by their own door: the
-  // entry point turns this into exit 2 while still printing the report.
-  if (auditExitCode(unresolved) === 2) throw new AuditFindings(output);
+  // entry point turns this into exit 3 while still printing the report.
+  if (hasUnresolvedFindings(unresolved)) throw new AuditFindings(output);
   return output;
 }
 

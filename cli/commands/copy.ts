@@ -1,4 +1,4 @@
-import {CliError, type Client} from '@/cli/client';
+import {CliError, UsageError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import type {TransferContext} from '@/cli/commands/get';
 import {runConflictCheck, runTransfer, summarise} from '@/cli/transfer';
@@ -27,9 +27,9 @@ export async function copy(
 ): Promise<CommandOutput> {
   const pattern = inv.positionals[0];
   if (!pattern) {
-    throw new CliError('Usage: tj copy <model> --to cold|<peer>');
+    throw new UsageError('Usage: tj copy <model> --to cold|<peer>');
   }
-  if (!inv.to) throw new CliError('tj copy needs --to cold or --to <peer>.');
+  if (!inv.to) throw new UsageError('tj copy needs --to cold or --to <peer>.');
 
   const [rows, peers] = await Promise.all([
     client.json<ModelRow[]>('/api/v1/models-table'),

@@ -327,7 +327,7 @@ $ tj audit --all --cached
 `--cold` audits cold storage and `--peer <slug>` audits a peer, instead of this
 machine's fast storage. `--dry-run` lists what would be hashed, and how much.
 
-When something is wrong, it says what and exits `2`:
+When something is wrong, it says what and exits `3`:
 
 ```console
 $ tj audit --all
@@ -350,10 +350,10 @@ gemma-3-270m-it-UD-IQ2_XXS.gguf  misplaced  moved to unsloth/gemma-3-…gguf  ex
 1 file(s) checked · 1 finding(s) · 1 fixed · 0 remaining
 ```
 
-Note the exit code there is **0**, not 2: everything found was repaired, so
+Note the exit code there is **0**, not 3: everything found was repaired, so
 `tj audit --fix || alert` doesn't page anyone about a problem that no longer
 exists. Findings that remain — because a repair failed, or because none exists —
-still exit 2.
+still exit 3.
 
 Resolving **duplicates** deletes copies, keeping one verified survivor. Since
 the audit asks nothing even at a terminal, that needs its own explicit
@@ -579,16 +579,21 @@ unsloth/DeepSeek-V4-Flash-0731-GGUF
 
 ## Exit codes
 
-|     |                                                                   |
-| --- | ----------------------------------------------------------------- |
-| `0` | Success                                                           |
-| `1` | Error — bad usage, unreachable server, malformed config, no match |
-| `2` | The audit ran and found something still wrong                     |
+|     |                                                        |
+| --- | ------------------------------------------------------ |
+| `0` | Success                                                |
+| `1` | Error — unreachable server, malformed config, no match |
+| `2` | Bad usage — an unknown flag, a missing argument        |
+| `3` | The audit ran and found something still wrong          |
 
-The distinction between `1` and `2` is the useful one for a monitoring job:
-`2` means "I checked, and it is bad", while `1` means "I could not check at
+The distinction between `1` and `3` is the useful one for a monitoring job:
+`3` means "I checked, and it is bad", while `1` means "I could not check at
 all". Treating them the same would let an unreachable server look exactly like
 a clean archive.
+
+`2` is kept for bad usage alone, because that is what every other command-line
+tool means by it — a script that reads `2` as "you typed it wrong" should not
+be told a clean archive is a syntax error.
 
 ## Recipes
 

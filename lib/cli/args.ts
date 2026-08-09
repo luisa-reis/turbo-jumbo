@@ -83,6 +83,20 @@ function isCommand(s: string): s is Command {
   return (COMMANDS as readonly string[]).includes(s);
 }
 
+/**
+ * What to print when parseArgs refuses the arguments.
+ *
+ * Its own wording for an unknown option answers a question nobody asked —
+ * every one of them carries a lecture about placing positional arguments
+ * after `--`. Someone who mistyped a flag needs to hear that the flag is
+ * unknown, and nothing else; the entry point points them at the help.
+ */
+function parseErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const unknown = /^Unknown option '([^']+)'/.exec(raw);
+  return unknown ? `Unknown option '${unknown[1]}'.` : raw;
+}
+
 export function parseCli(argv: string[]): ParseResult {
   let parsed;
   try {
@@ -92,9 +106,7 @@ export function parseCli(argv: string[]): ParseResult {
       allowPositionals: true,
     });
   } catch (e) {
-    // parseArgs reports unknown options and missing values; its message is
-    // already user-facing ("Unknown option '--verbose'").
-    return {ok: false, error: e instanceof Error ? e.message : String(e)};
+    return {ok: false, error: parseErrorMessage(e)};
   }
 
   const {values, positionals} = parsed;

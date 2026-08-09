@@ -4,7 +4,7 @@ import {parseCli, type CliInvocation} from '@/lib/cli/args';
 import type {ConfirmIo} from '@/lib/cli/confirm';
 import {resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {resolveServerUrl} from '@/lib/cli/server-url';
-import {CliError, createClient, type Client} from '@/cli/client';
+import {CliError, UsageError, createClient, type Client} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
 import {HELP} from '@/cli/help';
 import {ls} from '@/cli/commands/ls';
@@ -26,8 +26,13 @@ import {lemonade} from '@/cli/commands/lemonade';
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 1;
-/** The audit ran and found something. Distinct from the audit failing to run. */
-const EXIT_FINDINGS = 2;
+/** The command as typed cannot run: a missing argument, an unknown flag. */
+const EXIT_USAGE = 2;
+/**
+ * The audit ran and found something. Distinct from the audit failing to run —
+ * and kept off 2, which every caller already reads as "you typed it wrong".
+ */
+const EXIT_FINDINGS = 3;
 
 /**
  * The local peer's address from config.yaml, if this machine is a peer and the
@@ -89,7 +94,7 @@ async function main(argv: string[]): Promise<number> {
   const parsed = parseCli(argv);
   if (!parsed.ok) {
     process.stderr.write(`${parsed.error}\n\nTry 'tj help'.\n`);
-    return EXIT_ERROR;
+    return EXIT_USAGE;
   }
   const inv = parsed.value;
 
@@ -164,8 +169,12 @@ try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (e) {
   // A CliError is already phrased for a human; anything else is a bug, and its
-  // stack is the useful part.
-  if (e instanceof CliError) {
+  // stack is the useful part. UsageError is checked first — it extends
+  // CliError, and the difference is only which exit code the caller sees.
+  if (e instanceof UsageError) {
+    process.stderr.write(`${e.message}\n`);
+    process.exitCode = EXIT_USAGE;
+  } else if (e instanceof CliError) {
     process.stderr.write(`${e.message}\n`);
     process.exitCode = EXIT_ERROR;
   } else {

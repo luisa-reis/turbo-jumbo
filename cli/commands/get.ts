@@ -1,4 +1,4 @@
-import {CliError, type Client} from '@/cli/client';
+import {CliError, UsageError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import {runTransfer, summarise} from '@/cli/transfer';
 import type {CliInvocation} from '@/lib/cli/args';
@@ -34,7 +34,7 @@ export async function get(
   ctx: TransferContext,
 ): Promise<CommandOutput> {
   const ref = inv.positionals[0];
-  if (!ref) throw new CliError('Usage: tj get <repo|url> [--quant <label>]');
+  if (!ref) throw new UsageError('Usage: tj get <repo|url> [--quant <label>]');
 
   const parsed = parseHfUrl(ref);
   if (!parsed) {

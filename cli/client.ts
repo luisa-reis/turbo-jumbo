@@ -7,6 +7,13 @@
 /** An error already phrased for the user; the entry point prints it bare. */
 export class CliError extends Error {}
 
+/**
+ * A CliError the user fixes by typing the command differently — a missing
+ * argument, a flag the command can't run without. Exits 2, so a caller can
+ * tell "you asked for this wrong" from "I tried and the world said no".
+ */
+export class UsageError extends CliError {}
+
 export interface Client {
   /** GET and parse, or fail the command. */
   json<T>(path: string): Promise<T>;

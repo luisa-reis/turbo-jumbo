@@ -1,4 +1,4 @@
-import {CliError, type Client} from '@/cli/client';
+import {CliError, UsageError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import type {TransferContext} from '@/cli/commands/get';
 import {fetchPeers} from '@/cli/fetch-peers';
@@ -59,7 +59,7 @@ export async function lemonade(
   if (sub === 'ls') return lemonadeLs(client, inv, color);
   if (sub === 'get') return lemonadeGet(client, inv, ctx);
   if (sub === 'sync') return lemonadeSync(client, inv, color, io);
-  throw new CliError(
+  throw new UsageError(
     `Usage: tj lemonade ls | tj lemonade get <model> | tj lemonade sync [--dry-run] [--yes]`,
   );
 }
@@ -137,7 +137,7 @@ async function lemonadeGet(
   ctx: TransferContext,
 ): Promise<CommandOutput> {
   const pattern = inv.positionals[1];
-  if (!pattern) throw new CliError('Usage: tj lemonade get <model>');
+  if (!pattern) throw new UsageError('Usage: tj lemonade get <model>');
 
   const entries = await lemonadeEntries(client, inv);
   const hits = matchEntries(entries, pattern);

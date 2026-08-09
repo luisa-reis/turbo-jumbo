@@ -25,9 +25,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   free is simply copied.
 
   `tj audit` verifies files against Hugging Face and reports what doesn't
-  match, exiting `2` when it finds something and `1` when it couldn't check at
+  match, exiting `3` when it finds something and `1` when it couldn't check at
   all — so a monitoring job can tell a corrupted archive from an unreachable
-  one. `--fix` puts misplaced files back where they belong; resolving
+  one. (`2` is reserved for a mistyped command, the way every other tool
+  spells it.) `--fix` puts misplaced files back where they belong; resolving
   duplicates deletes copies, so that needs `--allow-delete` spelled out. A run
   that repairs everything it found exits `0`, because nothing is wrong any
   more.

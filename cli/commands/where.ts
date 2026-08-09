@@ -1,4 +1,4 @@
-import {CliError, type Client} from '@/cli/client';
+import {CliError, UsageError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import {fetchPeerModels, fetchPeers} from '@/cli/fetch-peers';
 import type {CliInvocation} from '@/lib/cli/args';
@@ -19,7 +19,7 @@ export async function where(
   color: boolean,
 ): Promise<CommandOutput> {
   const pattern = inv.positionals[0];
-  if (!pattern) throw new CliError('Usage: tj where <model>');
+  if (!pattern) throw new UsageError('Usage: tj where <model>');
 
   const [rows, peers] = await Promise.all([
     client.json<ModelRow[]>('/api/v1/models-table'),

@@ -10,7 +10,7 @@ COMMANDS
   peers               Configured peers and whether each answers
   get <repo|url>      Download from Hugging Face
   copy <model>        Copy between local, cold storage and peers
-  audit <model>|--all Verify files against Hugging Face; exit 2 on findings
+  audit <model>|--all Verify files against Hugging Face; exit 3 on findings
   rm <model>          Delete a model's files from one storage tier
   lemonade ls|get|sync  Browse the Lemonade catalog, download from it, or
                       reconcile its cache
@@ -70,8 +70,9 @@ OUTPUT
 
 EXIT CODES
   0  success
-  1  error (bad usage, unreachable server, malformed config)
-  2  the audit ran and found something — distinct from failing to run
+  1  error (unreachable server, malformed config, nothing matched)
+  2  bad usage — an unknown flag, a missing argument
+  3  the audit ran and found something — distinct from failing to run
 
 EXAMPLES
   tj ls qwen                      Models whose name contains "qwen"

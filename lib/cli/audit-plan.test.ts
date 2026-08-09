@@ -1,6 +1,6 @@
 import {test, expect} from 'bun:test';
 import {
-  auditExitCode,
+  hasUnresolvedFindings,
   auditTargets,
   createAuditAggregator,
   findings,
@@ -94,12 +94,13 @@ test('only passing files are clean', () => {
   expect(findings(rs).map((r) => r.file)).toEqual(['b', 'c']);
 });
 
-test('exit 2 means findings, 0 means clean — never 1', () => {
-  // 1 is left for the command failing, so a script can tell "could not check"
-  // from "checked, and it is bad".
-  expect(auditExitCode([result('a', 'pass')])).toBe(0);
-  expect(auditExitCode([result('a', 'misplaced')])).toBe(2);
-  expect(auditExitCode([])).toBe(0);
+test('findings are reported apart from the command failing', () => {
+  // The entry point spells this as exit 3, leaving 1 for the command failing
+  // and 2 for bad usage, so a script can tell "could not check" from
+  // "checked, and it is bad".
+  expect(hasUnresolvedFindings([result('a', 'pass')])).toBe(false);
+  expect(hasUnresolvedFindings([result('a', 'misplaced')])).toBe(true);
+  expect(hasUnresolvedFindings([])).toBe(false);
 });
 
 test('a finding that was repaired no longer counts', () => {
@@ -110,7 +111,7 @@ test('a finding that was repaired no longer counts', () => {
     {file: 'b', status: 'deleted'},
   ]);
   expect(left).toHaveLength(0);
-  expect(auditExitCode(left)).toBe(0);
+  expect(hasUnresolvedFindings(left)).toBe(false);
 });
 
 test('a failed or skipped repair leaves the finding standing', () => {
@@ -120,7 +121,7 @@ test('a failed or skipped repair leaves the finding standing', () => {
     {file: 'b', status: 'skipped'},
   ]);
   expect(left.map((r) => r.file)).toEqual(['a', 'b']);
-  expect(auditExitCode(left)).toBe(2);
+  expect(hasUnresolvedFindings(left)).toBe(true);
 });
 
 test('without --fix there are no repairs, so everything stands', () => {

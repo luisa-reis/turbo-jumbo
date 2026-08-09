@@ -1,4 +1,4 @@
-import {CliError, type Client} from '@/cli/client';
+import {CliError, UsageError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import {
   deletePath,
@@ -31,9 +31,10 @@ export async function rm(
   io: ConfirmIo,
 ): Promise<CommandOutput> {
   const pattern = inv.positionals[0];
-  if (!pattern) throw new CliError('Usage: tj rm <model> --from <where> --yes');
+  if (!pattern)
+    throw new UsageError('Usage: tj rm <model> --from <where> --yes');
   if (!inv.from) {
-    throw new CliError(
+    throw new UsageError(
       'tj rm needs --from local|cold|<peer>: which copy should go?\n' +
         'Try --dry-run first to see what would be deleted.',
     );
