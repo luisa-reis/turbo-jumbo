@@ -69,11 +69,25 @@ export async function get(
     );
   }
 
+  // `--exact` records the files it names as the model's whole set, so it needs
+  // them named. A quantization is already a complete unit, and a bare repo is
+  // the whole repo — neither leaves anything for a scope to say.
+  if (inv.exact && inv.file.length === 0) {
+    throw new CliError(
+      '--exact needs --file: it records the files you name as the model’s complete set.',
+    );
+  }
+
+  // The named files ARE the model: completeness checks judge it against them
+  // rather than the repo, so the repo's other files aren't counted as missing.
+  const fileScope = inv.exact ? chosen.map((f) => f.path) : undefined;
+
   const plan = {
     repo: parsed.repoId,
     revision: parsed.branch,
     files: chosen.map((f) => ({path: f.path, size: f.size})),
     totalBytes: total,
+    ...(fileScope ? {fileScope} : {}),
     toColdStorage: inv.to === 'cold',
     deleteAfterTransfer: inv.deleteAfter,
   };
@@ -93,6 +107,7 @@ export async function get(
       repoId: parsed.repoId,
       branch: parsed.branch,
       filePaths: chosen.map((f) => f.path),
+      ...(fileScope ? {fileScope} : {}),
       sendToCold: inv.to === 'cold',
       deleteAfterTransfer: inv.deleteAfter,
     },
@@ -200,5 +215,8 @@ function renderPlan(
     renderTable(columns, chosen),
     '',
     `total ${formatSize(total)}${inv.deleteAfter ? ' · local copy removed after archiving' : ''}`,
+    ...(inv.exact
+      ? ['', 'These files would be recorded as the model’s complete set.']
+      : []),
   ].join('\n');
 }

@@ -93,6 +93,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
   aimed at another peer carries the `--url` that runs it on that machine
   instead of this one.
 
+  A model whose file set is narrower than the repo holding it keeps that too.
+  A FastFlowLM registry entry pins a handful of files in a repo that also
+  carries NPU kernels for other targets, and Turbo Jumbo records that set so
+  the rest isn't counted against the model as missing — `tj get` can now say
+  the same thing with a new `--exact`, so the copied command produces the same
+  model rather than one that reads as permanently incomplete.
+
 - The check that runs before a copy — the one that finds files already present
   at the destination — no longer re-reads both copies of every file to compare
   them. Turbo Jumbo already records each file's SHA256 when it downloads it, so

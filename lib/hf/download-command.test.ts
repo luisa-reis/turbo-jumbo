@@ -116,3 +116,48 @@ test('quotes an argument that the shell would otherwise split', () => {
   });
   expect(cmd).toBe("tj get org/repo --file 'some folder/weights.gguf'");
 });
+
+test('names the whole scope and marks it exact when the model is file-scoped', () => {
+  // An FLM registry pin: the request fetches only what's missing, but the
+  // model's complete set is the registry's list — so the command names that,
+  // and `hf` skips the files already on disk.
+  const cmd = buildTjGetCommand({
+    repoId: 'FastFlowLM/Qwen3-4B',
+    branch: 'v1.2',
+    filePaths: ['model.q4nx'],
+    fileScope: ['config.json', 'model.q4nx'],
+  });
+  expect(cmd).toBe(
+    [
+      'tj get https://huggingface.co/FastFlowLM/Qwen3-4B/tree/v1.2 \\',
+      '  --file config.json \\',
+      '  --file model.q4nx \\',
+      '  --exact',
+    ].join('\n'),
+  );
+});
+
+test('a scope equal to the selection still marks it exact', () => {
+  const cmd = buildTjGetCommand({
+    repoId: 'org/repo',
+    branch: 'main',
+    filePaths: ['model.q4nx'],
+    fileScope: ['model.q4nx'],
+  });
+  expect(cmd).toBe('tj get org/repo --file model.q4nx --exact');
+});
+
+test('quantizations are never collapsed away by a scope', () => {
+  // A scope names files; it must not turn into a --quant that means something
+  // wider than the registry declared.
+  const cmd = buildTjGetCommand(
+    {
+      repoId: 'org/repo',
+      branch: 'main',
+      filePaths: ['a-Q4_K_M.gguf'],
+      fileScope: ['a-Q4_K_M.gguf'],
+    },
+    {quants: [{label: 'Q4_K_M', paths: ['a-Q4_K_M.gguf']}]},
+  );
+  expect(cmd).toBe('tj get org/repo --file a-Q4_K_M.gguf --exact');
+});

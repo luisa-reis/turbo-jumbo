@@ -178,6 +178,22 @@ then removes the local copy — the two checkboxes in the download modal.
 `--delete-after` without `--to cold` is a usage error rather than a silent
 no-op.
 
+`--exact` says the files you named are the whole model, rather than part of a
+bigger repo. Some repos hold a model alongside things that aren't part of it —
+a FastFlowLM registry entry pins a handful of files in a repo that also carries
+NPU kernels for other targets — and without this, everything else in the repo
+counts against the model as missing:
+
+```console
+$ tj get https://huggingface.co/FastFlowLM/Qwen3-4B/tree/v1.2 \
+    --file config.json --file model.q4nx --exact
+```
+
+The set is recorded with the model, so later audits and completeness checks
+judge it against those files alone. It needs `--file`: a quantization is
+already a complete unit, and a bare repo is the whole repo, so neither leaves
+a scope anything to say.
+
 Downloads run **on the server this CLI points at**. To fetch onto another
 machine, point at it: `tj --url http://192.0.2.11:3000 get …`.
 

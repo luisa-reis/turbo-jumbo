@@ -2,6 +2,10 @@ export interface DownloadCommandRequest {
   repoId: string;
   branch: string;
   filePaths: string[];
+  /** The model's complete file set, when it is narrower than its repo (a
+   *  FastFlowLM registry pin). May be a superset of `filePaths`, which carries
+   *  only what the target is still missing. */
+  fileScope?: string[];
   sendToCold?: boolean;
   deleteAfterTransfer?: boolean;
 }
@@ -71,6 +75,7 @@ export function buildTjGetCommand(
     `${base} ${shellArg(ref)}`,
     ...selection(req, quants, repoPaths),
   ];
+  if (req.fileScope && req.fileScope.length > 0) parts.push('--exact');
   if (req.sendToCold) parts.push('--to cold');
   if (req.deleteAfterTransfer) parts.push('--delete-after');
 
@@ -85,6 +90,13 @@ function selection(
   quants: DownloadCommandContext['quants'],
   repoPaths: DownloadCommandContext['repoPaths'],
 ): string[] {
+  // A file-scoped model's set is what the command must name — `--exact` records
+  // exactly the files it lists, and the request's own `filePaths` are only the
+  // ones still missing at the target. A quantization label would say something
+  // wider than the scope, so scoped models are always named file by file.
+  if (req.fileScope && req.fileScope.length > 0) {
+    return req.fileScope.map((p) => `--file ${shellArg(p)}`);
+  }
   const wanted = new Set(req.filePaths);
   if (quants && quants.length > 0) {
     // Whole units only: a part-selected quantization can't be named by label

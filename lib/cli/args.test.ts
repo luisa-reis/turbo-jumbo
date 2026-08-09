@@ -71,3 +71,13 @@ test('--peer without a slug is rejected', () => {
 test('-h is accepted as help', () => {
   expect(ok(['ls', '-h']).help).toBe(true);
 });
+
+test('--exact is collected for a scoped download', () => {
+  expect(ok(['get', 'org/repo', '--file', 'a.gguf', '--exact']).exact).toBe(
+    true,
+  );
+});
+
+test('--exact defaults to off', () => {
+  expect(ok(['get', 'org/repo']).exact).toBe(false);
+});

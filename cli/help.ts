@@ -24,6 +24,8 @@ FILTERS (ls)
 TRANSFERS (get, copy)
   --quant <label>     Which quantization; repeatable. Omit on get to list them
   --file <path>       Individual repo files instead of a whole quantization
+  --exact             With --file on get: the named files are the whole model,
+                      not part of a bigger repo
   --to cold|<peer>    Where it ends up. get takes cold; copy takes either
   --from local|cold|<peer>   Where copy reads from (default: wherever it is)
   --delete-after      Remove the source once the copy is verified

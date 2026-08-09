@@ -39,6 +39,9 @@ export interface CliInvocation {
   // Transfers (phase 2).
   quant: string[];
   file: string[];
+  // The named files are the whole model, not part of a bigger repo: they are
+  // recorded as its complete file set (see `fileScope`).
+  exact: boolean;
   to?: string;
   from?: string;
   deleteAfter: boolean;
@@ -65,6 +68,7 @@ const OPTIONS = {
   // Repeatable: several quantizations, or several files, in one transfer.
   quant: {type: 'string', multiple: true},
   file: {type: 'string', multiple: true},
+  exact: {type: 'boolean'},
   to: {type: 'string'},
   from: {type: 'string'},
   'delete-after': {type: 'boolean'},
@@ -144,6 +148,7 @@ function invocation(
     help: values.help ?? false,
     quant: values.quant ?? [],
     file: values.file ?? [],
+    exact: values.exact ?? false,
     to: values.to,
     from: values.from,
     deleteAfter: values['delete-after'] ?? false,
