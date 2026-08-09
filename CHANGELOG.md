@@ -131,6 +131,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   "Checking…" for minutes with no way out.
 - Updated the UI toolkit (Astryx 0.3.0) and framework (Next.js 16.3, React
   19.2.8), so some controls may look subtly different.
+- Every checkbox is now the compact size — the row and select-all boxes in the
+  models table, the file and quantization pickers, and the cold-storage options
+  in the download, copy, delete and conflict dialogs. They were a mix of two
+  sizes before; the smaller one suits lists this dense and keeps table rows
+  from being taller than the text in them.
 
 ### Fixed
 

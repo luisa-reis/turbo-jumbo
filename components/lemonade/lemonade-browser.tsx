@@ -768,12 +768,14 @@ export function LemonadeBrowser({
               label="Copy to cold storage when done"
               value={sendToCold}
               onChange={setSendToCold}
+              size="sm"
             />
             {sendToCold && (
               <CheckboxInput
                 label="Delete from local storage after transfer"
                 value={deleteAfterTransfer}
                 onChange={setDeleteAfterTransfer}
+                size="sm"
               />
             )}
             {resolveError && (

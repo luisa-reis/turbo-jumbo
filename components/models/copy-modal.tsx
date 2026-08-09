@@ -135,12 +135,14 @@ export function CopyModal({files, from, onCopy, onCancel}: CopyModalProps) {
                         setToColdStorage(checked);
                         if (!checked) setDeleteAfterCopy(false);
                       }}
+                      size="sm"
                     />
                     {toColdStorage && (
                       <CheckboxInput
                         label="Delete after copying"
                         value={deleteAfterCopy}
                         onChange={setDeleteAfterCopy}
+                        size="sm"
                       />
                     )}
                   </>
@@ -169,6 +171,7 @@ export function CopyModal({files, from, onCopy, onCancel}: CopyModalProps) {
                         value={selectedPeers.has(peer.address)}
                         isDisabled={alreadyPresent}
                         onChange={() => togglePeer(peer.address)}
+                        size="sm"
                       />
                     );
                   })

@@ -126,6 +126,7 @@ export function ConflictsModal({
                         isLabelHidden
                         value={willOverwrite}
                         onChange={() => toggleOverwrite(conflict)}
+                        size="sm"
                       />
                       <StackItem size="fill">
                         <VStack gap={1}>

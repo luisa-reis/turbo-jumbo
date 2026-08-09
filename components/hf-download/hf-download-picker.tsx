@@ -477,6 +477,7 @@ export function HfDownloadPicker({
                     isLabelHidden
                     value={groupCheckState(g)}
                     onChange={(checked) => toggleGroup(g, checked)}
+                    size="sm"
                   />
                 }
                 label={g.label}
@@ -516,6 +517,7 @@ export function HfDownloadPicker({
                           isLabelHidden
                           value={selectedPaths.has(p)}
                           onChange={(checked) => toggleFile(p, checked)}
+                          size="sm"
                         />
                       }
                       label={p.split('/').pop()}
@@ -549,6 +551,7 @@ export function HfDownloadPicker({
                     isLabelHidden
                     value={selectedPaths.has(f.path)}
                     onChange={(checked) => toggleFile(f.path, checked)}
+                    size="sm"
                   />
                 }
                 label={f.path}
@@ -574,12 +577,14 @@ export function HfDownloadPicker({
                 setSendToCold(checked);
                 if (!checked) setDeleteAfterTransfer(false);
               }}
+              size="sm"
             />
             {sendToCold && (
               <CheckboxInput
                 label="Delete from local storage after transfer"
                 value={deleteAfterTransfer}
                 onChange={setDeleteAfterTransfer}
+                size="sm"
               />
             )}
           </VStack>

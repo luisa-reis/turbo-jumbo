@@ -258,6 +258,7 @@ export function ModelsTableClient({
                   }
                   onChange={() => onToggleSelected!(allVisiblePaths)}
                   isDisabled={allVisiblePaths.length === 0}
+                  size="sm"
                 />
               );
             })(),
@@ -279,6 +280,7 @@ export function ModelsTableClient({
                     allSelected ? true : someSelected ? 'indeterminate' : false
                   }
                   onChange={() => onToggleSelected!(item.paths)}
+                  size="sm"
                 />
               );
             },
