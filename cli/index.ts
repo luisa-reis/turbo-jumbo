@@ -3,6 +3,7 @@ import {createInterface} from 'node:readline/promises';
 import {parseCli, type CliInvocation} from '@/lib/cli/args';
 import type {ConfirmIo} from '@/lib/cli/confirm';
 import {resolveColor, resolveFormat, type OutputFormat} from '@/lib/cli/format';
+import {createDiagnostics, SILENT, type Verbosity} from '@/lib/cli/verbosity';
 import {resolveServerUrl} from '@/lib/cli/server-url';
 import {CliError, UsageError, createClient, type Client} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
@@ -56,10 +57,13 @@ async function localPeerAddress(): Promise<string | undefined> {
  * watching; every machine format stays silent, so its output is exactly the
  * result and nothing else.
  */
-function transferContext(format: OutputFormat): TransferContext {
+function transferContext(
+  format: OutputFormat,
+  verbosity: Verbosity,
+): TransferContext {
   return {
     isTty: Boolean(process.stdout.isTTY),
-    showProgress: format === 'table',
+    showProgress: format === 'table' && verbosity > SILENT,
     write: (s) => process.stdout.write(s),
   };
 }
@@ -111,13 +115,20 @@ async function main(argv: string[]): Promise<number> {
     // no-color.org: any non-empty value means don't.
     noColor: (process.env.NO_COLOR ?? '') !== '',
   });
-  const client = createClient(
-    resolveServerUrl({
-      flag: inv.url,
-      env: process.env.TJ_URL,
-      localPeerAddress: await localPeerAddress(),
-    }),
+  // Diagnostics go to stderr, always: the dial controls what is said about
+  // the work, never the result of it, so `-vvv --output-format json | jq`
+  // still hands jq exactly the JSON it would have got without the -vvv.
+  const diag = createDiagnostics(inv.verbosity, (line) =>
+    process.stderr.write(line),
   );
+  const url = resolveServerUrl({
+    flag: inv.url,
+    env: process.env.TJ_URL,
+    localPeerAddress: await localPeerAddress(),
+  });
+  diag.write(1, `command ${inv.command}`);
+  diag.write(1, `server ${url}`);
+  const client = createClient(url, diag);
 
   let out: CommandOutput;
   // Findings are a successful audit with bad news, so they print their report
@@ -137,7 +148,7 @@ async function main(argv: string[]): Promise<number> {
   return exitCode;
 }
 
-/** Dispatch one command. `color` follows the same TTY rule as the format. */
+/** Dispatch one command. */
 async function run(
   client: Client,
   inv: CliInvocation,
@@ -156,15 +167,21 @@ async function run(
     case 'version':
       return version(client, color);
     case 'get':
-      return get(client, inv, transferContext(format));
+      return get(client, inv, transferContext(format, inv.verbosity));
     case 'copy':
-      return copy(client, inv, transferContext(format));
+      return copy(client, inv, transferContext(format, inv.verbosity));
     case 'audit':
-      return audit(client, inv, transferContext(format));
+      return audit(client, inv, transferContext(format, inv.verbosity));
     case 'rm':
       return rm(client, inv, confirmIo());
     case 'lemonade':
-      return lemonade(client, inv, color, transferContext(format), confirmIo());
+      return lemonade(
+        client,
+        inv,
+        color,
+        transferContext(format, inv.verbosity),
+        confirmIo(),
+      );
     case 'help':
       // Handled before dispatch; listed so the switch stays exhaustive and a
       // new command can't be added without being wired up here.

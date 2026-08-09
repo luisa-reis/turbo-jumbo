@@ -58,7 +58,16 @@ OPTIONS
   --output-format <f> table (default), json, csv, toon, or lines
   --url <url>         Server to talk to
   --color <when>      auto (default), always, never
+  -v, --verbose       Say what is being done; repeat for more (-vv, -vvv)
+  -q, --silent        Errors only. --quiet is accepted, for other tools' sake
   -h, --help          Show this text
+
+VERBOSITY
+  One dial: --silent, then the default, then -v, -vv, -vvv. -v says what is
+  being done, -vv adds each request and how long it took, -vvv adds the
+  bodies. Every line is tagged with the level that produced it and goes to
+  stderr, so turning the noise up never changes what a script reads from
+  stdout. Asking for --silent and -v at once is an error, not a guess.
 
 SERVER
   The server is found in this order: --url, then TJ_URL, then the local peer's

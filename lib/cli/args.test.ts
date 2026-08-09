@@ -57,7 +57,11 @@ test('an unknown command names the alternatives', () => {
 });
 
 test('an unknown option is reported rather than ignored', () => {
-  expect(err(['ls', '--verbose'])).toContain('--verbose');
+  const e = err(['ls', '--nonsense']);
+  expect(e).toContain('--nonsense');
+  // And nothing else: parseArgs' own wording tacks on a lecture about placing
+  // positionals after `--`, which is not what a mistyped flag needs to hear.
+  expect(e).not.toContain('--"');
 });
 
 test('an unknown format is caught at parse time', () => {
@@ -90,4 +94,23 @@ test('-n is --dry-run', () => {
   expect(ok(['copy', 'qwen', '--to', 'cold', '-n']).dryRun).toBe(true);
   expect(ok(['copy', 'qwen', '--to', 'cold', '--dry-run']).dryRun).toBe(true);
   expect(ok(['copy', 'qwen', '--to', 'cold']).dryRun).toBe(false);
+});
+
+test('-v stacks and -q is the other end of the same dial', () => {
+  expect(ok(['ls']).verbosity).toBe(0);
+  expect(ok(['ls', '-v']).verbosity).toBe(1);
+  expect(ok(['ls', '-vv']).verbosity).toBe(2);
+  expect(ok(['ls', '-v', '-v', '-v']).verbosity).toBe(3);
+  expect(ok(['ls', '-q']).verbosity).toBe(-1);
+  expect(ok(['ls', '--silent']).verbosity).toBe(-1);
+});
+
+test('--quiet is accepted, though --silent is what we document', () => {
+  // Muscle memory from every other tool; failing on it would cost a script a
+  // run over the one flag whose whole job is to be unobtrusive.
+  expect(ok(['ls', '--quiet']).verbosity).toBe(-1);
+});
+
+test('asking to be quiet and loud at once is a usage error', () => {
+  expect(err(['ls', '-q', '-v'])).toContain('same dial');
 });

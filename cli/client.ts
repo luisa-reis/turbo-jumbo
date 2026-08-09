@@ -4,6 +4,8 @@
  * code the web UI uses (see docs/specs/2026-08-08-tj-cli-phase-1-design.md).
  */
 
+import {NO_DIAGNOSTICS, type Diagnostics} from '@/lib/cli/verbosity';
+
 /** An error already phrased for the user; the entry point prints it bare. */
 export class CliError extends Error {}
 
@@ -22,8 +24,18 @@ export interface Client {
   readonly baseUrl: string;
 }
 
-export function createClient(baseUrl: string): Client {
-  const get = async (path: string) => fetch(`${baseUrl}${path}`);
+export function createClient(
+  baseUrl: string,
+  diag: Diagnostics = NO_DIAGNOSTICS,
+): Client {
+  const get = async (path: string) => {
+    diag.write(2, `GET ${baseUrl}${path}`);
+    const started = performance.now();
+    const res = await fetch(`${baseUrl}${path}`);
+    const ms = Math.round(performance.now() - started);
+    diag.write(2, `  ${res.status} ${res.statusText} in ${ms}ms`);
+    return res;
+  };
 
   return {
     baseUrl,
@@ -48,7 +60,13 @@ export function createClient(baseUrl: string): Client {
             (body ? `: ${body}` : ''),
         );
       }
-      return (await res.json()) as T;
+      if (!diag.enabled(3)) return (await res.json()) as T;
+      // Only read it as text when someone asked to see it: the body of a
+      // models listing is large, and parsing it twice would be the cost of
+      // a level nobody turned on.
+      const body = await res.text();
+      diag.write(3, body);
+      return JSON.parse(body) as T;
     },
 
     async tryJson<T>(path: string): Promise<T | null> {

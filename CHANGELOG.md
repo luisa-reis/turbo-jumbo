@@ -79,6 +79,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   It talks to a running Turbo Jumbo server, so what it reports and what the
   web UI shows cannot drift apart.
 
+  How much it says is one dial rather than a pair of flags: `--silent`, the
+  default, then `-v`, `-vv`, `-vvv`, saying what is being done, then each
+  request and its timing, then the bodies. Every line is tagged with the level
+  that produced it and goes to stderr, so turning the noise up to debug a
+  script never changes what that script reads.
+
   Documented with worked examples in [docs/cli.md](docs/cli.md).
 
 - The Hugging Face download modal now offers a GGUF repo as a list of

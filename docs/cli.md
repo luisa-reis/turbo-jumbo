@@ -604,6 +604,37 @@ summary a transfer ends with — becomes a one-row CSV, header included. Should
 a command ever answer with something that is neither, it says so and exits `2`
 rather than inventing a shape for it.
 
+## Saying more, or less
+
+Verbosity is one dial, not two flags: `--silent`, then the default, then `-v`,
+`-vv`, `-vvv`. `-v` says what is being done, `-vv` adds each request and how
+long it took, `-vvv` adds the response bodies. Extra `v`s clamp at three
+rather than complaining.
+
+```console
+$ tj ls -vv 2>&1 >/dev/null
+debug1: command ls
+debug1: server http://192.0.2.11:3000
+debug2: GET http://192.0.2.11:3000/api/v1/models-table
+debug2:   200 OK in 12ms
+```
+
+Every line is tagged with the level that produced it, so `2>&1 | grep debug1`
+is a way to read them, and **all of it goes to stderr**. Turning the noise up
+never changes what a script reads:
+
+```console
+$ diff <(tj ls --output-format json) <(tj ls -vvv --output-format json)
+$
+```
+
+`--silent` is the other end of the same dial: errors only, and no progress
+bar. `--quiet` is accepted too, since that is what every other tool calls it,
+though `--silent` is the spelling documented here. Asking for `--silent` and
+`-v` together is a usage error rather than a guess — you cannot stand at two
+points on one dial, and in practice it means a wrapper and its caller are each
+appending a flag without knowing about the other.
+
 ## Exit codes
 
 |     |                                                        |

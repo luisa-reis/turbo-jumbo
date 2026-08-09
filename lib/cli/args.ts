@@ -1,4 +1,5 @@
 import {parseArgs} from 'node:util';
+import {resolveVerbosity, type Verbosity} from '@/lib/cli/verbosity';
 import {
   COLOR_VALUES,
   FORMAT_VALUES,
@@ -38,6 +39,7 @@ export interface CliInvocation {
   positionals: string[];
   outputFormat?: FormatFlag;
   color?: ColorFlag;
+  verbosity: Verbosity;
   url?: string;
   peer?: string;
   local: boolean;
@@ -68,6 +70,12 @@ export type ParseResult =
 const OPTIONS = {
   'output-format': {type: 'string'},
   color: {type: 'string'},
+  verbose: {type: 'boolean', short: 'v', multiple: true},
+  silent: {type: 'boolean', short: 'q'},
+  // Undocumented in the summary, disclosed in --help: every other tool spells
+  // this --quiet, and a verbosity flag that errors is the worst kind to lose a
+  // script to.
+  quiet: {type: 'boolean'},
   url: {type: 'string'},
   peer: {type: 'string'},
   local: {type: 'boolean'},
@@ -121,12 +129,18 @@ export function parseCli(argv: string[]): ParseResult {
   const {values, positionals} = parsed;
   const [name, ...rest] = positionals;
 
+  const verbosity = resolveVerbosity({
+    verbose: values.verbose?.length ?? 0,
+    silent: (values.silent ?? false) || (values.quiet ?? false),
+  });
+  if (!verbosity.ok) return {ok: false, error: verbosity.error};
+
   // A bare `tj`, or `tj --help`, is the help screen rather than an error: it is
   // what someone types to find out what the tool does.
   if (name === undefined) {
     return {
       ok: true,
-      value: invocation('help', [], values),
+      value: invocation('help', [], values, verbosity.value),
     };
   }
   if (!isCommand(name)) {
@@ -156,7 +170,7 @@ export function parseCli(argv: string[]): ParseResult {
     return {ok: false, error: '--peer needs a peer slug.'};
   }
 
-  return {ok: true, value: invocation(name, rest, values)};
+  return {ok: true, value: invocation(name, rest, values, verbosity.value)};
 }
 
 type Values = ReturnType<typeof parseArgs<{options: typeof OPTIONS}>>['values'];
@@ -165,12 +179,14 @@ function invocation(
   command: Command,
   positionals: string[],
   values: Values,
+  verbosity: Verbosity,
 ): CliInvocation {
   return {
     command,
     positionals,
     outputFormat: values['output-format'] as FormatFlag | undefined,
     color: values.color as ColorFlag | undefined,
+    verbosity,
     url: values.url,
     peer: values.peer,
     local: values.local ?? false,
