@@ -8,6 +8,7 @@ import {
 } from '@/lib/storage/check-progress';
 import type {SourceFile} from '@/lib/copy/source-files';
 import {
+  averageRate,
   createJsonProgressReader,
   createMilestoneEmitter,
   createTextProgressReader,
@@ -15,7 +16,7 @@ import {
   renderBar,
   type TransferProgress,
 } from '@/lib/cli/progress';
-import {formatSize} from '@/lib/format/bytes';
+import {formatSize, formatSpeed} from '@/lib/format/bytes';
 
 export interface TransferResult {
   progress: TransferProgress | null;
@@ -101,10 +102,14 @@ export async function runTransfer(
     if (!p || !showProgress) continue;
 
     if (isTty) {
-      write(`\r${renderBar(p, Date.now() - started)}`);
+      write(
+        `\r${renderBar(p, Date.now() - started, {
+          columns: process.stdout.columns,
+        })}`,
+      );
       barDrawn = true;
     } else {
-      const line = milestone(p);
+      const line = milestone(p, Date.now() - started);
       if (line) write(`${line}\n`);
     }
   }
@@ -213,5 +218,10 @@ export function summarise(verb: string, result: TransferResult): string {
   const done = p && p.filesDone > 0 ? p.filesDone : result.expectedFiles;
   const files = `${done}/${result.expectedFiles}`;
   const bytes = p ? formatSize(p.bytesDone) : '0 B';
-  return `${verb} ${files} files · ${bytes} · ${formatDuration(result.elapsedMs)}`;
+  // What the whole run averaged, the figure worth carrying to the next one.
+  const avg = averageRate(p?.bytesDone ?? 0, result.elapsedMs);
+  return (
+    `${verb} ${files} files · ${bytes} · ${formatDuration(result.elapsedMs)}` +
+    (avg === null ? '' : ` · ${formatSpeed(avg)} avg`)
+  );
 }

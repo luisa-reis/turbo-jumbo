@@ -167,6 +167,19 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Pulling a model out of cold storage was the last copy that always started
   over; it resumes too.
 
+- `tj`'s progress bar now reports the rate a transfer has averaged since it
+  began — `111.9 MiB/s avg` — and repeats it on the closing line, so a copy
+  says what it managed overall rather than leaving you to divide. Copies had no
+  rate at all before, only downloads did, and the one downloads showed was a
+  spot reading of the moment. The average counts the stretches that moved no
+  bytes, like verifying a partial destination before resuming it, because those
+  are part of what the transfer cost. It appears on the milestone lines that
+  replace the bar when output is redirected, too, where a log of an overnight
+  transfer is read for exactly that figure.
+
+  The bar now also shrinks to fit a narrow terminal rather than wrapping, since
+  a wrapped bar redraws its last row and strands the rest.
+
 ### Fixed
 
 - An interrupted download of a split model can now be finished from the audit

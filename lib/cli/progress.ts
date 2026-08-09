@@ -3,7 +3,7 @@ import {
   parseSize,
   type DownloadProgress,
 } from '@/lib/hf/download-output';
-import {formatSize} from '@/lib/format/bytes';
+import {formatSize, formatSpeed} from '@/lib/format/bytes';
 
 /**
  * One shape for both transfer streams. `/api/v1/hf-download` emits redrawing
@@ -116,6 +116,25 @@ export function createJsonProgressReader() {
   };
 }
 
+/**
+ * Bytes per second averaged over the whole run so far: what the transfer has
+ * actually sustained end to end, rather than what it is managing this instant.
+ *
+ * It deliberately counts the stretches that moved no bytes — verifying a
+ * partial destination, waiting on a slow peer, the gaps between files — which
+ * is what makes it the number to judge "how long will the rest of this take"
+ * by. A spot reading taken during a fast patch answers a question nobody asked.
+ *
+ * Null until there is something to divide.
+ */
+export function averageRate(
+  bytesDone: number,
+  elapsedMs: number,
+): number | null {
+  if (elapsedMs <= 0 || bytesDone <= 0) return null;
+  return (bytesDone * 1000) / elapsedMs;
+}
+
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   const h = Math.floor(s / 3600);
@@ -123,24 +142,49 @@ export function formatDuration(ms: number): string {
   return h > 0 ? `${h}h${m}m${s % 60}s` : m > 0 ? `${m}m${s % 60}s` : `${s}s`;
 }
 
-/** A redrawing progress bar, for a terminal. */
+/** Below this the bar stops being a bar; it would rather be narrow than gone. */
+const MIN_BAR_WIDTH = 6;
+
+/**
+ * A redrawing progress bar, for a terminal.
+ *
+ * Pass `columns` when the terminal's width is known and the bar will shrink to
+ * keep the whole line on one row. The readings are what the line is *for*, so
+ * the bar is what gives way: a line that wraps is worse than a short bar,
+ * because the carriage return that redraws it only reaches the last screen row
+ * and strands every row above it.
+ */
 export function renderBar(
   p: TransferProgress,
   elapsedMs: number,
-  width = 24,
+  opts: {width?: number; columns?: number} = {},
 ): string {
+  const {width = 24, columns} = opts;
   const frac = p.bytesTotal > 0 ? Math.min(1, p.bytesDone / p.bytesTotal) : 0;
-  const filled = Math.round(frac * width);
-  const bar = '█'.repeat(filled) + '░'.repeat(width - filled);
-  const parts = [
-    `${bar} ${String(Math.round(frac * 100)).padStart(3)}%`,
-    `${formatSize(p.bytesDone)} / ${formatSize(p.bytesTotal)}`,
-  ];
-  if (p.filesTotal > 1) parts.push(`${p.filesDone}/${p.filesTotal} files`);
-  if (p.speed) parts.push(`${formatSize(p.speed)}/s`);
-  parts.push(formatDuration(elapsedMs));
-  if (p.phase && p.phase !== 'copying') parts.push(p.phase);
-  return parts.join('  ');
+
+  const readings = [`${formatSize(p.bytesDone)} / ${formatSize(p.bytesTotal)}`];
+  if (p.filesTotal > 1) readings.push(`${p.filesDone}/${p.filesTotal} files`);
+  // Two different readings when the stream offers both: what it is doing now,
+  // then what it has averaged since the start. The copy stream reports no
+  // instantaneous speed at all, so the average is its only rate.
+  if (p.speed) readings.push(formatSpeed(p.speed));
+  const avg = averageRate(p.bytesDone, elapsedMs);
+  if (avg !== null) readings.push(`${formatSpeed(avg)} avg`);
+  readings.push(formatDuration(elapsedMs));
+  if (p.phase && p.phase !== 'copying') readings.push(p.phase);
+
+  const pct = `${String(Math.round(frac * 100)).padStart(3)}%`;
+  const tail = readings.join('  ');
+  // Everything the bar has to share the row with: ` ${pct}  ${tail}`.
+  const fixed = 1 + pct.length + 2 + tail.length;
+  const barWidth =
+    columns && columns > 0
+      ? Math.max(MIN_BAR_WIDTH, Math.min(width, columns - fixed))
+      : width;
+
+  const filled = Math.round(frac * barWidth);
+  const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+  return `${bar} ${pct}  ${tail}`;
 }
 
 /**
@@ -161,7 +205,9 @@ export function createMilestoneEmitter(decile = 10) {
   let lastDone = -1;
   let lastBucket = -1;
   let lastLine = '';
-  return (p: TransferProgress): string | null => {
+  /** `elapsedMs` is optional: with a clock the line also carries the average
+   *  rate, which is the number a log of a long transfer is read for. */
+  return (p: TransferProgress, elapsedMs?: number): string | null => {
     const pct =
       p.bytesTotal > 0 ? Math.floor((p.bytesDone / p.bytesTotal) * 100) : 0;
     const bucket = Math.floor(pct / decile);
@@ -177,9 +223,13 @@ export function createMilestoneEmitter(decile = 10) {
       `${files}${String(pct).padStart(3)}%  ` +
       `${formatSize(p.bytesDone)} / ${formatSize(p.bytesTotal)}`;
     // The last file finishing trips both rules at once — the closing decile and
-    // the file count — which would otherwise print the same line twice.
+    // the file count — which would otherwise print the same line twice. The
+    // rate is left out of that comparison: it moves every tick, so including it
+    // would make every duplicate look new.
     if (line === lastLine) return null;
     lastLine = line;
-    return line;
+    const avg =
+      elapsedMs === undefined ? null : averageRate(p.bytesDone, elapsedMs);
+    return avg === null ? line : `${line}  ${formatSpeed(avg)} avg`;
   };
 }

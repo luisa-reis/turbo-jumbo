@@ -19,4 +19,7 @@ test('formatSpeed renders a binary transfer rate', () => {
   expect(formatSpeed(5 * 1024)).toBe('5 KiB/s');
   expect(formatSpeed(1024 ** 2)).toBe('1.0 MiB/s');
   expect(formatSpeed(1024 ** 3)).toBe('1.00 GiB/s');
+  // A crawl is reported as a crawl, not as a stop.
+  expect(formatSpeed(51)).toBe('51 B/s');
+  expect(formatSpeed(0)).toBe('0 B/s');
 });

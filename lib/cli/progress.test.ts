@@ -1,5 +1,6 @@
 import {test, expect} from 'bun:test';
 import {
+  averageRate,
   createJsonProgressReader,
   createLineSplitter,
   createMilestoneEmitter,
@@ -143,6 +144,113 @@ test('a zero-total transfer renders without dividing by zero', () => {
     0,
   );
   expect(out).toContain('0%');
+});
+
+test('the bar carries the average rate, and the copy stream has only that', () => {
+  const at = (speed?: number) =>
+    renderBar(
+      {
+        filesDone: 1,
+        filesTotal: 4,
+        bytesDone: 5 * 1024 ** 3,
+        bytesTotal: 10 * 1024 ** 3,
+        speed,
+        errors: [],
+      },
+      // 5 GiB in 50s averages 102.4 MiB/s.
+      50_000,
+    );
+  expect(at()).toContain('102.4 MiB/s avg');
+  // The download stream also reports what it is doing right now; both show,
+  // and only one of them is labelled the average.
+  const withSpot = at(40 * 1024 ** 2);
+  expect(withSpot).toContain('40.0 MiB/s');
+  expect(withSpot).toContain('102.4 MiB/s avg');
+});
+
+test('the average covers stretches that moved no bytes', () => {
+  // Half the run spent verifying a partial destination rather than sending:
+  // the average reflects the wait, because that is what the wait cost.
+  const out = renderBar(
+    {
+      filesDone: 0,
+      filesTotal: 1,
+      bytesDone: 100 * 1024 ** 2,
+      bytesTotal: 200 * 1024 ** 2,
+      phase: 'verifying',
+      errors: [],
+    },
+    100_000,
+  );
+  expect(out).toContain('1.0 MiB/s avg');
+});
+
+test('no rate is shown before there is one to divide', () => {
+  const nothing = {
+    filesDone: 0,
+    filesTotal: 1,
+    bytesDone: 0,
+    bytesTotal: 100,
+    errors: [],
+  };
+  expect(renderBar(nothing, 5_000)).not.toContain('avg');
+  // A frame that arrives in the same millisecond the transfer began.
+  expect(renderBar({...nothing, bytesDone: 10}, 0)).not.toContain('avg');
+  expect(averageRate(0, 1_000)).toBeNull();
+  expect(averageRate(1024 ** 2, 1_000)).toBe(1024 ** 2);
+});
+
+test('milestone lines carry the average, without breaking de-duplication', () => {
+  const m = createMilestoneEmitter();
+  const at = (filesDone: number) => ({
+    filesDone,
+    filesTotal: 1,
+    bytesDone: 100,
+    bytesTotal: 100,
+    errors: [],
+  });
+  expect(m(at(0), 1_000)).toContain('100 B/s avg');
+  // Same milestone, later clock: the rate differs but the line is still the
+  // same one, so it stays silent.
+  expect(m(at(1), 2_000)).toBeNull();
+});
+
+test('milestone lines omit the rate when there is no clock', () => {
+  const m = createMilestoneEmitter();
+  const line = m({
+    filesDone: 1,
+    filesTotal: 4,
+    bytesDone: 10,
+    bytesTotal: 40,
+    errors: [],
+  });
+  expect(line).toContain('1/4 files');
+  expect(line).not.toContain('avg');
+});
+
+test('the bar shrinks to keep the readings on one row', () => {
+  const p = {
+    filesDone: 3,
+    filesTotal: 15,
+    bytesDone: 22 * 1024 ** 3,
+    bytesTotal: 55 * 1024 ** 3,
+    phase: 'verifying',
+    errors: [],
+  };
+  for (const columns of [120, 100, 80]) {
+    const out = renderBar(p, 205_000, {columns});
+    expect(out.length).toBeLessThanOrEqual(columns);
+    // Whatever the width, the numbers survive — the bar is what gives way.
+    expect(out).toContain('22.0 GiB / 55.0 GiB');
+    expect(out).toContain('avg');
+    expect(out).toContain('verifying');
+  }
+  // Narrower than the readings themselves: the bar is down to its floor and
+  // there is nothing left to give, so the line simply runs as short as it can.
+  const cramped = renderBar(p, 205_000, {columns: 40});
+  expect(cramped.split(' ')[0]).toBe('██░░░░'); // the floor, still proportioned
+  // Without a known width it renders at its natural size.
+  expect(renderBar(p, 205_000)).toContain('█'.repeat(9));
 });
 
 test('durations read in the largest useful unit', () => {

@@ -16,9 +16,11 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 ** 4).toFixed(1)} TiB`;
 }
 
-/** A transfer rate as "72.3 MiB/s". */
+/** A transfer rate as "72.3 MiB/s". Below a kibibyte it counts in bytes rather
+ *  than rounding to "0 KiB/s", which reads as stalled when it is merely slow. */
 export function formatSpeed(bps: number): string {
   if (bps >= 1024 ** 3) return `${(bps / 1024 ** 3).toFixed(2)} GiB/s`;
   if (bps >= 1024 ** 2) return `${(bps / 1024 ** 2).toFixed(1)} MiB/s`;
-  return `${(bps / 1024).toFixed(0)} KiB/s`;
+  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KiB/s`;
+  return `${Math.round(bps)} B/s`;
 }
