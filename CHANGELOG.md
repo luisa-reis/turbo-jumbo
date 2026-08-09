@@ -79,6 +79,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   It talks to a running Turbo Jumbo server, so what it reports and what the
   web UI shows cannot drift apart.
 
+  Help comes in the depth you asked for. `tj -h`, or a bare `tj`, is every
+  command on one screen; `tj --help` is the same ground with the reasons
+  filled in; and `tj rm --help` — or `tj help rm` — is that one command alone,
+  without the transfer flags scrolling past first. `tj --help-all` prints the
+  lot, for when grep is the reader.
+
   `tj --version` answers which CLI you are running without needing a server
   to answer it, and `--version -v` adds the commit and build detail; `tj
 version` lists the server's and the CLI's side by side, since a client and

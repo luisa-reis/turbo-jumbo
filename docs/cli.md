@@ -48,6 +48,21 @@ $ tj ls
 A bare `host:port` works too — that's the form `config.yaml` uses — and gets an
 `http://` scheme added.
 
+## Getting help
+
+Three depths, so you get the one you asked for:
+
+|                         |                                            |
+| ----------------------- | ------------------------------------------ |
+| `tj -h`, or a bare `tj` | The summary — every command on one screen  |
+| `tj --help`, `tj help`  | The same ground with the reasons filled in |
+| `tj <command> --help`   | One command alone, with only its own flags |
+| `tj help <command>`     | The same thing, asked the other way        |
+| `tj --help-all`         | Every command's help at once, for grepping |
+
+Typing the bare name is how you find out what the tool is, so it answers with
+the screenful rather than the manual.
+
 ## Commands
 
 ### `tj ls [pattern]`

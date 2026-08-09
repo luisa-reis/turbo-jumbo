@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 import {createInterface} from 'node:readline/promises';
-import {parseCli, type CliInvocation} from '@/lib/cli/args';
+import {COMMANDS, parseCli, type CliInvocation} from '@/lib/cli/args';
 import type {ConfirmIo} from '@/lib/cli/confirm';
 import {resolveColor, resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {createDiagnostics, SILENT, type Verbosity} from '@/lib/cli/verbosity';
 import {resolveServerUrl} from '@/lib/cli/server-url';
 import {CliError, UsageError, createClient, type Client} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
-import {HELP} from '@/cli/help';
+import {commandHelp, helpAll, FULL_HELP, SHORT_HELP} from '@/cli/help';
 import {ls} from '@/cli/commands/ls';
 import {where} from '@/cli/commands/where';
 import {disk} from '@/cli/commands/disk';
@@ -94,6 +94,32 @@ function confirmIo(): ConfirmIo {
   };
 }
 
+/**
+ * The help this run is asking for, if it is asking for any.
+ *
+ * `tj help <command>` and `tj <command> --help` are one question asked two
+ * ways, so they answer alike. At the top level the spelling decides: -h is the
+ * screenful, --help the long form — and a bare `tj`, which the parser reports
+ * as the help command, takes the screenful too.
+ */
+function helpAsked(inv: CliInvocation): string | undefined {
+  if (inv.command === 'help') {
+    const named = inv.positionals[0];
+    if (named === undefined) {
+      return inv.help === 'short' ? SHORT_HELP : FULL_HELP;
+    }
+    const text = commandHelp(named);
+    if (text === undefined) {
+      throw new UsageError(
+        `No help for '${named}': it isn't a command.\n` +
+          `Try one of: ${COMMANDS.join(', ')}.`,
+      );
+    }
+    return text;
+  }
+  return inv.help === undefined ? undefined : commandHelp(inv.command);
+}
+
 async function main(argv: string[]): Promise<number> {
   const parsed = parseCli(argv);
   if (!parsed.ok) {
@@ -110,8 +136,14 @@ async function main(argv: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  if (inv.command === 'help' || inv.help) {
-    process.stdout.write(HELP);
+  if (inv.helpAll) {
+    process.stdout.write(helpAll());
+    return EXIT_OK;
+  }
+
+  const asked = helpAsked(inv);
+  if (asked !== undefined) {
+    process.stdout.write(asked);
     return EXIT_OK;
   }
 
@@ -193,7 +225,7 @@ async function run(
     case 'help':
       // Handled before dispatch; listed so the switch stays exhaustive and a
       // new command can't be added without being wired up here.
-      throw new CliError(HELP);
+      throw new CliError(FULL_HELP);
   }
 }
 

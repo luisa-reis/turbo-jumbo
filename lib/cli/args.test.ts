@@ -75,7 +75,7 @@ test('--peer without a slug is rejected', () => {
 });
 
 test('-h is accepted as help', () => {
-  expect(ok(['ls', '-h']).help).toBe(true);
+  expect(ok(['ls', '-h']).help).toBe('short');
 });
 
 test('--exact is collected for a scoped download', () => {
@@ -122,4 +122,15 @@ test('--version is a flag, and needs no command', () => {
   expect(ok(['--version']).command).toBe('help');
   expect(ok(['--version', '-v']).verbosity).toBe(1);
   expect(ok(['ls']).version).toBe(false);
+});
+
+test('-h and --help are told apart, since they print different things', () => {
+  expect(ok(['-h']).help).toBe('short');
+  expect(ok(['--help']).help).toBe('full');
+  // A bare `tj` takes the summary: typing the name is how you find out what
+  // the tool is, not how you read the manual.
+  expect(ok([]).help).toBe('short');
+  // `tj help` asked for the manual by name.
+  expect(ok(['help']).help).toBeUndefined();
+  expect(ok(['ls']).help).toBeUndefined();
 });

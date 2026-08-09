@@ -34,6 +34,9 @@ export const COMMANDS = [
 ] as const;
 export type Command = (typeof COMMANDS)[number];
 
+/** -h is the screenful; --help is the same ground with the reasons in. */
+export type HelpStyle = 'short' | 'full';
+
 export interface CliInvocation {
   command: Command;
   positionals: string[];
@@ -45,7 +48,9 @@ export interface CliInvocation {
   local: boolean;
   cold: boolean;
   all: boolean;
-  help: boolean;
+  /** Which spelling was used: -h wants the summary, --help the long form. */
+  help?: HelpStyle;
+  helpAll: boolean;
   version: boolean;
   // Transfers (phase 2).
   quant: string[];
@@ -83,6 +88,7 @@ const OPTIONS = {
   cold: {type: 'boolean'},
   all: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
+  'help-all': {type: 'boolean'},
   version: {type: 'boolean'},
   // Repeatable: several quantizations, or several files, in one transfer.
   quant: {type: 'string', multiple: true},
@@ -123,13 +129,26 @@ export function parseCli(argv: string[]): ParseResult {
       args: argv,
       options: OPTIONS,
       allowPositionals: true,
+      // Only the tokens tell -h from --help: parseArgs folds both into one
+      // boolean, and the two are supposed to print different things.
+      tokens: true,
     });
   } catch (e) {
     return {ok: false, error: parseErrorMessage(e)};
   }
 
-  const {values, positionals} = parsed;
+  const {values, positionals, tokens} = parsed;
   const [name, ...rest] = positionals;
+
+  const helpToken = tokens.find(
+    (t) => t.kind === 'option' && t.name === 'help',
+  );
+  const helpStyle: HelpStyle | undefined =
+    helpToken === undefined
+      ? undefined
+      : helpToken.kind === 'option' && helpToken.rawName === '--help'
+        ? 'full'
+        : 'short';
 
   const verbosity = resolveVerbosity({
     verbose: values.verbose?.length ?? 0,
@@ -142,7 +161,15 @@ export function parseCli(argv: string[]): ParseResult {
   if (name === undefined) {
     return {
       ok: true,
-      value: invocation('help', [], values, verbosity.value),
+      // A bare `tj` gets the summary, not the manual: typing the name is how
+      // you find out what the tool is.
+      value: invocation(
+        'help',
+        [],
+        values,
+        verbosity.value,
+        helpStyle ?? 'short',
+      ),
     };
   }
   if (!isCommand(name)) {
@@ -172,7 +199,10 @@ export function parseCli(argv: string[]): ParseResult {
     return {ok: false, error: '--peer needs a peer slug.'};
   }
 
-  return {ok: true, value: invocation(name, rest, values, verbosity.value)};
+  return {
+    ok: true,
+    value: invocation(name, rest, values, verbosity.value, helpStyle),
+  };
 }
 
 type Values = ReturnType<typeof parseArgs<{options: typeof OPTIONS}>>['values'];
@@ -182,6 +212,7 @@ function invocation(
   positionals: string[],
   values: Values,
   verbosity: Verbosity,
+  helpStyle: HelpStyle | undefined,
 ): CliInvocation {
   return {
     command,
@@ -194,7 +225,8 @@ function invocation(
     local: values.local ?? false,
     cold: values.cold ?? false,
     all: values.all ?? false,
-    help: values.help ?? false,
+    help: helpStyle,
+    helpAll: values['help-all'] ?? false,
     version: values.version ?? false,
     quant: values.quant ?? [],
     file: values.file ?? [],
