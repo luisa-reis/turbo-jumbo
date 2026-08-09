@@ -25,7 +25,6 @@ export function LemonadeModalRoute({location}: {location: string}) {
     <LemonadeModal
       activeLocation={location}
       coldModels={coldModels}
-      localModelsPath={localModelsDir ?? ''}
       hfTokenSet={!!process.env.HF_TOKEN}
       peerConfigs={peerConfigs}
       localPeerAddress={localPeer?.address ?? null}

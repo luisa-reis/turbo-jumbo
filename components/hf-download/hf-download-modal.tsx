@@ -17,12 +17,10 @@ import {HfDownloadPicker} from '@/components/hf-download/hf-download-picker';
  */
 export function HfDownloadModal({
   activeLocation,
-  localModelsPath,
   hfTokenSet,
   peerConfigs,
 }: {
   activeLocation: string;
-  localModelsPath: string;
   hfTokenSet: boolean;
   peerConfigs: PeerConfig[];
 }) {
@@ -38,7 +36,7 @@ export function HfDownloadModal({
 
   // Where the download runs: the All tab and the local peer download on this
   // machine; a remote peer's tab downloads on that peer via the proxy.
-  const target = downloadTarget(activeLocation, peerConfigs, localModelsPath);
+  const target = downloadTarget(activeLocation, peerConfigs);
 
   // On soft navigation away (e.g. browser Back while open) Next keeps the
   // unmatched @modal slot's previous state mounted, so gate on the URL: only

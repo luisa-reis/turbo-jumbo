@@ -17,7 +17,10 @@ import {
   parseSize,
   type DownloadProgress,
 } from '@/lib/hf/download-output';
-import {buildDownloadScript} from '@/lib/hf/download-command';
+import {
+  buildTjGetCommand,
+  type DownloadCommandContext,
+} from '@/lib/hf/download-command';
 
 // Padding for the pinned status region in the dialog header, matching
 // LayoutContent's inset so the banners and progress bars align with the body.
@@ -46,14 +49,13 @@ export type DownloadRequest = {
 };
 
 /**
- * The shell script that reproduces a download request by hand, mirroring what
- * the `/api/v1/hf-download` route does (env like HF_XET_HIGH_PERFORMANCE is
- * inherited from the server's environment, so it doesn't appear here). Shown in
- * the modal's Command section so a run can be copied and re-run. Lives in
+ * The `tj` command that reproduces a download request — the same request, not
+ * an imitation of it, since `tj get` posts to `/api/v1/hf-download` too. Shown
+ * in the modal's Command section so a run can be copied and re-run. Lives in
  * `@/lib/hf/download-command`; re-exported here because this has been its
  * address since the modal first disclosed a command.
  */
-export {buildDownloadScript};
+export {buildTjGetCommand};
 
 // Apply a raw output chunk to the terminal buffer, honouring \r (carriage
 // return) so progress lines redraw in place rather than stacking.
@@ -90,15 +92,15 @@ function applyChunk(state: TermState, chunk: string): TermState {
  * Drives a streaming `/api/v1/hf-download` run: posts the request, parses the
  * terminal output into a redrawing buffer and structured progress, and exposes
  * cancel/reset. Reused by the HF download box and the audit "Redownload" action.
- * `displayPath` is the models directory the disclosed script changes into, so
- * every caller's modal can show a runnable equivalent of the request;
  * `downloadUrl` is the endpoint each run POSTs to — the local route by default,
- * or a peer proxy when the download targets a remote machine.
+ * or a peer proxy when the download targets a remote machine; `cliUrl` names
+ * that machine to `tj --url` in the disclosed command, since a download runs on
+ * whichever server the CLI points at.
  */
-export function useDownloadRunner(
-  displayPath: string,
+export function useDownloadRunner({
   downloadUrl = '/api/v1/hf-download',
-) {
+  cliUrl,
+}: {downloadUrl?: string; cliUrl?: string} = {}) {
   const [term, setTerm] = useState<TermState | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [running, setRunning] = useState(false);
@@ -142,14 +144,23 @@ export function useDownloadRunner(
     return state;
   };
 
-  const start = async (req: DownloadRequest) => {
+  // What the disclosed command knows beyond the request itself — the repo's
+  // quantizations and full listing, when the caller has them, so the command
+  // can name a whole quantization instead of every file in it.
+  const commandFor = (req: DownloadRequest, context?: DownloadCommandContext) =>
+    buildTjGetCommand(req, {...context, cliUrl});
+
+  const start = async (
+    req: DownloadRequest,
+    context?: DownloadCommandContext,
+  ) => {
     if (running) return;
     const abort = new AbortController();
     abortRef.current = abort;
     setRunning(true);
     setTerm({lines: [''], col: 0});
     setProgress(null);
-    setCommand(buildDownloadScript(req, displayPath));
+    setCommand(commandFor(req, context));
 
     try {
       await runOne(req, abort, {lines: [''], col: 0});
@@ -177,9 +188,7 @@ export function useDownloadRunner(
     let state: TermState = {lines: [''], col: 0};
     setTerm(state);
     setProgress(null);
-    setCommand(
-      reqs.map((r) => buildDownloadScript(r, displayPath)).join('\n\n'),
-    );
+    setCommand(reqs.map((r) => commandFor(r)).join('\n'));
 
     try {
       for (let i = 0; i < reqs.length; i++) {

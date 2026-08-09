@@ -24,7 +24,6 @@ export function HomeView({location}: {location: string}) {
     <HomeClient
       activeLocation={location}
       coldModels={coldModels}
-      localModelsPath={localModelsDir ?? null}
       hfTokenSet={!!process.env.HF_TOKEN}
       modelsTableData={modelsTableData}
       peerConfigs={peerConfigs}

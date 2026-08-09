@@ -1,5 +1,5 @@
 import {test, expect} from 'bun:test';
-import {downloadTarget, peerModelsDir} from '@/lib/hf/download-target';
+import {downloadTarget} from '@/lib/hf/download-target';
 import type {Peer} from '@/lib/config';
 
 const local: Peer = {
@@ -17,36 +17,35 @@ const remoteNoBase: Peer = {name: 'box-c', address: '192.0.2.3:3000'};
 const peers = [local, remote, remoteNoBase];
 
 test('All tab targets the local download endpoint', () => {
-  expect(downloadTarget('all', peers, '/local/models')).toEqual({
+  expect(downloadTarget('all', peers)).toEqual({
     url: '/api/v1/hf-download',
-    displayPath: '/local/models',
     diskUsageUrl: '/api/v1/disk-usage',
     coldStorageUrl: '/api/v1/cold-storage',
   });
 });
 
 test('local peer targets the local download endpoint', () => {
-  expect(downloadTarget('192.0.2.1:3000', peers, '/local/models')).toEqual({
+  // No cliUrl: `tj get` already downloads onto the server it points at.
+  expect(downloadTarget('192.0.2.1:3000', peers)).toEqual({
     url: '/api/v1/hf-download',
-    displayPath: '/local/models',
     diskUsageUrl: '/api/v1/disk-usage',
     coldStorageUrl: '/api/v1/cold-storage',
   });
 });
 
-test('remote peer targets its proxy and resolved models dir', () => {
-  expect(downloadTarget('192.0.2.2:3000', peers, '/local/models')).toEqual({
+test('remote peer targets its proxy and names itself for the CLI', () => {
+  expect(downloadTarget('192.0.2.2:3000', peers)).toEqual({
     url: '/api/v1/peers/box-b/hf-download',
-    displayPath: '/mnt/b/turbo-jumbo',
+    cliUrl: '192.0.2.2:3000',
     diskUsageUrl: '/api/v1/peers/box-b/disk-usage',
     coldStorageUrl: '/api/v1/peers/box-b/cold-storage',
   });
 });
 
-test('remote peer without base_path falls back to a placeholder path', () => {
-  expect(downloadTarget('192.0.2.3:3000', peers, '/local/models')).toEqual({
+test('remote peer without base_path is still addressable', () => {
+  expect(downloadTarget('192.0.2.3:3000', peers)).toEqual({
     url: '/api/v1/peers/box-c/hf-download',
-    displayPath: 'box-c models directory',
+    cliUrl: '192.0.2.3:3000',
     diskUsageUrl: '/api/v1/peers/box-c/disk-usage',
     coldStorageUrl: '/api/v1/peers/box-c/cold-storage',
   });
@@ -59,21 +58,10 @@ test('a peer with a Unicode name targets its proxy by slug', () => {
     slug: 'zurich',
     base_path: '/mnt/g',
   };
-  expect(downloadTarget('192.0.2.4:3000', [unicode], '/local/models')).toEqual({
+  expect(downloadTarget('192.0.2.4:3000', [unicode])).toEqual({
     url: '/api/v1/peers/zurich/hf-download',
-    displayPath: '/mnt/g/turbo-jumbo',
+    cliUrl: '192.0.2.4:3000',
     diskUsageUrl: '/api/v1/peers/zurich/disk-usage',
     coldStorageUrl: '/api/v1/peers/zurich/cold-storage',
   });
-});
-
-test('peerModelsDir honors the turbo_jumbo_subdir override', () => {
-  expect(
-    peerModelsDir({
-      name: 'x',
-      address: 'a',
-      base_path: '/m',
-      turbo_jumbo_subdir: 'tj',
-    }),
-  ).toBe('/m/tj');
 });

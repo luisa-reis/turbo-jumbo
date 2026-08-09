@@ -115,7 +115,6 @@ function selectedFileInfo(
 export function HomeClient({
   activeLocation,
   coldModels,
-  localModelsPath,
   hfTokenSet,
   modelsTableData,
   peerConfigs,
@@ -124,7 +123,6 @@ export function HomeClient({
 }: {
   activeLocation: string;
   coldModels: Model[];
-  localModelsPath: string | null;
   hfTokenSet: boolean;
   modelsTableData: ModelRow[];
   peerConfigs: PeerConfig[];
@@ -301,7 +299,7 @@ export function HomeClient({
   // Redownload an incomplete file: re-fetch from HF into local storage. The
   // existing partial file is left in place so the HF downloader recovers it
   // (never deleted, never sent to cold storage here).
-  const redownload = useDownloadRunner(localModelsPath ?? '');
+  const redownload = useDownloadRunner();
   const [redownloadOpen, setRedownloadOpen] = useState(false);
   const redownloadPath = useRef<string | null>(null);
 

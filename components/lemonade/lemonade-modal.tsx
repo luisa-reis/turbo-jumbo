@@ -24,7 +24,6 @@ import {useInventoryLocations} from '@/components/models/use-inventory-locations
 export function LemonadeModal({
   activeLocation,
   coldModels,
-  localModelsPath,
   hfTokenSet,
   peerConfigs,
   localPeerAddress,
@@ -33,7 +32,6 @@ export function LemonadeModal({
 }: {
   activeLocation: string;
   coldModels: Model[];
-  localModelsPath: string;
   hfTokenSet: boolean;
   peerConfigs: PeerConfig[];
   localPeerAddress: string | null;
@@ -123,7 +121,7 @@ export function LemonadeModal({
 
   // Where the download runs: the All tab and the local peer download on this
   // machine; a remote peer's tab downloads on that peer via the proxy.
-  const target = downloadTarget(activeLocation, peerConfigs, localModelsPath);
+  const target = downloadTarget(activeLocation, peerConfigs);
   // The inventory whose presence decides which files to skip: the machine the
   // download will run on (All → the local peer), identified by peer name to
   // match the InventoryLocation entries.

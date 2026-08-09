@@ -14,7 +14,7 @@ import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {
   DownloadModal,
-  buildDownloadScript,
+  buildTjGetCommand,
   useDownloadRunner,
 } from '@/components/hf-download/download-runner';
 import {copyToClipboard} from '@/lib/util/clipboard';
@@ -103,7 +103,7 @@ export function HfDownloadPicker({
     start,
     cancel,
     reset,
-  } = useDownloadRunner(target.displayPath, target.url);
+  } = useDownloadRunner({downloadUrl: target.url, cliUrl: target.cliUrl});
   const [files, setFiles] = useState<HfFile[] | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
@@ -300,17 +300,38 @@ export function HfDownloadPicker({
   const canPickFiles = groups?.some((g) => g.fileCount > 1) ?? false;
   const expandable = showFiles && canPickFiles;
 
+  // What the command needs beyond the request: the quantizations, so a whole
+  // one is named by its label rather than shard by shard, and the full listing,
+  // so taking all of a repo that isn't a menu of alternatives is just its name.
+  const commandContext = useMemo(
+    () => ({
+      ...(groups ? {quants: groups} : {}),
+      ...(files ? {repoPaths: files.map((f) => f.path)} : {}),
+      ...(target.cliUrl ? {cliUrl: target.cliUrl} : {}),
+    }),
+    [groups, files, target.cliUrl],
+  );
+
   const command = useMemo(() => {
     if (!parsed || !files || selectedFiles.length === 0) return null;
-    return buildDownloadScript(
+    return buildTjGetCommand(
       {
         repoId: parsed.repoId,
         branch: parsed.branch,
         filePaths: selectedFiles.map((f) => f.path),
+        sendToCold,
+        deleteAfterTransfer,
       },
-      target.displayPath,
+      commandContext,
     );
-  }, [parsed, files, selectedFiles, target.displayPath]);
+  }, [
+    parsed,
+    files,
+    selectedFiles,
+    sendToCold,
+    deleteAfterTransfer,
+    commandContext,
+  ]);
 
   const toggleFile = (path: string, checked: boolean) => {
     setSelectedPaths((prev) => {
@@ -355,13 +376,16 @@ export function HfDownloadPicker({
   const startDownload = () => {
     if (!parsed || selectedFiles.length === 0 || running) return;
     setShowTerminal(true);
-    start({
-      repoId: parsed.repoId,
-      branch: parsed.branch,
-      filePaths: selectedFiles.map((f) => f.path),
-      sendToCold,
-      deleteAfterTransfer,
-    });
+    start(
+      {
+        repoId: parsed.repoId,
+        branch: parsed.branch,
+        filePaths: selectedFiles.map((f) => f.path),
+        sendToCold,
+        deleteAfterTransfer,
+      },
+      commandContext,
+    );
   };
 
   // Closing the terminal returns to the picker (the URL stays).

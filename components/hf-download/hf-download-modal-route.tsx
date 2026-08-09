@@ -1,4 +1,4 @@
-import {config, localModelsDir, localPeer} from '@/lib/config';
+import {config, localPeer} from '@/lib/config';
 import {HfDownloadModal} from '@/components/hf-download/hf-download-modal';
 
 // Server side of the HF download modal. Unlike Lemonade it needs no
@@ -12,7 +12,6 @@ export function HfDownloadModalRoute({location}: {location: string}) {
   return (
     <HfDownloadModal
       activeLocation={location}
-      localModelsPath={localModelsDir ?? ''}
       hfTokenSet={!!process.env.HF_TOKEN}
       peerConfigs={peerConfigs}
     />

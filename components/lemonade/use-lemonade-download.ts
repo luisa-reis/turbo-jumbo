@@ -49,7 +49,7 @@ export function useLemonadeDownload({
   const [showTerminal, setShowTerminal] = useState(false);
   const [downloadTitle, setDownloadTitle] = useState('');
   const {term, progress, running, command, start, startMany, cancel, reset} =
-    useDownloadRunner(target.displayPath, target.url);
+    useDownloadRunner({downloadUrl: target.url, cliUrl: target.cliUrl});
 
   // A single GGUF model: resolve the variant's files in its one repo and run
   // the downloader once. Unchanged from the original single-model path.

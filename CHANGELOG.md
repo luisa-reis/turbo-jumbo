@@ -78,18 +78,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- The Command section of the download dialog now shows a script you can
-  actually run, rather than a lone `hf` line: it changes into the models
-  directory first, and then writes the provenance sidecar the app would have
-  written, staging it in `/tmp` and copying it into place so the only step
-  needing write access to the models directory is a single `cp`. Run an audit
-  afterwards and the hand-placed model is indistinguishable from a downloaded
-  one.
+- The Command section of the download dialog now shows the `tj` command for
+  what you are about to do — say `tj get <repo> --quant UD-IQ3_S` — instead of
+  a shell script that reproduced the download by hand. It is the same request
+  the Download button makes rather than an imitation of it, since `tj get`
+  posts to the same endpoint: the files land where the scanner expects them and
+  the provenance sidecar is written for you, with no here-doc to paste and
+  nothing to run afterwards to make a hand-started download indistinguishable
+  from a clicked one.
 
-  This also corrects the `hf` line itself. It named the models directory as
-  `--local-dir`, but the app downloads into `<models>/<org>/<repo>` — so
-  copying the old command put files a couple of directories above where the app
-  looks for them, under a name derived from the filename instead of the repo.
+  A whole quantization is named by the label the dialog shows; a narrower pick
+  is named file by file; the cold-storage checkboxes become `--to cold` and
+  `--delete-after`; a model pinned to a revision keeps its pin; and a download
+  aimed at another peer carries the `--url` that runs it on that machine
+  instead of this one.
 
 - The check that runs before a copy — the one that finds files already present
   at the destination — no longer re-reads both copies of every file to compare
