@@ -186,6 +186,41 @@ export function LemonadeSyncModal({
     .flatMap((r) => r.files.map((f) => ({repoId: r.repoId, ...f})))
     .filter((f) => f.status === 'error');
 
+  // Every kind of work a run does, in one list so a count of zero simply drops
+  // out. A badge that renders its own absence — "0 linked" after a run that
+  // sorted twenty-seven directories — reads as failure.
+  //
+  // `linked` and `materialized` are opposite directions and were both once
+  // labelled "linked": one imports a Lemonade-only file into Turbo Jumbo, the
+  // other lends a Turbo Jumbo file back to Lemonade.
+  const plural = (n: number, one: string, many = `${one}s`) =>
+    n === 1 ? one : many;
+  const tallies: Array<{
+    label: string;
+    variant: 'success' | 'neutral' | 'error';
+  }> = (
+    [
+      [counts.linked ?? 0, (n: number) => `${n} imported`, 'success'],
+      [counts.deduplicated ?? 0, (n: number) => `${n} deduplicated`, 'success'],
+      [
+        counts.materialized ?? 0,
+        (n: number) => `${n} linked into Lemonade`,
+        'success',
+      ],
+      [
+        counts['stale-removed'] ?? 0,
+        (n: number) => `${n} stale ${plural(n, 'link')} removed`,
+        'success',
+      ],
+      [sorted, (n: number) => `${n} sorted into builtin/extra`, 'success'],
+      [offered, (n: number) => `${n} offered to Lemonade`, 'success'],
+      [counts.skipped ?? 0, (n: number) => `${n} skipped`, 'neutral'],
+      [errors.length, (n: number) => `${n} failed`, 'error'],
+    ] as const
+  )
+    .filter(([n]) => n > 0)
+    .map(([n, label, variant]) => ({label: label(n), variant}));
+
   return (
     <Dialog
       isOpen
@@ -209,6 +244,13 @@ export function LemonadeSyncModal({
                 Turbo Jumbo. Catalog models Turbo Jumbo already has but Lemonade
                 hasn&apos;t downloaded are linked into Lemonade&apos;s cache,
                 and stale links whose files were deleted are removed.
+              </Text>
+              <Text type="supporting">
+                It also keeps Lemonade&apos;s two directories in order: its
+                cache holds what Lemonade lists, and its extra-models directory
+                is offered everything else this machine holds — so a model
+                Lemonade has never heard of can be served from the copy you
+                already have.
               </Text>
 
               {phase === 'loading' && (
@@ -299,48 +341,22 @@ export function LemonadeSyncModal({
 
               {phase === 'done' && (
                 <VStack gap={2}>
-                  <HStack gap={2} vAlign="center">
-                    <Badge
-                      label={`${counts.linked ?? 0} linked`}
-                      variant="success"
-                    />
-                    {counts.deduplicated ? (
-                      <Badge
-                        label={`${counts.deduplicated} deduplicated`}
-                        variant="success"
-                      />
-                    ) : null}
-                    {counts.materialized ? (
-                      <Badge
-                        label={`${counts.materialized} linked`}
-                        variant="success"
-                      />
-                    ) : null}
-                    {counts['stale-removed'] ? (
-                      <Badge
-                        label={`${counts['stale-removed']} stale link${counts['stale-removed'] === 1 ? '' : 's'} removed`}
-                        variant="success"
-                      />
-                    ) : null}
-                    {counts.skipped ? (
-                      <Badge
-                        label={`${counts.skipped} skipped`}
-                        variant="neutral"
-                      />
-                    ) : null}
-                    {errors.length > 0 ? (
-                      <Badge
-                        label={`${errors.length} failed`}
-                        variant="error"
-                      />
-                    ) : null}
-                  </HStack>
-                  <Text type="supporting">
-                    Synced {results.length} model
-                    {results.length === 1 ? '' : 's'}
-                    {sorted > 0 ? `, sorted ${sorted} into builtin/extra` : ''}
-                    {offered > 0 ? `, offered ${offered} to Lemonade` : ''}.
-                  </Text>
+                  {tallies.length > 0 ? (
+                    <HStack gap={2} vAlign="center">
+                      {tallies.map((t) => (
+                        <Badge
+                          key={t.label}
+                          label={t.label}
+                          variant={t.variant}
+                        />
+                      ))}
+                    </HStack>
+                  ) : (
+                    <Text type="body">
+                      Nothing needed changing — Lemonade and Turbo Jumbo were
+                      already in step.
+                    </Text>
+                  )}
                   {errors.map((e, i) => (
                     <Text key={i} type="supporting">
                       {e.repoId}/{e.repoPath}: {e.message}
