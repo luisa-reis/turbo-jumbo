@@ -163,11 +163,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
   in the download, copy, delete and conflict dialogs. They were a mix of two
   sizes before; the smaller one suits lists this dense and keeps table rows
   from being taller than the text in them.
-- **Lemonade's cache is now two directories rather than one**: `builtin/` for
-  the models Lemonade itself knows — the ones its catalog lists, plus the
-  FastFlowLM tags it serves — and `extra/` for everything else, in the same
-  Hugging Face cache layout. One directory could only ever hold what Lemonade
+- **Lemonade's storage is now two directories rather than one**: `builtin/`,
+  the Hugging Face cache holding the models Lemonade itself knows — its catalog
+  plus the FastFlowLM tags it serves — and `extra/`, which is what Lemonade's
+  `--extra-models-dir` reads. One directory could only ever hold what Lemonade
   already believed in; two make room for the models it doesn't list.
+
+  The two are not the same kind of thing, because Lemonade doesn't read them
+  the same way. `builtin/` is a real Hugging Face cache, with `refs/main` and
+  `snapshots/`. `extra/` is a plain tree it scans for `.gguf` files, naming
+  each model after the directory holding it — so Turbo Jumbo gives every model
+  a directory named for its repo and fills it with symlinks, and Lemonade lists
+  `extra.DeepSeek-V4-Flash-0731-GGUF` rather than something derived from a
+  quantization folder. Only GGUF models are offered there: it is all Lemonade
+  loads from that directory, so linking anything else would be a dead entry.
 
   `tj lemonade sync` sorts every cache entry onto the side it belongs on,
   including the ones left at the old single-directory root, and it does so on
@@ -179,9 +188,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
   is sorted at all, since an unanswered request looks exactly like "Lemonade
   lists nothing" and acting on it would sweep the whole library into `extra`.
 
-  **Lemonade has to be pointed at `<lemonade>/builtin` as its cache root.**
-  Until it is, it will find nothing: its models have moved down a level. Give it
-  `<lemonade>/extra` as a second root to serve what its catalog never listed.
+  Sync also keeps `extra/` in step with local storage: a model that stops being
+  held, or that the catalog picks up later, has its links cleared away. A
+  directory there containing a real file is left alone entirely — Lemonade
+  calls that directory user-managed, and a file in it is somebody's own.
+
+  **Two settings on the Lemonade side.** Its cache root has to be
+  `<lemonade>/builtin`, or it will find nothing: its models have moved down a
+  level. And `--extra-models-dir <lemonade>/extra` is what makes the second
+  half visible at all.
 
 - A copy interrupted partway to another machine now picks up where it stopped
   instead of starting the file again. Copies within one machine already did

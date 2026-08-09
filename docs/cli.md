@@ -511,14 +511,28 @@ deduplicating and removing stale links deletes files from Lemonade's cache
 
 `--peer <slug>` syncs on that peer instead of this machine.
 
-Lemonade's cache is split in two: `<lemonade>/builtin` for the models Lemonade
-lists itself (its catalog, plus the FastFlowLM tags it serves) and
-`<lemonade>/extra` for the rest, both in the ordinary Hugging Face cache layout.
-Sync sorts every entry onto the right side on each run, so a model the catalog
-picks up later moves across by itself, and the dry-run shows those moves before
-any happen. **Point Lemonade at `<lemonade>/builtin` as its cache root** — its
-models live a level deeper than they used to — and add `<lemonade>/extra` as a
-second root to serve what its catalog never listed.
+Lemonade's storage is split in two, because Lemonade reads two kinds of thing:
+
+|                      |                          |                                                                                |
+| -------------------- | ------------------------ | ------------------------------------------------------------------------------ |
+| `<lemonade>/builtin` | its Hugging Face cache   | models Lemonade lists itself — its catalog, plus the FastFlowLM tags it serves |
+| `<lemonade>/extra`   | its `--extra-models-dir` | everything else Turbo Jumbo holds locally                                      |
+
+Sync sorts cache entries onto the right side on each run, so a model the
+catalog picks up later moves across by itself, and the dry-run shows those
+moves before any happen.
+
+`extra` is not a cache. Lemonade scans it recursively for `.gguf` files and
+names each model after the directory holding them, so sync gives every model a
+directory named for its repo and fills it with symlinks — Lemonade then lists
+`extra.DeepSeek-V4-Flash-0731-GGUF`. Only GGUF models go there; it loads
+nothing else from that directory. Links for a model that is no longer held
+locally, or that the catalog has since picked up, are cleared away, and a
+directory containing a real file is left alone — that one is yours.
+
+**Both paths have to be set on the Lemonade side**: `<lemonade>/builtin` as its
+cache root (its models live a level deeper than they used to), and
+`--extra-models-dir <lemonade>/extra`.
 
 ### `tj version`
 

@@ -17,6 +17,14 @@ import {
   type Placement,
 } from '@/lib/lemonade/lemonade-place';
 import {
+  planExtraModels,
+  previewExtraModels,
+  syncExtraModels,
+  type ExtraChange,
+  type ExtraModelPlan,
+} from '@/lib/lemonade/lemonade-extra';
+import {scanModels} from '@/lib/models/models';
+import {
   previewLemonadeSync,
   syncLemonadeToTurboJumbo,
   type LemonadeSides,
@@ -74,6 +82,23 @@ async function lemonadeKnowledge(): Promise<{
   return {catalog, listed: listedRepoIds(catalog, flm)};
 }
 
+/**
+ * What to offer Lemonade in its extra-models directory: the models this machine
+ * holds on fast storage that Lemonade's own lists don't cover.
+ *
+ * Local storage only. A model that lives solely in cold storage has no fast
+ * copy to point at, and an entry reaching into the archive would be one
+ * Lemonade could open but shouldn't — serving a model off the slow tier
+ * without saying so.
+ */
+function extraPlans(listed: Set<string>): ExtraModelPlan[] {
+  if (!localModelsDir) return [];
+  const unlisted = scanModels(localModelsDir, lemonadeDir).filter(
+    (m) => !listed.has(m.name),
+  );
+  return planExtraModels(localModelsDir, unlisted);
+}
+
 function sides(): LemonadeSides | null {
   if (!lemonadeBuiltinDir || !lemonadeExtraDir) return null;
   return {
@@ -89,6 +114,8 @@ export interface SyncPreview {
   /** Cache entries sitting on the wrong side of the split, or at the old
    *  single-directory root. Empty once everything is where it belongs. */
   placement: Placement[];
+  /** Links to add to or drop from Lemonade's extra-models directory. */
+  extra: ExtraChange[];
 }
 
 // Preview the changes a sync would make (read-only). Returns an empty preview
@@ -96,13 +123,18 @@ export interface SyncPreview {
 export async function previewSync(): Promise<SyncPreview> {
   const s = sides();
   if (!localModelsDir || !lemonadeDir || !s)
-    return {preview: [], placement: []};
+    return {preview: [], placement: [], extra: []};
   const {catalog, listed} = await lemonadeKnowledge();
-  const [placement, preview] = await Promise.all([
+  const [placement, preview, extra] = await Promise.all([
     planPlacement(lemonadeDir, listed),
     previewLemonadeSync(localModelsDir, s, catalog, listed),
+    previewExtraModels(s.extra, extraPlans(listed)),
   ]);
-  return {preview, placement: placement.filter((p) => p.status !== 'in-place')};
+  return {
+    preview,
+    placement: placement.filter((p) => p.status !== 'in-place'),
+    extra,
+  };
 }
 
 // Execute the sync. Returns null when Lemonade is not configured so callers can
@@ -110,6 +142,7 @@ export async function previewSync(): Promise<SyncPreview> {
 export async function runSync(): Promise<{
   results: SyncModelResult[];
   placement: Placement[];
+  extra: ExtraChange[];
 } | null> {
   const s = sides();
   if (!localModelsDir || !lemonadeDir || !s) return null;
@@ -118,8 +151,12 @@ export async function runSync(): Promise<{
   // on the side it belongs on rather than wherever it happened to be.
   const placement = await placeRepos(lemonadeDir, listed);
   const results = await syncLemonadeToTurboJumbo(localModelsDir, s, catalog);
+  // Last, because it reflects what local storage holds once the passes above
+  // have finished moving things into it.
+  const extra = await syncExtraModels(s.extra, extraPlans(listed));
   return {
     results,
     placement: placement.filter((p) => p.status !== 'in-place'),
+    extra,
   };
 }

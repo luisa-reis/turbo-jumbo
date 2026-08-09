@@ -7,6 +7,7 @@ import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
 import {confirmDestructive, type ConfirmIo} from '@/lib/cli/confirm';
 import type {Placement} from '@/lib/lemonade/lemonade-place';
+import type {ExtraChange} from '@/lib/lemonade/lemonade-extra';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
   matchEntries,
@@ -526,9 +527,10 @@ async function lemonadeSync(
   const base = await syncPath(client, inv);
 
   if (inv.dryRun) {
-    const {preview, placement} = await client.json<{
+    const {preview, placement, extra} = await client.json<{
       preview: LemonadeSyncPreview[];
       placement: Placement[];
+      extra: ExtraChange[];
     }>(base);
     const columns: Column<LemonadeSyncPreview>[] = [
       {header: 'REPO', value: (p) => p.repoId},
@@ -548,15 +550,17 @@ async function lemonadeSync(
       }),
       {move: 0, dedup: 0, link: 0, stale: 0},
     );
-    const nothing = preview.length === 0 && placement.length === 0;
+    const nothing =
+      preview.length === 0 && placement.length === 0 && extra.length === 0;
     return {
-      json: {dryRun: true, preview, placement, totals},
+      json: {dryRun: true, preview, placement, extra, totals},
       table: nothing
         ? 'Nothing to sync.'
         : [
             ...(placement.length > 0
               ? [renderPlacement(placement, color), '']
               : []),
+            ...(extra.length > 0 ? [renderExtra(extra, color), ''] : []),
             ...(preview.length > 0
               ? [
                   renderTable(columns, preview, color),
@@ -594,19 +598,39 @@ async function lemonadeSync(
       `Sync failed: ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`,
     );
   }
-  const {results, placement} = (await res.json()) as {
+  const {results, placement, extra} = (await res.json()) as {
     results: Array<{repoId: string; rev: string; files: unknown[]}>;
     placement: Placement[];
+    extra: ExtraChange[];
   };
   const fileCount = results.reduce((s, r) => s + r.files.length, 0);
   const sorted = (placement ?? []).filter((p) => p.status === 'moved').length;
+  const offered = (extra ?? []).filter((e) => e.toLink > 0).length;
   return {
-    json: {results, placement},
+    json: {results, placement, extra},
     table:
       `synced ${results.length} model(s) · ${fileCount} file(s)` +
-      (sorted > 0 ? ` · sorted ${sorted} into builtin/extra` : ''),
+      (sorted > 0 ? ` · sorted ${sorted} into builtin/extra` : '') +
+      (offered > 0 ? ` · offered ${offered} model(s) in extra` : ''),
     quiet: results.map((r) => r.repoId),
   };
+}
+
+/** The models being offered to Lemonade through its extra-models directory,
+ *  named as Lemonade will list them so the name here is the name there. */
+function renderExtra(extra: ExtraChange[], color: boolean): string {
+  const columns: Column<ExtraChange>[] = [
+    {header: 'MODEL', value: (e) => `extra.${e.folder}`},
+    {header: 'REPO', value: (e) => e.repoId},
+    {header: 'LINK', value: (e) => String(e.toLink), align: 'right'},
+    {header: 'DROP', value: (e) => String(e.toRemove), align: 'right'},
+  ];
+  return [
+    renderTable(columns, extra, color),
+    '',
+    "Offered to Lemonade's extra-models directory as symlinks — GGUF only, " +
+      'since that is all it loads from there.',
+  ].join('\n');
 }
 
 /** What sorting the cache into its two halves would do, or did. Conflicts are
