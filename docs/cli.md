@@ -511,6 +511,15 @@ deduplicating and removing stale links deletes files from Lemonade's cache
 
 `--peer <slug>` syncs on that peer instead of this machine.
 
+Lemonade's cache is split in two: `<lemonade>/builtin` for the models Lemonade
+lists itself (its catalog, plus the FastFlowLM tags it serves) and
+`<lemonade>/extra` for the rest, both in the ordinary Hugging Face cache layout.
+Sync sorts every entry onto the right side on each run, so a model the catalog
+picks up later moves across by itself, and the dry-run shows those moves before
+any happen. **Point Lemonade at `<lemonade>/builtin` as its cache root** — its
+models live a level deeper than they used to — and add `<lemonade>/extra` as a
+second root to serve what its catalog never listed.
+
 ### `tj version`
 
 ```console

@@ -8,6 +8,18 @@ import {
   type TjModelFile,
 } from '@/lib/models/model-sidecar';
 import {MIXED_COMMIT} from '@/lib/models/sidecar-types';
+import {LEMONADE_SIDES, type LemonadeSide} from '@/lib/lemonade/lemonade-sides';
+
+/** The two halves of Lemonade's cache, as absolute paths. */
+export interface LemonadeSides {
+  builtin: string;
+  extra: string;
+}
+
+/** Each side's directory, paired with its name. */
+function sideDirs(sides: LemonadeSides): Array<[LemonadeSide, string]> {
+  return LEMONADE_SIDES.map((s) => [s, sides[s]] as [LemonadeSide, string]);
+}
 
 // Sync Lemonade and Turbo Jumbo so a single copy on disk serves both, via the
 // Lemonade HuggingFace-cache layout `models--<org>--<repo>/snapshots/<rev>/…`
@@ -49,7 +61,7 @@ export interface SyncModelResult {
 }
 
 /** Decode a `models--<org>--<repo>` directory name into its repo id, or null. */
-function decodeRepoDir(dirName: string): string | null {
+export function decodeRepoDir(dirName: string): string | null {
   if (!dirName.startsWith('models--')) return null;
   const repoId = dirName.slice('models--'.length).replaceAll('--', '/');
   return REPO_ID_RE.test(repoId) ? repoId : null;
@@ -172,6 +184,8 @@ export async function findLemonadeOnlyRepos(
 
 export interface LemonadeSyncPreview {
   repoId: string;
+  /** Which half of the cache this entry lives on, or is headed for. */
+  side: LemonadeSide;
   rev: string; // empty when blocked — there is no revision to show
   moveCount: number; // Lemonade-only files that would move into Turbo Jumbo
   dedupCount: number; // files Turbo Jumbo already holds — Lemonade copy deleted
@@ -189,42 +203,49 @@ export interface LemonadeSyncPreview {
  *  actionable files are omitted. */
 export async function previewLemonadeSync(
   tjBase: string,
-  lemonadeBase: string,
+  sides: LemonadeSides,
   catalogRepoIds: string[] = [],
 ): Promise<LemonadeSyncPreview[]> {
   const tj = nodePath.resolve(tjBase);
   const out: LemonadeSyncPreview[] = [];
-  // Cache repos: move/dedup.
-  for (const repo of await listLemonadeRepos(lemonadeBase)) {
-    const entries = await walkSnapshot(
-      nodePath.join(repo.dir, 'snapshots', repo.rev),
-    );
-    let moveCount = 0;
-    let dedupCount = 0;
-    let staleCount = 0;
-    for (const entry of entries) {
-      const {action} = await planFile(tj, repo.repoId, entry);
-      if (action === 'move') moveCount++;
-      else if (action === 'dedup') dedupCount++;
-      else if (action === 'stale') staleCount++;
+  // Cache repos on both sides: move/dedup. Consolidation doesn't care which
+  // half an entry sits on — a Lemonade-only file is worth pulling into Turbo
+  // Jumbo wherever Lemonade keeps it.
+  for (const [side, dir] of sideDirs(sides)) {
+    for (const repo of await listLemonadeRepos(dir)) {
+      const entries = await walkSnapshot(
+        nodePath.join(repo.dir, 'snapshots', repo.rev),
+      );
+      let moveCount = 0;
+      let dedupCount = 0;
+      let staleCount = 0;
+      for (const entry of entries) {
+        const {action} = await planFile(tj, repo.repoId, entry);
+        if (action === 'move') moveCount++;
+        else if (action === 'dedup') dedupCount++;
+        else if (action === 'stale') staleCount++;
+      }
+      if (moveCount + dedupCount + staleCount > 0)
+        out.push({
+          repoId: repo.repoId,
+          side,
+          rev: repo.rev,
+          moveCount,
+          dedupCount,
+          linkCount: 0,
+          staleCount,
+        });
     }
-    if (moveCount + dedupCount + staleCount > 0)
-      out.push({
-        repoId: repo.repoId,
-        rev: repo.rev,
-        moveCount,
-        dedupCount,
-        linkCount: 0,
-        staleCount,
-      });
   }
-  // Catalog models to materialize into Lemonade.
+  // Catalog models to materialize, always into the side Lemonade reads as its
+  // own: these are the models it lists.
   for (const repoId of catalogRepoIds) {
-    const plan = await planMaterialize(tj, lemonadeBase, repoId);
+    const plan = await planMaterialize(tj, sides.builtin, repoId);
     if (!plan) continue;
     if (plan.rev === null) {
       out.push({
         repoId,
+        side: 'builtin',
         rev: '',
         moveCount: 0,
         dedupCount: 0,
@@ -235,6 +256,7 @@ export async function previewLemonadeSync(
     } else {
       out.push({
         repoId,
+        side: 'builtin',
         rev: plan.rev,
         moveCount: 0,
         dedupCount: 0,
@@ -572,27 +594,34 @@ export async function syncLemonadeRepo(
  */
 export async function syncLemonadeToTurboJumbo(
   tjBase: string,
-  lemonadeBase: string,
+  sides: LemonadeSides,
   catalogRepoIds: string[] = [],
 ): Promise<SyncModelResult[]> {
   const out: SyncModelResult[] = [];
-  // Pass 1: Lemonade cache → Turbo Jumbo (move + dedup).
-  for (const repo of await listLemonadeRepos(lemonadeBase)) {
-    const result = await syncLemonadeRepo(tjBase, repo);
-    if (
-      result.files.some(
-        (f) =>
-          f.status === 'linked' ||
-          f.status === 'deduplicated' ||
-          f.status === 'stale-removed',
-      )
-    ) {
-      out.push(result);
+  // Pass 1: Lemonade cache → Turbo Jumbo (move + dedup), both halves.
+  for (const [, dir] of sideDirs(sides)) {
+    for (const repo of await listLemonadeRepos(dir)) {
+      const result = await syncLemonadeRepo(tjBase, repo);
+      if (
+        result.files.some(
+          (f) =>
+            f.status === 'linked' ||
+            f.status === 'deduplicated' ||
+            f.status === 'stale-removed',
+        )
+      ) {
+        out.push(result);
+      }
     }
   }
-  // Pass 2: Turbo Jumbo → Lemonade cache (materialize catalog models as links).
+  // Pass 2: Turbo Jumbo → Lemonade cache (materialize catalog models as links),
+  // into the half Lemonade treats as its own.
   for (const repoId of catalogRepoIds) {
-    const result = await materializeLemonadeModel(tjBase, lemonadeBase, repoId);
+    const result = await materializeLemonadeModel(
+      tjBase,
+      sides.builtin,
+      repoId,
+    );
     if (result?.files.some((f) => f.status === 'materialized'))
       out.push(result);
   }

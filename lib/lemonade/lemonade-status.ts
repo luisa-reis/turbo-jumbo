@@ -14,6 +14,7 @@ import type {
   OmniCollection,
 } from '@/lib/lemonade/lemonade-types';
 import {FILENAME_VARIANT_RE, baseName} from '@/lib/lemonade/lemonade-plan';
+import {LEMONADE_SIDES, type LemonadeSide} from '@/lib/lemonade/lemonade-sides';
 
 // Strip a `-NNNNN-of-MMMMM` shard suffix that sits just before the extension,
 // so a split group's representative filename can be compared to a Lemonade
@@ -253,6 +254,25 @@ export function modelInLemonadeCache(
   cacheModels: Model[],
 ): boolean {
   return locationStatus(model, cacheModels) !== 'none';
+}
+
+/**
+ * Which half of Lemonade's cache holds a model, or null if neither does.
+ *
+ * `builtin` wins when both do: that is the half Lemonade reads as its own, so
+ * it is the copy actually being served, and a leftover on the other side is
+ * something the next sync will report as a conflict rather than a location.
+ */
+export function modelCacheSide(
+  model: LemonadeModel,
+  cacheModels: Array<Model & {side?: LemonadeSide}>,
+): LemonadeSide | null {
+  for (const side of LEMONADE_SIDES) {
+    const onSide = cacheModels.filter((m) => m.side === side);
+    if (onSide.length > 0 && locationStatus(model, onSide) !== 'none')
+      return side;
+  }
+  return null;
 }
 
 /** Whether any of an omni component's checkpoints is in the Lemonade cache. */

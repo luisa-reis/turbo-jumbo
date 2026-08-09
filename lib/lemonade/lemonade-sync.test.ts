@@ -34,22 +34,27 @@ async function lemonadeRepo(
 
 async function mkdirs() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-lemsync-'));
+  const lem = path.join(root, 'lemonade');
   return {
     root,
     tj: path.join(root, 'turbo-jumbo'),
-    lem: path.join(root, 'lemonade'),
+    lem,
+    // Consolidating and materializing don't care which half of the cache an
+    // entry sits on, so these fixtures keep to one; sorting entries between the
+    // halves is `lemonade-place` and has its own tests.
+    sides: {builtin: lem, extra: path.join(root, 'lemonade-extra')},
   };
 }
 
 test('syncs a Lemonade-only model: moves files into TJ, symlinks them back', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = '047e06635fbe71469926b35ea414537245218200';
   await lemonadeRepo(lem, 'LiquidAI', 'LFM2.5-GGUF', rev, {
     'model.gguf': 'WEIGHTS',
     'config/index.json': '{}', // nested path
   });
 
-  const results = await syncLemonadeToTurboJumbo(tj, lem);
+  const results = await syncLemonadeToTurboJumbo(tj, sides);
   expect(results.map((r) => r.repoId)).toEqual(['LiquidAI/LFM2.5-GGUF']);
 
   // Turbo Jumbo now holds the real files.
@@ -86,24 +91,24 @@ test('syncs a Lemonade-only model: moves files into TJ, symlinks them back', asy
 });
 
 test('is idempotent: a second run finds nothing to sync', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'abc123';
   await lemonadeRepo(lem, 'org', 'repo', rev, {'a.bin': 'A'});
 
-  expect((await syncLemonadeToTurboJumbo(tj, lem)).length).toBe(1);
+  expect((await syncLemonadeToTurboJumbo(tj, sides)).length).toBe(1);
   // After the first sync the repo lives in TJ, so it's no longer Lemonade-only.
   expect(await findLemonadeOnlyRepos(tj, lem)).toEqual([]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides)).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('leaves a model alone when Turbo Jumbo holds a different (size) file', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'deadbeef';
   await write(tj, 'org/repo/a.bin', 'TJ-COPY'); // 7 bytes
   await lemonadeRepo(lem, 'org', 'repo', rev, {'a.bin': 'LEM-COPY-X'}); // 10 bytes
 
-  expect(await syncLemonadeToTurboJumbo(tj, lem)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides)).toEqual([]);
   // Both copies are untouched — neither is the other.
   const lemFile = path.join(lem, `models--org--repo/snapshots/${rev}/a.bin`);
   expect((await fsp.lstat(lemFile)).isSymbolicLink()).toBe(false);
@@ -115,12 +120,12 @@ test('leaves a model alone when Turbo Jumbo holds a different (size) file', asyn
 });
 
 test('deduplicates a model in both stores: deletes the Lemonade copy, symlinks to TJ', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'rev-dup';
   await write(tj, 'org/repo/a.bin', 'SAME'); // Turbo Jumbo already owns it
   await lemonadeRepo(lem, 'org', 'repo', rev, {'a.bin': 'SAME'}); // identical size
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
   expect(result.files).toEqual([{repoPath: 'a.bin', status: 'deduplicated'}]);
 
   // The Turbo Jumbo copy is untouched (still a real file).
@@ -135,12 +140,12 @@ test('deduplicates a model in both stores: deletes the Lemonade copy, symlinks t
   expect(await fsp.readFile(lemFile, 'utf8')).toBe('SAME');
 
   // Idempotent: a second run has nothing left to do.
-  expect(await syncLemonadeToTurboJumbo(tj, lem)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides)).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('preview splits actionable files into move vs deduplicate, omitting no-ops', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   // Lemonade-only → move (two files).
   await lemonadeRepo(lem, 'org', 'only', 'r1', {'a.bin': 'AA', 'b.bin': 'BBB'});
   // Identical copy already in TJ → deduplicate.
@@ -151,7 +156,7 @@ test('preview splits actionable files into move vs deduplicate, omitting no-ops'
   await lemonadeRepo(lem, 'org', 'diff', 'r3', {'d.bin': 'LEMONADE-DIFFERENT'});
 
   const byId = new Map(
-    (await previewLemonadeSync(tj, lem)).map((p) => [p.repoId, p]),
+    (await previewLemonadeSync(tj, sides)).map((p) => [p.repoId, p]),
   );
   expect(byId.get('org/only')).toMatchObject({moveCount: 2, dedupCount: 0});
   expect(byId.get('org/dup')).toMatchObject({moveCount: 0, dedupCount: 1});
@@ -185,13 +190,13 @@ async function syncedRepo(
 }
 
 test('skips a model already synced (its files are symlinks into Turbo Jumbo)', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'synced';
   await syncedRepo(lem, tj, 'org', 'done', rev, {'m.bin': 'DATA'});
 
   // Neither the preview nor a run treats an already-linked model as work.
-  expect(await previewLemonadeSync(tj, lem)).toEqual([]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem)).toEqual([]);
+  expect(await previewLemonadeSync(tj, sides)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides)).toEqual([]);
 
   // The existing symlink is left exactly as it was.
   const lemFile = path.join(lem, `models--org--done/snapshots/${rev}/m.bin`);
@@ -203,7 +208,7 @@ test('skips a model already synced (its files are symlinks into Turbo Jumbo)', a
 });
 
 test('in a partially-synced model, acts only on the un-synced file', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'partial';
   // old.bin already linked into TJ; new.bin is a fresh real file.
   await syncedRepo(
@@ -217,10 +222,11 @@ test('in a partially-synced model, acts only on the un-synced file', async () =>
   );
 
   // Only the un-synced file is counted as work.
-  expect(await previewLemonadeSync(tj, lem)).toEqual([
+  expect(await previewLemonadeSync(tj, sides)).toEqual([
     {
       repoId: 'org/part',
       rev,
+      side: 'builtin',
       moveCount: 1,
       dedupCount: 0,
       linkCount: 0,
@@ -228,7 +234,7 @@ test('in a partially-synced model, acts only on the un-synced file', async () =>
     },
   ]);
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
   expect(result.files).toContainEqual({repoPath: 'new.bin', status: 'linked'});
   expect(result.files).toContainEqual({
     repoPath: 'old.bin',
@@ -250,7 +256,7 @@ test('in a partially-synced model, acts only on the un-synced file', async () =>
 });
 
 test('preview counts a dangling snapshot link as stale', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'stale-rev';
   // One healthy link, one whose Turbo Jumbo target is then deleted.
   await syncedRepo(lem, tj, 'org', 'stale', rev, {
@@ -259,10 +265,11 @@ test('preview counts a dangling snapshot link as stale', async () => {
   });
   await fsp.rm(path.join(tj, 'org/stale/gone.bin'));
 
-  expect(await previewLemonadeSync(tj, lem)).toEqual([
+  expect(await previewLemonadeSync(tj, sides)).toEqual([
     {
       repoId: 'org/stale',
       rev,
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 0,
@@ -273,7 +280,7 @@ test('preview counts a dangling snapshot link as stale', async () => {
 });
 
 test('sync removes a dangling snapshot link and leaves healthy links alone', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'stale-run';
   await syncedRepo(lem, tj, 'org', 'stale', rev, {
     'kept.bin': 'KEPT',
@@ -281,7 +288,7 @@ test('sync removes a dangling snapshot link and leaves healthy links alone', asy
   });
   await fsp.rm(path.join(tj, 'org/stale/gone.bin'));
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
   expect(result.repoId).toBe('org/stale');
   expect(result.files).toContainEqual({
     repoPath: 'gone.bin',
@@ -301,7 +308,7 @@ test('sync removes a dangling snapshot link and leaves healthy links alone', asy
   expect(await fsp.readFile(path.join(snap, 'kept.bin'), 'utf8')).toBe('KEPT');
 
   // Idempotent: with the stale link cleared, a re-run finds nothing.
-  expect(await syncLemonadeToTurboJumbo(tj, lem)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides)).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
@@ -335,7 +342,7 @@ async function tjModel(
 }
 
 test('materializes a catalog model Turbo Jumbo has but Lemonade lacks (symlinks + refs/main)', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'cafebabe0000';
   await tjModel(tj, 'org/cat', rev, {
     'model.gguf': 'WEIGHTS',
@@ -343,10 +350,11 @@ test('materializes a catalog model Turbo Jumbo has but Lemonade lacks (symlinks 
   });
 
   // Preview lists it as a link, not a move/dedup.
-  expect(await previewLemonadeSync(tj, lem, ['org/cat'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/cat'])).toEqual([
     {
       repoId: 'org/cat',
       rev,
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 2,
@@ -354,7 +362,7 @@ test('materializes a catalog model Turbo Jumbo has but Lemonade lacks (symlinks 
     },
   ]);
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem, ['org/cat']);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides, ['org/cat']);
   expect(result.rev).toBe(rev);
   expect(result.files.every((f) => f.status === 'materialized')).toBe(true);
 
@@ -371,12 +379,12 @@ test('materializes a catalog model Turbo Jumbo has but Lemonade lacks (symlinks 
   expect(existsSync(path.join(snap, 'tjmodel.json'))).toBe(false);
 
   // Idempotent: every file is now linked, so a re-run does nothing.
-  expect(await syncLemonadeToTurboJumbo(tj, lem, ['org/cat'])).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, ['org/cat'])).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('materializes files missing from an existing cache entry into its snapshot', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   // An existing, healthy cache entry for one file…
   await syncedRepo(lem, tj, 'org', 'grow', 'entry-rev', {'kept.bin': 'KEPT'});
   // …while Turbo Jumbo also holds a file the entry lacks. The sidecar records a
@@ -394,10 +402,11 @@ test('materializes files missing from an existing cache entry into its snapshot'
     }),
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/grow'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/grow'])).toEqual([
     {
       repoId: 'org/grow',
       rev: 'entry-rev',
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 1,
@@ -405,7 +414,7 @@ test('materializes files missing from an existing cache entry into its snapshot'
     },
   ]);
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem, ['org/grow']);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides, ['org/grow']);
   expect(result.rev).toBe('entry-rev');
   expect(result.files).toEqual([
     {repoPath: 'new.gguf', status: 'materialized'},
@@ -419,12 +428,12 @@ test('materializes files missing from an existing cache entry into its snapshot'
   expect(await fsp.readFile(path.join(snap, 'kept.bin'), 'utf8')).toBe('KEPT');
 
   // Idempotent: with the entry complete, a re-run does nothing.
-  expect(await syncLemonadeToTurboJumbo(tj, lem, ['org/grow'])).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, ['org/grow'])).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('one sync clears a stale link and links the replacement file in', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'phi-rev';
   // The Phi-4 shape: the entry's only link went dangling (its quant was deleted
   // from Turbo Jumbo), while Turbo Jumbo holds a different quant.
@@ -442,7 +451,7 @@ test('one sync clears a stale link and links the replacement file in', async () 
     }),
   );
 
-  const results = await syncLemonadeToTurboJumbo(tj, lem, ['org/phi']);
+  const results = await syncLemonadeToTurboJumbo(tj, sides, ['org/phi']);
   const files = results.flatMap((r) => r.files);
   expect(files).toContainEqual({
     repoPath: 'old-Q6.gguf',
@@ -462,7 +471,7 @@ test('one sync clears a stale link and links the replacement file in', async () 
 });
 
 test('materialize ignores hf-CLI .cache metadata alongside the weights', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, sides} = await mkdirs();
   const rev = 'cache-rev';
   await tjModel(tj, 'org/hascache', rev, {'model.gguf': 'WEIGHTS'});
   await write(
@@ -471,10 +480,11 @@ test('materialize ignores hf-CLI .cache metadata alongside the weights', async (
     'META',
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/hascache'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/hascache'])).toEqual([
     {
       repoId: 'org/hascache',
       rev,
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 1,
@@ -482,7 +492,7 @@ test('materialize ignores hf-CLI .cache metadata alongside the weights', async (
     },
   ]);
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem, ['org/hascache']);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides, ['org/hascache']);
   expect(result.files).toEqual([
     {repoPath: 'model.gguf', status: 'materialized'},
   ]);
@@ -490,7 +500,7 @@ test('materialize ignores hf-CLI .cache metadata alongside the weights', async (
 });
 
 test('a dir holding only .cache metadata and sidecars is not a candidate', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   // The husk a deletion leaves behind: sidecars + hf-CLI download metadata,
   // no weights. It must not appear in the preview at all — not even blocked.
   await write(
@@ -509,14 +519,14 @@ test('a dir holding only .cache metadata and sidecars is not a candidate', async
     'META',
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/ghost'])).toEqual([]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem, ['org/ghost'])).toEqual([]);
+  expect(await previewLemonadeSync(tj, sides, ['org/ghost'])).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, ['org/ghost'])).toEqual([]);
   expect(existsSync(path.join(lem, 'models--org--ghost'))).toBe(false);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('does not materialize when Turbo Jumbo lacks the model or a recorded revision', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   // In TJ but no repoCommit recorded → can't name the snapshot dir. The model
   // is surfaced as blocked in the preview (not silently omitted), but a run
   // still won't touch it.
@@ -533,10 +543,11 @@ test('does not materialize when Turbo Jumbo lacks the model or a recorded revisi
   // Not in TJ at all.
   const repoIds = ['org/norev', 'org/absent'];
 
-  expect(await previewLemonadeSync(tj, lem, repoIds)).toEqual([
+  expect(await previewLemonadeSync(tj, sides, repoIds)).toEqual([
     {
       repoId: 'org/norev',
       rev: '',
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 0,
@@ -544,19 +555,20 @@ test('does not materialize when Turbo Jumbo lacks the model or a recorded revisi
       blocked: 'no-revision',
     },
   ]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem, repoIds)).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, repoIds)).toEqual([]);
   expect(existsSync(path.join(lem, 'models--org--norev'))).toBe(false);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('a model without a sidecar at all is likewise surfaced as blocked', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, sides} = await mkdirs();
   await write(tj, 'org/bare/m.bin', 'X');
 
-  expect(await previewLemonadeSync(tj, lem, ['org/bare'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/bare'])).toEqual([
     {
       repoId: 'org/bare',
       rev: '',
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 0,
@@ -564,12 +576,12 @@ test('a model without a sidecar at all is likewise surfaced as blocked', async (
       blocked: 'no-revision',
     },
   ]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem, ['org/bare'])).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, ['org/bare'])).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('materializes a sidecar-less model from its files own tjmeta commits', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   // A fresh download: real file + per-file tjmeta, no tjmodel.json yet.
   const rev = 'feedface1111';
   await write(tj, 'org/fresh/model.gguf', 'WEIGHTS');
@@ -579,10 +591,11 @@ test('materializes a sidecar-less model from its files own tjmeta commits', asyn
     JSON.stringify({sourceCommit: rev}),
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/fresh'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/fresh'])).toEqual([
     {
       repoId: 'org/fresh',
       rev,
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 1,
@@ -590,7 +603,7 @@ test('materializes a sidecar-less model from its files own tjmeta commits', asyn
     },
   ]);
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem, ['org/fresh']);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides, ['org/fresh']);
   expect(result.rev).toBe(rev);
   expect(result.files).toEqual([
     {repoPath: 'model.gguf', status: 'materialized'},
@@ -602,7 +615,7 @@ test('materializes a sidecar-less model from its files own tjmeta commits', asyn
 });
 
 test('materializes from a sidecar with only a file-derived sourceCommit', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, sides} = await mkdirs();
   // The Lemonade-download flow writes tjmodel.json with sourceCommit (derived
   // from the files) but no repo-level repoCommit.
   const rev = 'deadbeef2222';
@@ -618,17 +631,18 @@ test('materializes from a sidecar with only a file-derived sourceCommit', async 
     }),
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/lem'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/lem'])).toEqual([
     {
       repoId: 'org/lem',
       rev,
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 1,
       staleCount: 0,
     },
   ]);
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem, ['org/lem']);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides, ['org/lem']);
   expect(result.rev).toBe(rev);
   expect(result.files).toEqual([
     {repoPath: 'model.gguf', status: 'materialized'},
@@ -637,7 +651,7 @@ test('materializes from a sidecar with only a file-derived sourceCommit', async 
 });
 
 test('stays blocked when the files tjmeta commits disagree', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, sides} = await mkdirs();
   await write(tj, 'org/mixed/a.gguf', 'A');
   await write(
     tj,
@@ -651,10 +665,11 @@ test('stays blocked when the files tjmeta commits disagree', async () => {
     JSON.stringify({sourceCommit: 'bbb'}),
   );
 
-  expect(await previewLemonadeSync(tj, lem, ['org/mixed'])).toEqual([
+  expect(await previewLemonadeSync(tj, sides, ['org/mixed'])).toEqual([
     {
       repoId: 'org/mixed',
       rev: '',
+      side: 'builtin',
       moveCount: 0,
       dedupCount: 0,
       linkCount: 0,
@@ -662,12 +677,12 @@ test('stays blocked when the files tjmeta commits disagree', async () => {
       blocked: 'no-revision',
     },
   ]);
-  expect(await syncLemonadeToTurboJumbo(tj, lem, ['org/mixed'])).toEqual([]);
+  expect(await syncLemonadeToTurboJumbo(tj, sides, ['org/mixed'])).toEqual([]);
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('resolves the revision from a sole snapshots dir when refs/main is absent', async () => {
-  const {root, tj, lem} = await mkdirs();
+  const {root, tj, lem, sides} = await mkdirs();
   const rev = 'no-ref-rev';
   await lemonadeRepo(
     lem,
@@ -678,10 +693,35 @@ test('resolves the revision from a sole snapshots dir when refs/main is absent',
     {withRef: false},
   );
 
-  const [result] = await syncLemonadeToTurboJumbo(tj, lem);
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
   expect(result?.rev).toBe(rev);
   expect(await fsp.readFile(path.join(tj, 'org/repo2/w.bin'), 'utf8')).toBe(
     'W',
+  );
+  await fsp.rm(root, {recursive: true, force: true});
+});
+
+test('consolidates entries on the extra side too, and says which side they were on', async () => {
+  // A model Lemonade's catalog never listed still has its files pulled into
+  // Turbo Jumbo — being unlisted decides which half it is kept on, not whether
+  // it is worth consolidating.
+  const {root, tj, sides} = await mkdirs();
+  await lemonadeRepo(sides.builtin, 'org', 'listed', 'r1', {'a.bin': 'AA'});
+  await lemonadeRepo(sides.extra, 'org', 'unlisted', 'r2', {'b.bin': 'BBB'});
+
+  const preview = await previewLemonadeSync(tj, sides);
+  expect(preview.map((p) => [p.repoId, p.side, p.moveCount]).sort()).toEqual([
+    ['org/listed', 'builtin', 1],
+    ['org/unlisted', 'extra', 1],
+  ]);
+
+  const results = await syncLemonadeToTurboJumbo(tj, sides);
+  expect(results.map((r) => r.repoId).sort()).toEqual([
+    'org/listed',
+    'org/unlisted',
+  ]);
+  expect(await fsp.readFile(path.join(tj, 'org/unlisted/b.bin'), 'utf8')).toBe(
+    'BBB',
   );
   await fsp.rm(root, {recursive: true, force: true});
 });

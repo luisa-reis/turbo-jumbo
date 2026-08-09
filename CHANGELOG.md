@@ -163,6 +163,26 @@ and versions follow [Semantic Versioning](https://semver.org/).
   in the download, copy, delete and conflict dialogs. They were a mix of two
   sizes before; the smaller one suits lists this dense and keeps table rows
   from being taller than the text in them.
+- **Lemonade's cache is now two directories rather than one**: `builtin/` for
+  the models Lemonade itself knows — the ones its catalog lists, plus the
+  FastFlowLM tags it serves — and `extra/` for everything else, in the same
+  Hugging Face cache layout. One directory could only ever hold what Lemonade
+  already believed in; two make room for the models it doesn't list.
+
+  `tj lemonade sync` sorts every cache entry onto the side it belongs on,
+  including the ones left at the old single-directory root, and it does so on
+  every run rather than once — a model sitting in `extra` becomes a `builtin`
+  one the day the catalog picks it up. `--dry-run` shows the whole plan first.
+  A repo somehow present on both sides is reported and neither copy is touched:
+  one of them is stale, but which one holds real downloaded bytes is not a
+  thing to guess at with a delete. And if the catalog can't be reached, nothing
+  is sorted at all, since an unanswered request looks exactly like "Lemonade
+  lists nothing" and acting on it would sweep the whole library into `extra`.
+
+  **Lemonade has to be pointed at `<lemonade>/builtin` as its cache root.**
+  Until it is, it will find nothing: its models have moved down a level. Give it
+  `<lemonade>/extra` as a second root to serve what its catalog never listed.
+
 - A copy interrupted partway to another machine now picks up where it stopped
   instead of starting the file again. Copies within one machine already did
   this; sending to a peer did not, because the sender can't see the receiver's

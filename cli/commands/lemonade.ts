@@ -6,6 +6,7 @@ import {runTransfer, summarise, type TransferResult} from '@/cli/transfer';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
 import {confirmDestructive, type ConfirmIo} from '@/lib/cli/confirm';
+import type {Placement} from '@/lib/lemonade/lemonade-place';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
   matchEntries,
@@ -23,7 +24,7 @@ import {
   componentDownloadStatus,
   componentInLemonadeCache,
   lemonadeDownloadStatus,
-  modelInLemonadeCache,
+  modelCacheSide,
 } from '@/lib/lemonade/lemonade-status';
 import type {
   DownloadStatus,
@@ -32,6 +33,7 @@ import type {
   LemonadeModel,
 } from '@/lib/lemonade/lemonade-types';
 import type {LemonadeSyncPreview} from '@/lib/lemonade/lemonade-sync';
+import type {CachedModel} from '@/lib/lemonade/lemonade-cache-scan';
 import type {Model} from '@/lib/models/model-types';
 
 type HfFile = {path: string; size: number};
@@ -376,7 +378,8 @@ interface CatalogRow {
 /** A catalog GGUF model's row. */
 function row(m: LemonadeModel, cache: Model[], local: Model[]): CatalogRow {
   const where: string[] = [];
-  if (modelInLemonadeCache(m, cache)) where.push('lemonade');
+  const side = modelCacheSide(m, cache);
+  if (side) where.push(`lemonade (${side})`);
   return {
     name: m.name,
     repoId: m.repoId,
@@ -474,7 +477,7 @@ async function lemonadeLs(
 ): Promise<CommandOutput> {
   const [entries, cache, local] = await Promise.all([
     lemonadeEntries(client, inv),
-    client.json<Model[]>('/api/v1/lemonade-cache'),
+    client.json<CachedModel[]>('/api/v1/lemonade-cache'),
     client.json<Model[]>('/api/v1/local-models'),
   ]);
 
@@ -523,9 +526,13 @@ async function lemonadeSync(
   const base = await syncPath(client, inv);
 
   if (inv.dryRun) {
-    const {preview} = await client.json<{preview: LemonadeSyncPreview[]}>(base);
+    const {preview, placement} = await client.json<{
+      preview: LemonadeSyncPreview[];
+      placement: Placement[];
+    }>(base);
     const columns: Column<LemonadeSyncPreview>[] = [
       {header: 'REPO', value: (p) => p.repoId},
+      {header: 'SIDE', value: (p) => p.side},
       {header: 'MOVE', value: (p) => String(p.moveCount), align: 'right'},
       {header: 'DEDUP', value: (p) => String(p.dedupCount), align: 'right'},
       {header: 'LINK', value: (p) => String(p.linkCount), align: 'right'},
@@ -541,20 +548,27 @@ async function lemonadeSync(
       }),
       {move: 0, dedup: 0, link: 0, stale: 0},
     );
+    const nothing = preview.length === 0 && placement.length === 0;
     return {
-      json: {dryRun: true, preview, totals},
-      table:
-        preview.length === 0
-          ? 'Nothing to sync.'
-          : [
-              renderTable(columns, preview, color),
-              '',
-              `would move ${totals.move}, deduplicate ${totals.dedup}, ` +
-                `link ${totals.link}, remove ${totals.stale} stale link(s)`,
-              // DEDUP and STALE are deletions; say so rather than letting two
-              // neutral-looking columns hide it.
-              `deduplicating and removing stale links deletes files from Lemonade's cache`,
-            ].join('\n'),
+      json: {dryRun: true, preview, placement, totals},
+      table: nothing
+        ? 'Nothing to sync.'
+        : [
+            ...(placement.length > 0
+              ? [renderPlacement(placement, color), '']
+              : []),
+            ...(preview.length > 0
+              ? [
+                  renderTable(columns, preview, color),
+                  '',
+                  `would move ${totals.move}, deduplicate ${totals.dedup}, ` +
+                    `link ${totals.link}, remove ${totals.stale} stale link(s)`,
+                  // DEDUP and STALE are deletions; say so rather than letting
+                  // two neutral-looking columns hide it.
+                  `deduplicating and removing stale links deletes files from Lemonade's cache`,
+                ]
+              : []),
+          ].join('\n'),
       quiet: preview.map((p) => p.repoId),
     };
   }
@@ -580,15 +594,39 @@ async function lemonadeSync(
       `Sync failed: ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`,
     );
   }
-  const {results} = (await res.json()) as {
+  const {results, placement} = (await res.json()) as {
     results: Array<{repoId: string; rev: string; files: unknown[]}>;
+    placement: Placement[];
   };
   const fileCount = results.reduce((s, r) => s + r.files.length, 0);
+  const sorted = (placement ?? []).filter((p) => p.status === 'moved').length;
   return {
-    json: {results},
-    table: `synced ${results.length} model(s) · ${fileCount} file(s)`,
+    json: {results, placement},
+    table:
+      `synced ${results.length} model(s) · ${fileCount} file(s)` +
+      (sorted > 0 ? ` · sorted ${sorted} into builtin/extra` : ''),
     quiet: results.map((r) => r.repoId),
   };
+}
+
+/** What sorting the cache into its two halves would do, or did. Conflicts are
+ *  called out by name: they are the only outcome needing a person. */
+function renderPlacement(placement: Placement[], color: boolean): string {
+  const columns: Column<Placement>[] = [
+    {header: 'REPO', value: (p) => p.repoId},
+    {header: 'TO', value: (p) => p.side},
+    {
+      header: 'STATUS',
+      value: (p) => (p.status === 'moved' ? 'move' : p.status),
+    },
+    {header: 'NOTE', value: (p) => p.message ?? ''},
+  ];
+  return [
+    renderTable(columns, placement, color),
+    '',
+    'These move between builtin/ and extra/ so Lemonade sees each on the ' +
+      'side it belongs on.',
+  ].join('\n');
 }
 
 async function syncPath(client: Client, inv: CliInvocation): Promise<string> {

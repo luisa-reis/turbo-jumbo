@@ -116,3 +116,22 @@ export const coldStorageDir: string | undefined = localPeer?.cold_storage_path;
 export const lemonadeDir: string | undefined = localPeer?.base_path
   ? resolveBaseSubdirs(localPeer).lemonade
   : undefined;
+
+/**
+ * The two halves of that cache, each a Hugging Face cache tree in its own right.
+ *
+ * `builtin` holds the models Lemonade itself knows — the ones its catalog lists,
+ * plus the FastFlowLM tags it serves — and is what Lemonade is pointed at as its
+ * cache root. `extra` holds the rest in the same layout, so Lemonade can be
+ * given it as a second root and serve models its catalog never listed.
+ *
+ * Splitting them is what lets the second kind exist at all: one directory could
+ * only ever hold what Lemonade already believed in.
+ */
+export const lemonadeBuiltinDir: string | undefined = lemonadeDir
+  ? path.join(lemonadeDir, 'builtin')
+  : undefined;
+
+export const lemonadeExtraDir: string | undefined = lemonadeDir
+  ? path.join(lemonadeDir, 'extra')
+  : undefined;
