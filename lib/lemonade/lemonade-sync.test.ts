@@ -725,3 +725,27 @@ test('consolidates entries on the extra side too, and says which side they were 
   );
   await fsp.rm(root, {recursive: true, force: true});
 });
+
+test('preview predicts the run when entries are still at the old cache root', async () => {
+  // Sorting into builtin/extra happens before a run consolidates, but a
+  // preview can't move anything — so it has to see an unsorted entry where it
+  // actually is. Looking only at the sides made every cached file look absent,
+  // and the preview promised links a run then had no reason to make.
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-lemroot-'));
+  const tj = path.join(root, 'turbo-jumbo');
+  const lem = path.join(root, 'lemonade');
+  const cache = {
+    root: lem,
+    builtin: path.join(lem, 'builtin'),
+    extra: path.join(lem, 'extra'),
+  };
+  const rev = 'abc123';
+  await write(tj, 'org/cat/a.bin', 'SAME');
+  await lemonadeRepo(lem, 'org', 'cat', rev, {'a.bin': 'SAME'});
+
+  const preview = await previewLemonadeSync(tj, cache, ['org/cat']);
+  expect(preview.map((p) => [p.repoId, p.dedupCount, p.linkCount])).toEqual([
+    ['org/cat', 1, 0],
+  ]);
+  await fsp.rm(root, {recursive: true, force: true});
+});

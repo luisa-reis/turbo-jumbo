@@ -8,17 +8,71 @@ import {
   type TjModelFile,
 } from '@/lib/models/model-sidecar';
 import {MIXED_COMMIT} from '@/lib/models/sidecar-types';
-import {LEMONADE_SIDES, type LemonadeSide} from '@/lib/lemonade/lemonade-sides';
+import {
+  LEMONADE_SIDES,
+  sideFor,
+  type LemonadeSide,
+} from '@/lib/lemonade/lemonade-sides';
 
-/** The two halves of Lemonade's cache, as absolute paths. */
+/**
+ * The two halves of Lemonade's cache, as absolute paths, and optionally the
+ * root above them.
+ *
+ * The root matters because sorting entries onto their side and consolidating
+ * them are separate steps: a run sorts first, but a preview cannot move
+ * anything, so it has to find an unsorted entry where it actually is. Include
+ * the root and both agree; leave it out and the preview reports a cache it
+ * can't see as empty.
+ */
 export interface LemonadeSides {
   builtin: string;
   extra: string;
+  root?: string;
 }
 
-/** Each side's directory, paired with its name. */
-function sideDirs(sides: LemonadeSides): Array<[LemonadeSide, string]> {
-  return LEMONADE_SIDES.map((s) => [s, sides[s]] as [LemonadeSide, string]);
+/** Every directory a cache entry might currently be in. Sides first, so an
+ *  entry already sorted is found there rather than at the root. */
+function cacheDirs(sides: LemonadeSides): string[] {
+  return [
+    ...LEMONADE_SIDES.map((s) => sides[s]),
+    ...(sides.root ? [sides.root] : []),
+  ];
+}
+
+/**
+ * Where a repo's cache entry currently is: the first of the searched locations
+ * that actually holds one, falling back to where a new entry would be written.
+ * A plain path searches only itself, which is what materializing into one
+ * specific place wants.
+ */
+async function existingRepoDir(
+  base: string | LemonadeSides,
+  repoId: string,
+): Promise<string> {
+  const target = typeof base === 'string' ? base : (base.root ?? base.builtin); // an unsorted entry is still at the root
+  const searched =
+    typeof base === 'string' ? [base] : [base.builtin, base.extra, target];
+  for (const dir of searched) {
+    const candidate = lemonadeRepoDir(dir, repoId);
+    if (await exists(candidate)) return candidate;
+  }
+  return lemonadeRepoDir(
+    typeof base === 'string' ? base : base.builtin,
+    repoId,
+  );
+}
+
+/** Which side an entry found in `dir` counts as being on. An entry still at the
+ *  root is reported as the side it is headed for. */
+function sideOfDir(
+  dir: string,
+  sides: LemonadeSides,
+  repoId: string,
+  listed: Set<string>,
+): LemonadeSide {
+  if (dir === sides.extra) return 'extra';
+  if (dir === sides.builtin) return 'builtin';
+  return sideFor(repoId, listed);
 }
 
 // Sync Lemonade and Turbo Jumbo so a single copy on disk serves both, via the
@@ -205,13 +259,15 @@ export async function previewLemonadeSync(
   tjBase: string,
   sides: LemonadeSides,
   catalogRepoIds: string[] = [],
+  listed?: Set<string>,
 ): Promise<LemonadeSyncPreview[]> {
   const tj = nodePath.resolve(tjBase);
   const out: LemonadeSyncPreview[] = [];
   // Cache repos on both sides: move/dedup. Consolidation doesn't care which
   // half an entry sits on — a Lemonade-only file is worth pulling into Turbo
   // Jumbo wherever Lemonade keeps it.
-  for (const [side, dir] of sideDirs(sides)) {
+  const listedSet = listed ?? new Set(catalogRepoIds);
+  for (const dir of cacheDirs(sides)) {
     for (const repo of await listLemonadeRepos(dir)) {
       const entries = await walkSnapshot(
         nodePath.join(repo.dir, 'snapshots', repo.rev),
@@ -228,7 +284,7 @@ export async function previewLemonadeSync(
       if (moveCount + dedupCount + staleCount > 0)
         out.push({
           repoId: repo.repoId,
-          side,
+          side: sideOfDir(dir, sides, repo.repoId, listedSet),
           rev: repo.rev,
           moveCount,
           dedupCount,
@@ -240,7 +296,7 @@ export async function previewLemonadeSync(
   // Catalog models to materialize, always into the side Lemonade reads as its
   // own: these are the models it lists.
   for (const repoId of catalogRepoIds) {
-    const plan = await planMaterialize(tj, sides.builtin, repoId);
+    const plan = await planMaterialize(tj, sides, repoId);
     if (!plan) continue;
     if (plan.rev === null) {
       out.push({
@@ -407,12 +463,16 @@ async function revFromFileMeta(
 
 async function planMaterialize(
   tj: string,
-  lemonadeBase: string,
+  lemonadeBase: string | LemonadeSides,
   repoId: string,
 ): Promise<{rev: string | null; repoPaths: string[]} | null> {
   const tjPaths = await listTjFiles(nodePath.join(tj, repoId));
   if (tjPaths.length === 0) return null;
-  const repoDir = lemonadeRepoDir(lemonadeBase, repoId);
+  // Where the entry already is, which need not be where it will end up: an
+  // unsorted one still sits at the cache root. Looking only where it belongs
+  // would read every cached file as absent and promise links that sorting the
+  // cache makes unnecessary.
+  const repoDir = await existingRepoDir(lemonadeBase, repoId);
   // Revision, most authoritative first: the cache entry's own; the sidecar's
   // repo-level commit; the sidecar's file-derived commit (unless the files
   // disagree); the files' own tjmeta records (a fresh HF download has those
@@ -598,8 +658,10 @@ export async function syncLemonadeToTurboJumbo(
   catalogRepoIds: string[] = [],
 ): Promise<SyncModelResult[]> {
   const out: SyncModelResult[] = [];
-  // Pass 1: Lemonade cache → Turbo Jumbo (move + dedup), both halves.
-  for (const [, dir] of sideDirs(sides)) {
+  // Pass 1: Lemonade cache → Turbo Jumbo (move + dedup), everywhere an entry
+  // may be — including the root, since sorting is skipped when the catalog
+  // couldn't be reached and the cache is still worth consolidating.
+  for (const dir of cacheDirs(sides)) {
     for (const repo of await listLemonadeRepos(dir)) {
       const result = await syncLemonadeRepo(tjBase, repo);
       if (

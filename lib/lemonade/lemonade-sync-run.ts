@@ -76,7 +76,12 @@ async function lemonadeKnowledge(): Promise<{
 
 function sides(): LemonadeSides | null {
   if (!lemonadeBuiltinDir || !lemonadeExtraDir) return null;
-  return {builtin: lemonadeBuiltinDir, extra: lemonadeExtraDir};
+  return {
+    builtin: lemonadeBuiltinDir,
+    extra: lemonadeExtraDir,
+    // Entries an older version left here are still part of the cache.
+    ...(lemonadeDir ? {root: lemonadeDir} : {}),
+  };
 }
 
 export interface SyncPreview {
@@ -95,7 +100,7 @@ export async function previewSync(): Promise<SyncPreview> {
   const {catalog, listed} = await lemonadeKnowledge();
   const [placement, preview] = await Promise.all([
     planPlacement(lemonadeDir, listed),
-    previewLemonadeSync(localModelsDir, s, catalog),
+    previewLemonadeSync(localModelsDir, s, catalog, listed),
   ]);
   return {preview, placement: placement.filter((p) => p.status !== 'in-place')};
 }

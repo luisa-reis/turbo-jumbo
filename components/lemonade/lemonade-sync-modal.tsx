@@ -38,6 +38,14 @@ interface ModelResult {
   rev: string;
   files: FileResult[];
 }
+/** A cache entry moving between builtin/ and extra/. Not a file change — the
+ *  directory is renamed — so it is counted and shown apart from the rest. */
+interface Placement {
+  repoId: string;
+  side: 'builtin' | 'extra';
+  status: 'moved' | 'in-place' | 'conflict' | 'error';
+  message?: string;
+}
 
 type Phase = 'loading' | 'preview' | 'running' | 'done' | 'error';
 
@@ -55,6 +63,7 @@ export function LemonadeSyncModal({
   const [phase, setPhase] = useState<Phase>('loading');
   const [preview, setPreview] = useState<Preview[]>([]);
   const [results, setResults] = useState<ModelResult[]>([]);
+  const [placement, setPlacement] = useState<Placement[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,9 +72,13 @@ export function LemonadeSyncModal({
       try {
         const res = await fetch(syncUrl);
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        const data = (await res.json()) as {preview?: Preview[]};
+        const data = (await res.json()) as {
+          preview?: Preview[];
+          placement?: Placement[];
+        };
         if (!cancelled) {
           setPreview(data.preview ?? []);
+          setPlacement(data.placement ?? []);
           setPhase('preview');
         }
       } catch (e) {
@@ -85,8 +98,12 @@ export function LemonadeSyncModal({
     try {
       const res = await fetch(syncUrl, {method: 'POST'});
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = (await res.json()) as {results?: ModelResult[]};
+      const data = (await res.json()) as {
+        results?: ModelResult[];
+        placement?: Placement[];
+      };
       setResults(data.results ?? []);
+      setPlacement(data.placement ?? []);
       setPhase('done');
       onSynced();
     } catch (e) {
@@ -101,6 +118,9 @@ export function LemonadeSyncModal({
     (n, p) => n + p.moveCount + p.dedupCount + p.linkCount + p.staleCount,
     0,
   );
+  // Sorting the cache is work too: a run that only moves directories still has
+  // something to do, and the button must not read as if it were a no-op.
+  const pending = actionable.length + placement.length;
   const fileCountLabel = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
   // Group the preview by action so each model is listed as its own row, the same
   // way across imports, deduplications, and links — never folded into a count.
@@ -147,6 +167,7 @@ export function LemonadeSyncModal({
       acc[f.status] = (acc[f.status] ?? 0) + 1;
       return acc;
     }, {});
+  const sorted = placement.filter((p) => p.status === 'moved').length;
   const errors = results
     .flatMap((r) => r.files.map((f) => ({repoId: r.repoId, ...f})))
     .filter((f) => f.status === 'error');
@@ -183,13 +204,37 @@ export function LemonadeSyncModal({
               {phase === 'error' && <Text type="body">{error}</Text>}
 
               {phase === 'preview' &&
-                (preview.length === 0 ? (
+                (preview.length === 0 && placement.length === 0 ? (
                   <Text type="body">
                     Nothing to sync — Lemonade is already consolidated into
                     Turbo Jumbo.
                   </Text>
                 ) : (
                   <VStack gap={3}>
+                    {placement.length > 0 && (
+                      <VStack gap={1}>
+                        <Text type="supporting">
+                          Sorting Lemonade&apos;s cache
+                        </Text>
+                        <Text type="supporting">
+                          Models Lemonade lists go in builtin, the rest in
+                          extra. Directories are moved; no files change.
+                        </Text>
+                        <List hasDividers>
+                          {placement.map((p) => (
+                            <ListItem
+                              key={`${p.repoId}-${p.side}`}
+                              label={p.repoId}
+                              description={
+                                p.status === 'conflict'
+                                  ? `already in ${p.side} — left alone`
+                                  : `→ ${p.side}`
+                              }
+                            />
+                          ))}
+                        </List>
+                      </VStack>
+                    )}
                     {sections.map((s) => (
                       <VStack key={s.title} gap={1}>
                         <Text type="supporting">{s.title}</Text>
@@ -253,7 +298,11 @@ export function LemonadeSyncModal({
                   </HStack>
                   <Text type="supporting">
                     Synced {results.length} model
-                    {results.length === 1 ? '' : 's'}.
+                    {results.length === 1 ? '' : 's'}
+                    {sorted > 0
+                      ? `, and sorted ${sorted} into builtin/extra`
+                      : ''}
+                    .
                   </Text>
                   {errors.map((e, i) => (
                     <Text key={i} type="supporting">
@@ -282,11 +331,23 @@ export function LemonadeSyncModal({
                     label={
                       phase === 'running'
                         ? 'Syncing…'
-                        : `Sync ${actionable.length} model${actionable.length === 1 ? '' : 's'} (${fileCountLabel(totalFiles)})`
+                        : // Say what the run will actually do. Counting only
+                          // file work read as "N models" on a run whose whole
+                          // job was moving directories, and then reported none.
+                          [
+                            actionable.length > 0
+                              ? `Sync ${actionable.length} model${actionable.length === 1 ? '' : 's'} (${fileCountLabel(totalFiles)})`
+                              : null,
+                            placement.length > 0
+                              ? `Sort ${placement.length}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || 'Sync'
                     }
                     variant="primary"
                     onClick={runSync}
-                    isDisabled={phase !== 'preview' || actionable.length === 0}
+                    isDisabled={phase !== 'preview' || pending === 0}
                   />
                 </>
               )}
