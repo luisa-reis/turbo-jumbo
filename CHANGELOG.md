@@ -55,12 +55,23 @@ and versions follow [Semantic Versioning](https://semver.org/).
   set: the repo also carries NPU kernels for other targets, which would
   otherwise be counted against it as missing forever.
 
-  Nothing prompts, so it works unattended: `--dry-run` prints the plan without
-  acting, anything that removes files has to be spelled out, and exit codes
-  are meaningful, so `tj copy … || alert` does what you would expect. Output is
-  a table for people and `--format json` for `jq`; piping never silently
-  changes the format. It talks to a running Turbo Jumbo server, so what it
-  reports and what the web UI shows cannot drift apart.
+  The two commands whose job is deletion — `tj rm` and `tj lemonade sync` —
+  ask before they act, naming what is about to go ("This deletes 15 file(s) of
+  Qwen/Qwen3.6-27B from cold storage · 51.7 GiB") and waiting for the word
+  `yes`. Nothing shorter counts: `y` and a bare Enter are both refusals. The
+  question is only ever put to a terminal, so an unattended run is never
+  waiting on an answer nobody is there to give — with input redirected the
+  command refuses and asks for `--yes` instead, which is what a script should
+  pass. Whether to ask is judged by the input, not the output, so
+  `tj rm … --format json | jq` can still ask; the question goes to stderr and
+  leaves the result on stdout untouched.
+
+  Everything else runs unattended without a word: `--dry-run` prints the plan
+  without acting, anything that removes files has to be spelled out, and exit
+  codes are meaningful, so `tj copy … || alert` does what you would expect.
+  Output is a table for people and `--format json` for `jq`; piping never
+  silently changes the format. It talks to a running Turbo Jumbo server, so
+  what it reports and what the web UI shows cannot drift apart.
 
   Documented with worked examples in [docs/cli.md](docs/cli.md).
 

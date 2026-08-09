@@ -271,11 +271,12 @@ UD-IQ3_S/DeepSeek-V4-Flash-0731-UD-IQ3_S-00004-of-00004.gguf  16.2 GiB
 total 108.1 GiB
 ```
 
-This is the safety mechanism. **Nothing in `tj` ever prompts** — a tool for cron
-can't block on a terminal that isn't there, and a prompt that is skipped when
-non-interactive makes the safe path the one that only happens when someone is
-watching. So destructive intent is typed (`--delete-after`) and `--dry-run`
-shows the plan first.
+This is the safety mechanism. **Nothing blocks on a terminal that isn't there**
+— a tool for cron can't, and a prompt that is skipped when non-interactive makes
+the safe path the one that only happens when someone is watching. So destructive
+intent is typed (`--delete-after`) and `--dry-run` shows the plan first. The two
+commands whose whole job is deletion do ask when a person is present, and still
+insist on `--yes` when one isn't (see [the safety flags](#how-the-safety-flags-fit-together)).
 
 ### Progress while transferring
 
@@ -355,7 +356,8 @@ exists. Findings that remain — because a repair failed, or because none exists
 still exit 2.
 
 Resolving **duplicates** deletes copies, keeping one verified survivor. Since
-nothing here prompts, that needs its own explicit permission:
+the audit asks nothing even at a terminal, that needs its own explicit
+permission:
 
 ```console
 $ tj audit big-model --fix --allow-delete
@@ -668,9 +670,27 @@ deliberate:
 | `--allow-delete` | Widens `audit --fix` to a repair that deletes (duplicates)         |
 | `--yes`          | Confirms a command whose **job** is removal: `rm`, `lemonade sync` |
 
-Nothing prompts, anywhere. A tool meant for cron can't block on a terminal that
-isn't there, and a prompt that gets skipped when non-interactive makes the safe
-path the one that only happens when somebody is watching.
+`rm` and `lemonade sync` ask before they delete, naming what is about to go:
+
+```console
+$ tj rm Qwen/Qwen3.6-27B --from cold
+This deletes 15 file(s) of Qwen/Qwen3.6-27B from cold storage · 51.7 GiB.
+Type "yes" to continue: no
+Cancelled.
+```
+
+Only the whole word will do — `y`, a bare Enter, or a closed input are all
+refusals, so leaning on the keyboard deletes nothing.
+
+**The question is only ever asked of a terminal.** With no one at the keyboard
+— under cron, or with input redirected — nothing is asked and `--yes` is
+required exactly as before, because a prompt that answers itself when nobody is
+watching makes the safe path the one that only happens when somebody is. `--yes`
+skips the question, which is what a script should use.
+
+Whether to ask is judged by **stdin**, not stdout, so `tj rm … --format json |
+jq` can still ask; the question and what you type go to stderr, leaving stdout
+carrying the result and nothing else.
 
 ## The design docs
 

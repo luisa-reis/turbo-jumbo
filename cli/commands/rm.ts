@@ -7,6 +7,7 @@ import {
   resolveLocationName,
 } from '@/cli/location';
 import type {CliInvocation} from '@/lib/cli/args';
+import {confirmDestructive, type ConfirmIo} from '@/lib/cli/confirm';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {auditTargets, type AuditTarget} from '@/lib/cli/audit-plan';
 import {formatSize} from '@/lib/format/bytes';
@@ -17,8 +18,9 @@ import type {Model} from '@/lib/models/model-types';
  *
  * The only irreversible command here, so both halves of the intent have to be
  * typed: `--from`, because a defaulted tier is exactly how someone removes the
- * archived copy while meaning the local one, and `--yes`, matching the `hf`
- * CLI's convention for destructive commands. `--dry-run` lists what would go.
+ * archived copy while meaning the local one, and the deletion itself, which is
+ * confirmed at the terminal or with `--yes` when there is no terminal to ask.
+ * `--dry-run` lists what would go without asking anything.
  *
  * An ambiguous model pattern is refused rather than resolved — deleting the
  * wrong hundred gigabytes is not something to guess at.
@@ -26,6 +28,7 @@ import type {Model} from '@/lib/models/model-types';
 export async function rm(
   client: Client,
   inv: CliInvocation,
+  io: ConfirmIo,
 ): Promise<CommandOutput> {
   const pattern = inv.positionals[0];
   if (!pattern) throw new CliError('Usage: tj rm <model> --from <where> --yes');
@@ -35,13 +38,6 @@ export async function rm(
         'Try --dry-run first to see what would be deleted.',
     );
   }
-  if (!inv.yes && !inv.dryRun) {
-    throw new CliError(
-      'tj rm needs --yes to confirm, since it deletes files.\n' +
-        'Try --dry-run first to see what would go.',
-    );
-  }
-
   const location = await resolveLocationName(client, inv.from);
   const models = await client.json<Model[]>(modelsPath(location));
 
@@ -72,6 +68,23 @@ export async function rm(
     );
   }
   const total = targets.reduce((s, t) => s + t.size, 0);
+  const where = describeLocation(location);
+
+  // Confirm once the files are known, so the question names them rather than
+  // asking about a pattern the user would have to resolve in their head.
+  if (!inv.dryRun) {
+    const verdict = await confirmDestructive({
+      summary:
+        `This deletes ${targets.length} file(s) of ${names[0]} from ` +
+        `${where} · ${formatSize(total)}.`,
+      preapproved: inv.yes,
+      flagHint:
+        'tj rm needs --yes to confirm, since it deletes files.\n' +
+        'Try --dry-run first to see what would go.',
+      io,
+    });
+    if (!verdict.ok) throw new CliError(verdict.reason);
+  }
 
   const res = await fetch(`${client.baseUrl}${deletePath(location)}`, {
     method: 'DELETE',
@@ -92,7 +105,6 @@ export async function rm(
     {header: 'FILE', value: (t) => t.path},
     {header: 'SIZE', value: (t) => formatSize(t.size), align: 'right'},
   ];
-  const where = describeLocation(location);
   return {
     json: {
       dryRun: inv.dryRun,

@@ -32,14 +32,18 @@ TRANSFERS (get, copy)
   --delete-after      Remove the source once the copy is verified
   --dry-run           Print the plan and stop
 
-  Nothing prompts. --delete-after must be typed, and --dry-run shows what
-  would happen first. Downloads run on the server this CLI points at; to
+  Transfers never prompt. --delete-after must be typed, and --dry-run shows
+  what would happen first. Downloads run on the server this CLI points at; to
   fetch onto another machine, point at it with --url.
 
 REMOVING (rm, lemonade sync)
   --from local|cold|<peer>   Which copy rm deletes. Required: no default
-  -y, --yes           Confirm. Required, since these delete files
+  -y, --yes           Answer the confirmation ahead of time
   --dry-run           Show what would go, and stop
+
+  These two ask before deleting, naming what will go; type "yes" to agree.
+  With no terminal to ask (cron, redirected input) they refuse instead, so
+  --yes is what an unattended run needs.
 
 AUDIT
   --cached            Last-known verdicts from sidecars: instant, no hashing

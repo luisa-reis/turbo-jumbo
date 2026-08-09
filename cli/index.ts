@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
+import {createInterface} from 'node:readline/promises';
 import {parseCli, type CliInvocation} from '@/lib/cli/args';
+import type {ConfirmIo} from '@/lib/cli/confirm';
 import {resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {resolveServerUrl} from '@/lib/cli/server-url';
 import {CliError, createClient, type Client} from '@/cli/client';
@@ -54,6 +56,32 @@ function transferContext(format: OutputFormat): TransferContext {
     isTty: Boolean(process.stdout.isTTY),
     showProgress: format === 'table',
     write: (s) => process.stdout.write(s),
+  };
+}
+
+/**
+ * The terminal a destructive command asks before it deletes.
+ *
+ * Judged by **stdin**, because that is where the answer comes from — piping the
+ * result somewhere (`tj rm … --format json | jq`) doesn't stop a person from
+ * answering. The question and its echo go to stderr for the same reason: stdout
+ * carries the result, and a prompt mixed into it would break every parser
+ * downstream.
+ */
+function confirmIo(): ConfirmIo {
+  return {
+    isInteractive: Boolean(process.stdin.isTTY),
+    ask: async (question) => {
+      const rl = createInterface({
+        input: process.stdin,
+        output: process.stderr,
+      });
+      try {
+        return await rl.question(question);
+      } finally {
+        rl.close();
+      }
+    },
   };
 }
 
@@ -122,9 +150,9 @@ async function run(
     case 'audit':
       return audit(client, inv, transferContext(format));
     case 'rm':
-      return rm(client, inv);
+      return rm(client, inv, confirmIo());
     case 'lemonade':
-      return lemonade(client, inv, color, transferContext(format));
+      return lemonade(client, inv, color, transferContext(format), confirmIo());
     case 'help':
       // Handled before dispatch; listed so the switch stays exhaustive and a
       // new command can't be added without being wired up here.

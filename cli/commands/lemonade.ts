@@ -5,6 +5,7 @@ import {fetchPeers} from '@/cli/fetch-peers';
 import {runTransfer, summarise, type TransferResult} from '@/cli/transfer';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
+import {confirmDestructive, type ConfirmIo} from '@/lib/cli/confirm';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
   matchEntries,
@@ -49,11 +50,12 @@ export async function lemonade(
   inv: CliInvocation,
   color: boolean,
   ctx: TransferContext,
+  io: ConfirmIo,
 ): Promise<CommandOutput> {
   const sub = inv.positionals[0];
   if (sub === 'ls') return lemonadeLs(client, inv, color);
   if (sub === 'get') return lemonadeGet(client, inv, ctx);
-  if (sub === 'sync') return lemonadeSync(client, inv, color);
+  if (sub === 'sync') return lemonadeSync(client, inv, color, io);
   throw new CliError(
     `Usage: tj lemonade ls | tj lemonade get <model> | tj lemonade sync [--dry-run] [--yes]`,
   );
@@ -516,6 +518,7 @@ async function lemonadeSync(
   client: Client,
   inv: CliInvocation,
   color: boolean,
+  io: ConfirmIo,
 ): Promise<CommandOutput> {
   const base = await syncPath(client, inv);
 
@@ -556,13 +559,19 @@ async function lemonadeSync(
     };
   }
 
-  if (!inv.yes) {
-    throw new CliError(
+  const verdict = await confirmDestructive({
+    summary:
+      "This moves files into Turbo Jumbo and deletes Lemonade's duplicate " +
+      'copies and stale links.\n' +
+      'Run with --dry-run first to see exactly what would change.',
+    preapproved: inv.yes,
+    flagHint:
       'tj lemonade sync needs --yes: it moves files and deletes ' +
-        "Lemonade's duplicate copies and stale links.\n" +
-        'Try --dry-run first to see what would change.',
-    );
-  }
+      "Lemonade's duplicate copies and stale links.\n" +
+      'Try --dry-run first to see what would change.',
+    io,
+  });
+  if (!verdict.ok) throw new CliError(verdict.reason);
 
   const res = await fetch(`${client.baseUrl}${base}`, {method: 'POST'});
   if (!res.ok) {
