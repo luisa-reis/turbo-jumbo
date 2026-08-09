@@ -42,7 +42,7 @@ export async function ls(
     json: inventory,
     table: renderTable(columns, inventory, color),
     // The model name alone: what you would feed to another command.
-    quiet: [...new Set(inventory.map((r) => r.model))],
+    lines: [...new Set(inventory.map((r) => r.model))],
   };
 }
 

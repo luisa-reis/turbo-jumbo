@@ -4,30 +4,75 @@
  * rather than a hidden global, and every branch is testable.
  */
 
-export type OutputFormat = 'table' | 'json' | 'quiet';
-
-/** Formats accepted on the command line. `auto` resolves against the TTY. */
-export const FORMAT_VALUES = ['auto', 'table', 'json', 'quiet'] as const;
-export type FormatFlag = (typeof FORMAT_VALUES)[number];
+/**
+ * Every shape output can take. `table` is the default and the only one meant
+ * for a person; there is no `auto`, because nothing switches on its own and a
+ * value that always resolves to the default is a value that does nothing.
+ */
+export const FORMAT_VALUES = ['table', 'json', 'csv', 'toon', 'lines'] as const;
+export type OutputFormat = (typeof FORMAT_VALUES)[number];
+export type FormatFlag = OutputFormat;
 
 export function isFormatFlag(s: string): s is FormatFlag {
   return (FORMAT_VALUES as readonly string[]).includes(s);
 }
 
 /**
- * The format a run should use. `auto` (the default) always means a table —
- * deliberately not JSON-when-piped, which silently breaks `tj ls | grep`.
- * Machine-readable output is asked for explicitly. What the TTY does decide is
- * decoration: colour is dropped when stdout isn't a terminal, so redirected
- * output holds no escape codes.
+ * The format a run should use. Piping never changes it — switching to JSON
+ * off-TTY would silently break `tj ls | grep`, so machine-readable output is
+ * asked for explicitly. What the TTY does decide is decoration: colour is
+ * dropped when stdout isn't a terminal, so redirected output holds no escape
+ * codes, and a machine format is never coloured at all.
  */
 export function resolveFormat(
   flag: FormatFlag | undefined,
   isTty: boolean,
 ): {format: OutputFormat; color: boolean} {
-  const format: OutputFormat =
-    flag === undefined || flag === 'auto' ? 'table' : flag;
+  const format: OutputFormat = flag ?? 'table';
   return {format, color: isTty && format === 'table'};
+}
+
+/**
+ * A CSV of whatever `--output-format json` would have printed.
+ *
+ * It follows the JSON rather than the table's columns: a machine format
+ * carries the data, and the table drops fields to stay readable in eighty
+ * columns — a spreadsheet has no such problem.
+ *
+ * `null` when the answer isn't records at all, which is the honest reply for
+ * something like a bare list of names: there is no table in it.
+ */
+export function toCsv(json: unknown): string | null {
+  const rows = isRecord(json) ? [json] : Array.isArray(json) ? json : null;
+  if (rows === null || !rows.every(isRecord)) return null;
+
+  const headers: string[] = [];
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (!headers.includes(key)) headers.push(key);
+    }
+  }
+  return [
+    headers.map(csvCell).join(','),
+    ...rows.map((row) => headers.map((h) => csvCell(row[h])).join(',')),
+  ].join('\n');
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** RFC 4180: quote any field holding a comma, a quote or a line break. */
+function csvCell(v: unknown): string {
+  const s =
+    v === null || v === undefined
+      ? ''
+      : Array.isArray(v)
+        ? v.join('; ')
+        : typeof v === 'object'
+          ? JSON.stringify(v)
+          : String(v);
+  return /["\n\r,]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
 export interface Column<T> {

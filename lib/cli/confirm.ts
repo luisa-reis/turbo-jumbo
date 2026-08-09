@@ -8,7 +8,7 @@
  * is watching — and one that quietly turns into a "yes" is worse.
  *
  * So interactivity is judged by **stdin**, which is where the answer has to come
- * from, and never by stdout: `tj rm … --format json | jq` should still be able
+ * from, and never by stdout: `tj rm … --output-format json | jq` should still be able
  * to ask. For the same reason the caller writes the question to stderr, leaving
  * stdout to carry the result and nothing else.
  */

@@ -54,7 +54,7 @@ export async function peers(
   return {
     json: rows,
     table: renderTable(columns, rows, color),
-    quiet: rows.filter((r) => r.reachable).map((r) => r.slug),
+    lines: rows.filter((r) => r.reachable).map((r) => r.slug),
   };
 }
 

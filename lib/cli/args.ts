@@ -1,5 +1,5 @@
 import {parseArgs} from 'node:util';
-import {isFormatFlag, type FormatFlag} from '@/lib/cli/format';
+import {FORMAT_VALUES, isFormatFlag, type FormatFlag} from '@/lib/cli/format';
 
 /**
  * Command-line parsing for `tj`. Built on node's own `parseArgs` rather than a
@@ -29,7 +29,7 @@ export type Command = (typeof COMMANDS)[number];
 export interface CliInvocation {
   command: Command;
   positionals: string[];
-  format?: FormatFlag;
+  outputFormat?: FormatFlag;
   url?: string;
   peer?: string;
   local: boolean;
@@ -58,7 +58,7 @@ export type ParseResult =
   {ok: true; value: CliInvocation} | {ok: false; error: string};
 
 const OPTIONS = {
-  format: {type: 'string'},
+  'output-format': {type: 'string'},
   url: {type: 'string'},
   peer: {type: 'string'},
   local: {type: 'boolean'},
@@ -127,10 +127,11 @@ export function parseCli(argv: string[]): ParseResult {
     };
   }
 
-  if (values.format !== undefined && !isFormatFlag(values.format)) {
+  const requested = values['output-format'];
+  if (requested !== undefined && !isFormatFlag(requested)) {
     return {
       ok: false,
-      error: `Unknown format '${values.format}'. Try one of: auto, table, json, quiet.`,
+      error: `Unknown format '${requested}'. Try one of: ${FORMAT_VALUES.join(', ')}.`,
     };
   }
 
@@ -151,7 +152,7 @@ function invocation(
   return {
     command,
     positionals,
-    format: values.format as FormatFlag | undefined,
+    outputFormat: values['output-format'] as FormatFlag | undefined,
     url: values.url,
     peer: values.peer,
     local: values.local ?? false,

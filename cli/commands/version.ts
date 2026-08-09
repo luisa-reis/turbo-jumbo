@@ -37,6 +37,6 @@ export async function version(
   return {
     json: {...v, url: client.baseUrl},
     table: renderTable(columns, rows, color),
-    quiet: [v.version],
+    lines: [v.version],
   };
 }

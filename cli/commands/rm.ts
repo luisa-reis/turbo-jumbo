@@ -123,7 +123,7 @@ export async function rm(
           `total ${formatSize(total)}`,
         ].join('\n')
       : `deleted ${targets.length} file(s) of ${names[0]} from ${where} · ${formatSize(total)}`,
-    quiet: targets.map((t) => t.path),
+    lines: targets.map((t) => t.path),
   };
 }
 

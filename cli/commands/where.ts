@@ -56,6 +56,6 @@ export async function where(
   return {
     json: inventory,
     table: renderTable(columns, inventory, color),
-    quiet: inventory.flatMap((r) => r.locations),
+    lines: inventory.flatMap((r) => r.locations),
   };
 }

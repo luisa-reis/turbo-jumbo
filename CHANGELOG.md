@@ -64,15 +64,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
   waiting on an answer nobody is there to give — with input redirected the
   command refuses and asks for `--yes` instead, which is what a script should
   pass. Whether to ask is judged by the input, not the output, so
-  `tj rm … --format json | jq` can still ask; the question goes to stderr and
-  leaves the result on stdout untouched.
+  `tj rm … --output-format json | jq` can still ask; the question goes to
+  stderr and leaves the result on stdout untouched.
 
   Everything else runs unattended without a word: `--dry-run` prints the plan
   without acting, anything that removes files has to be spelled out, and exit
   codes are meaningful, so `tj copy … || alert` does what you would expect.
-  Output is a table for people and `--format json` for `jq`; piping never
-  silently changes the format. It talks to a running Turbo Jumbo server, so
-  what it reports and what the web UI shows cannot drift apart.
+  Output is a table for people, and `--output-format` gives it to a machine
+  instead: `json` for `jq`, `csv` for a spreadsheet, `toon` for dropping into
+  a model's context without paying for JSON's braces, and `lines` for `xargs`.
+  Piping never silently changes the format. It talks to a running Turbo Jumbo
+  server, so what it reports and what the web UI shows cannot drift apart.
 
   Documented with worked examples in [docs/cli.md](docs/cli.md).
 

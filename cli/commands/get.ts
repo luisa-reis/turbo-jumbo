@@ -12,7 +12,7 @@ type HfFile = {path: string; size: number};
 
 export interface TransferContext {
   isTty: boolean;
-  /** Live progress is for humans; json and quiet runs stay silent. */
+  /** Live progress is for humans; machine formats stay silent. */
   showProgress: boolean;
   write: (s: string) => void;
 }
@@ -96,7 +96,7 @@ export async function get(
     return {
       json: {dryRun: true, ...plan},
       table: renderPlan(parsed.repoId, chosen, total, inv),
-      quiet: chosen.map((f) => f.path),
+      lines: chosen.map((f) => f.path),
     };
   }
 
@@ -127,7 +127,7 @@ export async function get(
   return {
     json: {...plan, elapsedMs: result.elapsedMs},
     table: summarise('downloaded', result),
-    quiet: [],
+    lines: [],
   };
 }
 
@@ -194,7 +194,7 @@ function listQuantizations(
     table:
       `${repoId} offers these quantizations. Choose one with --quant:\n\n` +
       renderTable(columns, groups),
-    quiet: groups.map((g) => g.label),
+    lines: groups.map((g) => g.label),
   };
 }
 

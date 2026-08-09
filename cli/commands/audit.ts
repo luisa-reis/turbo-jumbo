@@ -87,7 +87,7 @@ export async function audit(
       fixes,
     },
     table: renderResults(results, found, unresolved, fixes, inv),
-    quiet: unresolved.map((r) => r.file),
+    lines: unresolved.map((r) => r.file),
   };
 
   // Findings are not a command failure, so they leave by their own door: the
@@ -237,7 +237,7 @@ function dryRun(
       '',
       `total ${formatSize(total)}`,
     ].join('\n'),
-    quiet: targets.map((t) => t.path),
+    lines: targets.map((t) => t.path),
   };
 }
 

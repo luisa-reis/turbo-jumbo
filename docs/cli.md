@@ -296,8 +296,8 @@ stream says which file is currently in flight, and inferring it from the order
 `tj` sent would sometimes be wrong. Failures are named, though — the copy stream
 reports those explicitly.
 
-`--format json` prints one result object at the end instead, and `--format
-quiet` prints nothing on success.
+`--output-format json` prints one result object at the end instead, and
+`--output-format lines` prints nothing on success.
 
 ### `tj audit <model>` / `tj audit --all`
 
@@ -549,15 +549,17 @@ tool is being pointed at a different machine than you assumed.
 
 ## Output formats
 
-`--format` takes `auto` (the default), `table`, `json` or `quiet`.
+`--output-format` takes `table` (the default), `json`, `csv`, `toon` or
+`lines`. There is no `auto`: nothing switches on its own, so a value that
+always resolved to the default would be a value that did nothing.
 
-**Piping does not change the format.** `auto` and `table` are the same thing;
-what the terminal decides is only decoration, so colour is dropped when output
-isn't a terminal and redirected output holds no escape codes. This keeps
-`tj ls | grep` working. When a script needs to read the output, say so:
+**Piping does not change the format.** What the terminal decides is only
+decoration, so colour is dropped when output isn't a terminal, never appears
+in a machine format at all, and redirected output holds no escape codes. This
+keeps `tj ls | grep` working. When a script needs to read the output, say so:
 
 ```console
-$ tj ls --format json
+$ tj ls --output-format json
 [
   {
     "model": "unsloth/DeepSeek-V4-Flash-0731-GGUF",
@@ -569,13 +571,32 @@ $ tj ls --format json
 ]
 ```
 
-`quiet` prints one identifier per line, for `xargs`:
+`lines` prints one identifier per line, for `xargs`:
 
 ```console
-$ tj ls --cold --format quiet
+$ tj ls --cold --output-format lines
 ggml-org/gemma-3-4b-it-GGUF
 unsloth/DeepSeek-V4-Flash-0731-GGUF
 ```
+
+`csv` and `toon` carry the same fields as `json`, not the table's columns: a
+table drops fields to stay readable in eighty columns, and neither a
+spreadsheet nor a model context has that problem.
+
+```console
+$ tj ls --cold --output-format csv
+model,quant,size,locations,coldIncomplete
+unsloth/DeepSeek-V4-Flash-0731-GGUF,UD-IQ3_S,116069339712,local; cold,true
+```
+
+`toon` is [TOON](https://toonformat.dev), which says the same thing as JSON in
+noticeably fewer tokens — worth having when the output is going into a prompt
+rather than a parser.
+
+An answer that is a single record rather than a list — `tj version`, or the
+summary a transfer ends with — becomes a one-row CSV, header included. Should
+a command ever answer with something that is neither, it says so and exits `2`
+rather than inventing a shape for it.
 
 ## Exit codes
 
@@ -600,34 +621,34 @@ be told a clean archive is a syntax error.
 **Models held in only one place** — the ones with no second copy:
 
 ```console
-$ tj ls --format json \
+$ tj ls --output-format json \
   | jq -r '.[] | select(.locations | length == 1) | "\(.model)\t\(.quant)\t\(.locations[0])"'
 ```
 
 **Cold copies that are incomplete**, which won't restore:
 
 ```console
-$ tj ls --format json | jq -r '.[] | select(.coldIncomplete) | .model'
+$ tj ls --output-format json | jq -r '.[] | select(.coldIncomplete) | .model'
 ```
 
 **What a peer has that this machine doesn't** — by quantization, since a model
 can be half-mirrored:
 
 ```console
-$ tj ls --peer rio --format json \
+$ tj ls --peer rio --output-format json \
   | jq -r '.[] | select(.locations | index("local") | not) | "\(.model)\t\(.quant)"'
 ```
 
 **Total bytes archived:**
 
 ```console
-$ tj ls --cold --format json | jq '[.[].size] | add'
+$ tj ls --cold --output-format json | jq '[.[].size] | add'
 ```
 
 **Alert when a disk passes 90% used:**
 
 ```console
-$ tj disk --all --format json \
+$ tj disk --all --output-format json \
   | jq -e 'all(.[]; .total == 0 or (.total - .free) / .total < 0.9)' \
   || echo "a Turbo Jumbo filesystem is over 90% full"
 ```
@@ -635,13 +656,13 @@ $ tj disk --all --format json \
 **Check every peer is up, for a monitoring job:**
 
 ```console
-$ tj peers --format json | jq -e 'all(.[]; .reachable)'
+$ tj peers --output-format json | jq -e 'all(.[]; .reachable)'
 ```
 
 **Archive anything held only on fast storage**, one model at a time:
 
 ```console
-$ tj ls --local --format json \
+$ tj ls --local --output-format json \
   | jq -r '.[] | select(.locations == ["local"]) | .model' \
   | sort -u \
   | while read -r m; do tj copy "$m" --to cold || echo "failed: $m"; done
@@ -675,15 +696,15 @@ $ tj audit --all --fix || echo "findings remain — see above"
 
 ```console
 $ comm -13 \
-    <(tj audit --all --cached --format json | jq -r '.findings[].file' | sort) \
-    <(tj ls --local --format quiet | sort)
+    <(tj audit --all --cached --output-format json | jq -r '.findings[].file' | sort) \
+    <(tj ls --local --output-format lines | sort)
 ```
 
 **See what a whole download would cost before starting it:**
 
 ```console
 $ tj get unsloth/DeepSeek-V4-Flash-0731-GGUF --quant UD-Q4_K_XL --dry-run \
-    --format json | jq '.totalBytes'
+    --output-format json | jq '.totalBytes'
 ```
 
 ## How the safety flags fit together
@@ -716,7 +737,7 @@ required exactly as before, because a prompt that answers itself when nobody is
 watching makes the safe path the one that only happens when somebody is. `--yes`
 skips the question, which is what a script should use.
 
-Whether to ask is judged by **stdin**, not stdout, so `tj rm … --format json |
+Whether to ask is judged by **stdin**, not stdout, so `tj rm … --output-format json |
 jq` can still ask; the question and what you type go to stderr, leaving stdout
 carrying the result and nothing else.
 

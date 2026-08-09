@@ -55,7 +55,7 @@ AUDIT
   name or --all rather than defaulting to everything.
 
 OPTIONS
-  --format <f>        auto (default), table, json, or quiet
+  --output-format <f> table (default), json, csv, toon, or lines
   --url <url>         Server to talk to
   -h, --help          Show this text
 
@@ -64,9 +64,13 @@ SERVER
   address from config.yaml, then http://localhost:3000.
 
 OUTPUT
-  auto and table are the same thing; colour is dropped when output is not a
-  terminal. Piping does not change the format — ask for --format json when a
-  script needs to read it. quiet prints one identifier per line, for xargs.
+  table is the default and the only one meant for a person; colour is dropped
+  when output is not a terminal, and never appears in a machine format.
+  Piping does not change the format — ask for --output-format json when a
+  script needs to read it. csv and toon carry the same fields as json: csv for
+  a spreadsheet, toon for feeding a model without paying for JSON's braces.
+  lines prints one identifier per line, for xargs. A command whose answer is
+  not records — a single version, say — has no csv form and says so.
 
 EXIT CODES
   0  success
@@ -82,5 +86,5 @@ EXAMPLES
   tj get unsloth/Qwen3-8B-GGUF    List that repo's quantizations
   tj get unsloth/Qwen3-8B-GGUF --quant Q4_K_M
   tj copy Qwen3-8B --to cold --dry-run
-  tj ls --format json | jq -r '.[] | select(.locations | length == 1) | .model'
+  tj ls --output-format json | jq -r '.[] | select(.locations | length == 1) | .model'
 `;

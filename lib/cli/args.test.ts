@@ -17,7 +17,7 @@ test('a bare command parses with defaults', () => {
   expect(v.command).toBe('ls');
   expect(v.positionals).toEqual([]);
   expect(v).toMatchObject({local: false, cold: false, all: false});
-  expect(v.format).toBeUndefined();
+  expect(v.outputFormat).toBeUndefined();
 });
 
 test('a positional argument is kept for the command', () => {
@@ -31,7 +31,7 @@ test('flags are collected', () => {
     'ls',
     'qwen',
     '--cold',
-    '--format',
+    '--output-format',
     'json',
     '--url',
     'http://192.0.2.7:3000',
@@ -40,7 +40,7 @@ test('flags are collected', () => {
     command: 'ls',
     positionals: ['qwen'],
     cold: true,
-    format: 'json',
+    outputFormat: 'json',
     url: 'http://192.0.2.7:3000',
   });
 });
@@ -61,7 +61,9 @@ test('an unknown option is reported rather than ignored', () => {
 });
 
 test('an unknown format is caught at parse time', () => {
-  expect(err(['ls', '--format', 'yaml'])).toContain("Unknown format 'yaml'");
+  expect(err(['ls', '--output-format', 'yaml'])).toContain(
+    "Unknown format 'yaml'",
+  );
 });
 
 test('--peer without a slug is rejected', () => {

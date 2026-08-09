@@ -53,8 +53,8 @@ async function localPeerAddress(): Promise<string | undefined> {
 
 /**
  * How a transfer reports itself while it runs. Live progress is for a human
- * watching; `--format json` and `--format quiet` stay silent so their output is
- * exactly the result and nothing else.
+ * watching; every machine format stays silent, so its output is exactly the
+ * result and nothing else.
  */
 function transferContext(format: OutputFormat): TransferContext {
   return {
@@ -68,7 +68,7 @@ function transferContext(format: OutputFormat): TransferContext {
  * The terminal a destructive command asks before it deletes.
  *
  * Judged by **stdin**, because that is where the answer comes from — piping the
- * result somewhere (`tj rm … --format json | jq`) doesn't stop a person from
+ * result somewhere (`tj rm … --output-format json | jq`) doesn't stop a person from
  * answering. The question and its echo go to stderr for the same reason: stdout
  * carries the result, and a prompt mixed into it would break every parser
  * downstream.
@@ -103,7 +103,7 @@ async function main(argv: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  const {format, color} = resolveFormat(inv.format, process.stdout.isTTY);
+  const {format, color} = resolveFormat(inv.outputFormat, process.stdout.isTTY);
   const client = createClient(
     resolveServerUrl({
       flag: inv.url,

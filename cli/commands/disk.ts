@@ -95,6 +95,6 @@ export async function disk(
   return {
     json: rows,
     table: renderTable(columns, rows, color),
-    quiet: rows.map((r) => `${r.location}\t${r.free}`),
+    lines: rows.map((r) => `${r.location}\t${r.free}`),
   };
 }

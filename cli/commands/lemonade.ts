@@ -183,7 +183,7 @@ async function lemonadeGet(
     return {
       json: {dryRun: true, ...summary},
       table: renderGetPlan(entry.model.name, jobs, total, inv),
-      quiet: jobs.flatMap((j) => j.chosen.map((f) => f.path)),
+      lines: jobs.flatMap((j) => j.chosen.map((f) => f.path)),
     };
   }
 
@@ -243,7 +243,7 @@ async function lemonadeGet(
   return {
     json: {...summary, elapsedMs: rolled.elapsedMs},
     table: summarise('downloaded', rolled),
-    quiet: [],
+    lines: [],
   };
 }
 
@@ -513,7 +513,7 @@ async function lemonadeLs(
   return {
     json: rows,
     table: renderTable(columns, rows, color),
-    quiet: rows.map((r) => r.name),
+    lines: rows.map((r) => r.name),
   };
 }
 
@@ -592,7 +592,7 @@ async function lemonadeSync(
                 ]
               : []),
           ].join('\n'),
-      quiet: preview.map((p) => p.repoId),
+      lines: preview.map((p) => p.repoId),
     };
   }
 
@@ -631,7 +631,7 @@ async function lemonadeSync(
       `synced ${results.length} model(s) · ${fileCount} file(s)` +
       (sorted > 0 ? ` · sorted ${sorted} into builtin/extra` : '') +
       (offered > 0 ? ` · offered ${offered} model(s) in extra` : ''),
-    quiet: results.map((r) => r.repoId),
+    lines: results.map((r) => r.repoId),
   };
 }
 

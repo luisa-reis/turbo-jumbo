@@ -115,7 +115,7 @@ export async function copy(
         inv.to,
         inv.deleteAfter,
       ),
-      quiet: moving.map((f) => f.path),
+      lines: moving.map((f) => f.path),
     };
   }
 
@@ -130,7 +130,7 @@ export async function copy(
         elapsedMs: 0,
       },
       table: `Nothing to copy: all ${skipped.size} file(s) of ${row.name} are already at ${inv.to}.`,
-      quiet: [],
+      lines: [],
     };
   }
 
@@ -171,7 +171,7 @@ export async function copy(
       elapsedMs: result.elapsedMs,
     },
     table: `${summarise('copied', result)}${alreadyThere}`,
-    quiet: [],
+    lines: [],
   };
 }
 
