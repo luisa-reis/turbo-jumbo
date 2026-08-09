@@ -124,7 +124,7 @@ async function run(
     case 'rm':
       return rm(client, inv);
     case 'lemonade':
-      return lemonade(client, inv, color);
+      return lemonade(client, inv, color, transferContext(format));
     case 'help':
       // Handled before dispatch; listed so the switch stays exhaustive and a
       // new command can't be added without being wired up here.

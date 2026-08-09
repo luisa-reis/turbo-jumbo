@@ -396,7 +396,7 @@ $ tj rm qwen --from cold --yes
 `--quant` narrows to particular quantizations; without it, every file of the
 model on that tier goes.
 
-### `tj lemonade ls` / `tj lemonade sync`
+### `tj lemonade ls` / `tj lemonade get` / `tj lemonade sync`
 
 Lemonade keeps its own on-disk cache of models it has pulled, separate from the
 storage Turbo Jumbo manages.
@@ -405,14 +405,43 @@ storage Turbo Jumbo manages.
 
 ```console
 $ tj lemonade ls qwen3.6
-NAME                      REPO                              VARIANT                           SIZE  WHERE
-Qwen3.6-35B-A3B-GGUF      unsloth/Qwen3.6-35B-A3B-GGUF      Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  21.3 GiB
-Qwen3.6-35B-A3B-MTP-GGUF  unsloth/Qwen3.6-35B-A3B-MTP-GGUF  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  21.3 GiB  lemonade, local
+NAME                      REPO                              VARIANT                          RECIPE        SIZE  WHERE
+Qwen3.6-35B-A3B-GGUF      unsloth/Qwen3.6-35B-A3B-GGUF      Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  llamacpp  21.3 GiB
+Qwen3.6-35B-A3B-MTP-GGUF  unsloth/Qwen3.6-35B-A3B-MTP-GGUF  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  llamacpp  21.3 GiB  lemonade, local
+Qwen3.6-35B-A3B-FLM       FastFlowLM/Qwen3.6-35B-A3B        qwen3.6-moe:35b-a3b              flm       19.8 GiB  lemonade
 ```
 
 An optional second word filters by name or repo. `WHERE` reads `lemonade` for
-Lemonade's own cache and `local` for Turbo Jumbo's fast storage. It lists the
+Lemonade's own side and `local` for Turbo Jumbo's fast storage. It lists the
 catalog's models; omni collections and their components aren't shown.
+
+`RECIPE` separates two different kinds of entry. `llamacpp` rows come from the
+static catalog. `flm` rows are FastFlowLM's NPU models, which never appear in
+that catalog at all — a Lemonade server discovers them from its local `flm`
+binary, so they are read live from one server (`--peer <slug>`, or this
+machine). A server that isn't configured for FLM, or isn't answering, simply
+contributes no `flm` rows.
+
+`tj lemonade get <model>` downloads either kind into Turbo Jumbo storage,
+taking the name as `ls` prints it (a substring is enough; an ambiguous one is
+listed rather than guessed at):
+
+```console
+$ tj lemonade get Qwen3.6-35B-A3B-FLM
+████████████████████████ 100%  19.8 GiB / 19.8 GiB  47 MiB/s  7m9s
+downloaded 3/3 files · 19.8 GiB · 7m9s
+```
+
+For an `flm` row this fetches from the Hugging Face repo FastFlowLM's registry
+pins for that tag, at the pinned revision, and records the registry's file list
+as the model's complete set — the repo also carries NPU kernels for other
+targets, which aren't part of it. It is the `--exact` of `tj get`, applied for
+you. A tag the registry doesn't name has no Hugging Face source, and the
+command says so rather than guessing: the web UI's fallback there is to have
+the Lemonade server pull into its own FLM store, which is a different place
+than Turbo Jumbo storage.
+
+`--to cold`, `--delete-after` and `--dry-run` work as they do on `tj get`.
 
 `tj lemonade sync` reconciles the two: it moves Lemonade-only files into Turbo
 Jumbo, deletes Lemonade copies of files Turbo Jumbo already has, mirrors the

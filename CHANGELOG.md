@@ -30,8 +30,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
   `tj rm` deletes a model from one tier, and asks you to mean it: `--from` has
   no default, because a defaulted tier is how you delete the archived copy
   while meaning the local one, and `--yes` has to be typed on top. The Lemonade
-  catalog can be browsed with what you already hold marked on it, and its cache
-  reconciled with Turbo Jumbo's storage.
+  catalog can be browsed with what you already hold marked on it, downloaded
+  from with `tj lemonade get`, and its cache reconciled with Turbo Jumbo's
+  storage.
+
+  That listing reaches past the static catalog to FastFlowLM's NPU models,
+  which only exist inside a running Lemonade server — it discovers them from
+  its local `flm` binary, so they appear in no catalog file. `tj lemonade get`
+  downloads one from the Hugging Face repo FastFlowLM's registry pins for its
+  tag, at the pinned revision, recording that file list as the model's complete
+  set: the repo also carries NPU kernels for other targets, which would
+  otherwise be counted against it as missing forever.
 
   Nothing prompts, so it works unattended: `--dry-run` prints the plan without
   acting, anything that removes files has to be spelled out, and exit codes

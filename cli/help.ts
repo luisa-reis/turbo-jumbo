@@ -12,7 +12,8 @@ COMMANDS
   copy <model>        Copy between local, cold storage and peers
   audit <model>|--all Verify files against Hugging Face; exit 2 on findings
   rm <model>          Delete a model's files from one storage tier
-  lemonade ls|sync    Browse the Lemonade catalog, or reconcile its cache
+  lemonade ls|get|sync  Browse the Lemonade catalog, download from it, or
+                      reconcile its cache
   version             Server version, and the URL this CLI is pointed at
   help                This text
 
