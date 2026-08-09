@@ -1,7 +1,7 @@
 import {CliError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import type {TransferContext} from '@/cli/commands/get';
-import {runTransfer, summarise} from '@/cli/transfer';
+import {runConflictCheck, runTransfer, summarise} from '@/cli/transfer';
 import {fetchPeers, type PeerConfig} from '@/cli/fetch-peers';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
@@ -66,41 +66,97 @@ export async function copy(
   }
 
   const dest = resolveDestination(inv.to, peers);
-  const total = files.reduce((s, f) => s + f.size, 0);
 
-  if (inv.dryRun) {
-    return {
-      json: {dryRun: true, model: row.name, files, to: inv.to, total},
-      table: renderPlan(row.name, files, total, inv.to, inv.deleteAfter),
-      quiet: files.map((f) => f.path),
-    };
-  }
-
-  // No `skip` list, and no `/api/v1/copy/check` first. That endpoint exists to
-  // find files that differ at the destination and ask a human which to
-  // overwrite — a question a CLI with no prompts cannot delegate — and it hashes
-  // both copies to do it. The copy itself already resumes from whatever prefix
-  // matches, so a file that is already there transfers almost nothing; running
-  // the check would add a full read of every byte to save that same read.
-  const result = await runTransfer({
+  // Ask what is already at the destination before sending anything, the same
+  // way the Copy button does, and leave byte-identical files alone. Only a
+  // copy within one machine can resume its way out of re-sending a file that
+  // is already there — an upload to a peer always starts at byte zero — so
+  // without this a repeat `tj copy` re-transfers the whole model. The check
+  // also returns the file list expanded with the model's support files, so the
+  // plan below counts what will really move.
+  const check = await runConflictCheck({
     client,
-    path: '/api/v1/copy',
     body: {
       files,
       toColdStorage: dest.toColdStorage,
       toPeers: dest.toPeers,
-      deleteAfterCopy: inv.deleteAfter,
     },
-    format: 'json',
-    expectedFiles: files.length,
     showProgress: ctx.showProgress,
     isTty: ctx.isTty,
     write: ctx.write,
   });
 
+  // `--delete-after` removes a source only for files this run actually put
+  // into cold storage, and a skipped file was never put there — skipping would
+  // leave every source behind and the flag would quietly stop doing what it
+  // says. Copying into cold storage resumes and rewrites nothing when the
+  // archive already matches, so there is little to save by skipping anyway.
+  const skip = inv.deleteAfter ? [] : check.skip;
+  const skipped = new Set(skip.map((s) => s.file));
+  const filesToCopy = check.files;
+  const moving = filesToCopy.filter((f) => !skipped.has(f.path));
+  const total = moving.reduce((s, f) => s + f.size, 0);
+
+  if (inv.dryRun) {
+    return {
+      json: {
+        dryRun: true,
+        model: row.name,
+        files: filesToCopy,
+        skipped: [...skipped],
+        to: inv.to,
+        total,
+      },
+      table: renderPlan(
+        row.name,
+        filesToCopy,
+        skipped,
+        total,
+        inv.to,
+        inv.deleteAfter,
+      ),
+      quiet: moving.map((f) => f.path),
+    };
+  }
+
+  if (moving.length === 0) {
+    return {
+      json: {
+        model: row.name,
+        files: filesToCopy,
+        skipped: [...skipped],
+        to: inv.to,
+        total: 0,
+        elapsedMs: 0,
+      },
+      table: `Nothing to copy: all ${skipped.size} file(s) of ${row.name} are already at ${inv.to}.`,
+      quiet: [],
+    };
+  }
+
+  const result = await runTransfer({
+    client,
+    path: '/api/v1/copy',
+    body: {
+      files: filesToCopy,
+      toColdStorage: dest.toColdStorage,
+      toPeers: dest.toPeers,
+      deleteAfterCopy: inv.deleteAfter,
+      skip,
+    },
+    format: 'json',
+    expectedFiles: moving.length,
+    showProgress: ctx.showProgress,
+    isTty: ctx.isTty,
+    write: ctx.write,
+  });
+
+  const alreadyThere =
+    skipped.size > 0 ? ` · ${skipped.size} already there` : '';
+
   if (result.errors.length > 0) {
     throw new CliError(
-      `${summarise('copied', result)}\nFailed:\n` +
+      `${summarise('copied', result)}${alreadyThere}\nFailed:\n` +
         result.errors.map((e) => `  ${e}`).join('\n'),
     );
   }
@@ -108,12 +164,13 @@ export async function copy(
   return {
     json: {
       model: row.name,
-      files,
+      files: filesToCopy,
+      skipped: [...skipped],
       to: inv.to,
       total,
       elapsedMs: result.elapsedMs,
     },
-    table: summarise('copied', result),
+    table: `${summarise('copied', result)}${alreadyThere}`,
     quiet: [],
   };
 }
@@ -199,6 +256,7 @@ function resolveDestination(to: string, peers: PeerConfig[]): Destination {
 function renderPlan(
   model: string,
   files: SourceFile[],
+  skipped: Set<string>,
   total: number,
   to: string,
   deleteAfter: boolean,
@@ -208,11 +266,23 @@ function renderPlan(
     {header: 'FROM', value: (f) => f.from},
     {header: 'SIZE', value: (f) => formatSize(f.size), align: 'right'},
   ];
+  // The listing stays whole — a file left alone is part of the answer — so the
+  // ones that won't move say so rather than vanishing from the plan.
+  if (skipped.size > 0) {
+    columns.push({
+      header: 'STATUS',
+      value: (f) => (skipped.has(f.path) ? 'already there' : 'copy'),
+    });
+  }
   return [
-    `Would copy ${files.length} file(s) of ${model} to ${to}:`,
+    `Would copy ${files.length - skipped.size} file(s) of ${model} to ${to}:`,
     '',
     renderTable(columns, files),
     '',
-    `total ${formatSize(total)}${deleteAfter ? ' · sources removed after copying' : ''}`,
+    `total ${formatSize(total)}` +
+      (skipped.size > 0
+        ? ` · ${skipped.size} already at the destination`
+        : '') +
+      (deleteAfter ? ' · sources removed after copying' : ''),
   ].join('\n');
 }

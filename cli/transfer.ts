@@ -1,6 +1,13 @@
 import {CliError, type Client} from '@/cli/client';
 import {hasDownloadFailure, parseNotices} from '@/lib/hf/download-output';
 import {
+  checkStatusLabel,
+  readCheckStream,
+  skipListFor,
+  type ConflictItem,
+} from '@/lib/storage/check-progress';
+import type {SourceFile} from '@/lib/copy/source-files';
+import {
   createJsonProgressReader,
   createMilestoneEmitter,
   createTextProgressReader,
@@ -116,6 +123,82 @@ export async function runTransfer(
         : [];
 
   return {progress, errors, elapsedMs: Date.now() - started, expectedFiles};
+}
+
+export interface ConflictCheck {
+  /** The copy's file list, expanded by the server with the model's support files. */
+  files: SourceFile[];
+  /** (file, destination) pairs already byte-identical at the destination. */
+  skip: Array<{file: string; destination: string}>;
+}
+
+/**
+ * Ask `/api/v1/copy/check` what is already at the destination, and turn its
+ * answer into the copy's skip list.
+ *
+ * This is the same call and the same default the Copy button uses: anything
+ * byte-identical is left alone, anything that differs is copied over. The
+ * button can offer that as a choice and a command cannot, but the default is
+ * the interesting part — without it a copy re-sends files that are already
+ * there, and only a copy within one machine can resume its way out of that
+ * (a peer upload always starts at byte zero).
+ *
+ * It runs with `hashFallback: false`, so it only ever answers from the SHA256s
+ * the sidecars already record and never reads a file to compare it. Skipping
+ * exists to save a transfer; a check that read both copies of every file to
+ * decide would cost more than the transfer it saves, and would make `tj copy`
+ * slower than not skipping at all. A pair it cannot settle for free is simply
+ * copied.
+ */
+export async function runConflictCheck(opts: {
+  client: Client;
+  body: {files: SourceFile[]; toColdStorage: boolean; toPeers: string[]};
+  showProgress: boolean;
+  isTty: boolean;
+  write: (s: string) => void;
+}): Promise<ConflictCheck> {
+  const {client, body, showProgress, isTty, write} = opts;
+  const path = '/api/v1/copy/check';
+
+  let res: Response;
+  try {
+    res = await fetch(`${client.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...body, hashFallback: false}),
+    });
+  } catch (e) {
+    throw new CliError(
+      `Cannot reach the Turbo Jumbo server at ${client.baseUrl} ` +
+        `(${e instanceof Error ? e.message : String(e)}).`,
+    );
+  }
+  if (!res.ok || !res.body) {
+    const text = (await res.text().catch(() => '')).trim();
+    throw new CliError(
+      `${path} returned ${res.status} ${res.statusText}${text ? `: ${text}` : ''}`,
+    );
+  }
+
+  let drew = false;
+  const result = await readCheckStream<ConflictItem, SourceFile>(res, (p) => {
+    if (!showProgress || !isTty) return;
+    write(`\r${checkStatusLabel(p)}`);
+    drew = true;
+  });
+  // Wipe the status line so the copy's own bar starts on clean ground.
+  if (drew) write('\r\x1b[K');
+
+  // No result frame means the stream ended early. The Copy button treats that
+  // as "don't copy", and so does this: a copy that silently forgot its skip
+  // list would re-send everything.
+  if (!result) {
+    throw new CliError(
+      'The pre-copy check ended without a result; nothing was copied.',
+    );
+  }
+
+  return {files: result.files, skip: skipListFor(result.conflicts)};
 }
 
 /**

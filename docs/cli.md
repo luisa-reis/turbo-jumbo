@@ -230,11 +230,29 @@ never used as the source for repairing another.
 `--to` takes `cold` or a peer slug. `--delete-after` removes the source once
 the copy is verified.
 
-**Existing files at the destination are overwritten, not queried.** The web UI
-can stop and ask which conflicting files to replace; a CLI with no prompts
-can't. Files already there transfer almost nothing, because the copy resumes
-from whatever prefix already matches — so re-running an interrupted copy is how
-you resume it.
+**Files already at the destination are left alone; ones that differ are
+overwritten, not queried.** Before sending anything, `tj copy` asks the server
+what the destination already holds and skips every file that is byte-identical
+to the source — the same comparison, and the same default, as the web UI's
+conflict dialog. The UI can then stop and ask which of the differing files to
+replace; a CLI with no prompts can't, so it replaces them.
+
+The comparison is answered entirely from the SHA256s recorded when each file
+was downloaded, so it reads no file bytes at all — `tj copy` reads a file only
+in order to copy it. A pair neither side can vouch for is therefore left
+undecided and copied, rather than read twice to find out it needn't be. (The
+web UI does fall back to comparing checksums there, because someone asked it
+to and is watching it happen.)
+
+Re-running an interrupted copy is therefore how you resume it: the files that
+completed are skipped outright, and a file cut off partway is copied again —
+from the start when the destination is a peer, from the matching prefix when
+it is cold storage or this machine.
+
+`--delete-after` turns skipping off. It removes a source only once this run has
+put that file into cold storage, so a skipped file would keep its source
+forever; the copy resumes and rewrites nothing when the archive already
+matches, so little is lost.
 
 ### `--dry-run`
 

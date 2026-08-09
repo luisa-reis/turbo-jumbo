@@ -10,23 +10,13 @@ import {Card} from '@astryxdesign/core/Card';
 import {Badge} from '@astryxdesign/core/Badge';
 import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
 import {formatSize} from '@/lib/format/bytes';
+import {
+  isIdenticalAtDestination,
+  type ConflictItem,
+} from '@/lib/storage/check-progress';
 import type {Peer} from '@/lib/config';
 
-export interface ConflictItem {
-  file: string;
-  destination: string; // "cold-storage" | peer address
-  sourceSize: number;
-  destSize: number;
-  sizeMatch: boolean;
-  // Which digest the two copies were compared with, and the result. The check
-  // prefers the SHA256 both sidecars already record (no bytes read) and falls
-  // back to md5-ing both copies; null means it couldn't compare at all — the
-  // sizes differ, or one side offered no digest.
-  digest: 'sha256' | 'md5' | null;
-  digestMatch: boolean | null;
-  sourceDigest: string | null;
-  destDigest: string | null;
-}
+export type {ConflictItem};
 
 // Digests are identity, not reading material: enough to eyeball two rows
 // against each other, with the algorithm named so sha256 and md5 rows are
@@ -55,7 +45,7 @@ export function ConflictsModal({
   const peerNameMap = new Map((peers ?? []).map((p) => [p.address, p.name]));
   // Checked = overwrite. Default to overwriting anything that isn't byte-identical.
   const [overwrite, setOverwrite] = useState<Set<string>>(
-    new Set(conflicts.filter((c) => c.digestMatch !== true).map(key)),
+    new Set(conflicts.filter((c) => !isIdenticalAtDestination(c)).map(key)),
   );
 
   function toggleOverwrite(conflict: ConflictItem) {

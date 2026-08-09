@@ -17,7 +17,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   one, `tj disk --all` reports free space here and on every peer, and
   `tj peers` says which machines are answering. `tj get` downloads from Hugging
   Face — naming a repo alone lists its quantizations rather than guessing —
-  and `tj copy` moves models between fast storage, cold storage and peers.
+  and `tj copy` moves models between fast storage, cold storage and peers,
+  leaving alone any file the destination already has an identical copy of —
+  so re-running an interrupted copy sends what is missing rather than the
+  whole model again. It decides that from the checksums recorded at download
+  time and never reads a file it isn't going to send: one it can't settle for
+  free is simply copied.
 
   `tj audit` verifies files against Hugging Face and reports what doesn't
   match, exiting `2` when it finds something and `1` when it couldn't check at

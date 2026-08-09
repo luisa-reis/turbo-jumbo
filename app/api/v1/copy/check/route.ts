@@ -73,10 +73,17 @@ export async function POST(req: Request) {
     files: SourceFile[];
     toColdStorage: boolean;
     toPeers: string[];
+    hashFallback?: boolean;
   }>(req, isObject);
   if (body instanceof Response) return body;
 
   const {files, toColdStorage, toPeers} = body;
+  // Whether a same-size pair neither sidecar can vouch for may be settled by
+  // md5-ing both copies. On by default, for the Copy button: a person asked
+  // for the comparison and is watching it run. `tj copy` turns it off — it
+  // reads a file only to copy it, so a pair it can't settle for free is
+  // copied instead of read twice to find out it needn't be.
+  const hashFallback = body.hashFallback !== false;
   if (
     !Array.isArray(files) ||
     files.some(
@@ -319,7 +326,7 @@ export async function POST(req: Request) {
               sourceDigest = srcSha;
               destDigest = dstSha;
               digestMatch = srcSha === dstSha;
-            } else {
+            } else if (hashFallback) {
               await write({
                 type: 'progress',
                 done: pairsDone,
@@ -336,6 +343,9 @@ export async function POST(req: Request) {
                 digestMatch = sourceDigest === destDigest;
               }
             }
+            // Without the fallback the pair is left undecided (digest null), and
+            // an undecided file is not identical — the caller copies it rather
+            // than reading both copies to find out.
           }
 
           conflicts.push({
