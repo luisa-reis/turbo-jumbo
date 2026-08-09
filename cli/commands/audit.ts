@@ -1,8 +1,13 @@
 import {CliError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import type {TransferContext} from '@/cli/commands/get';
-import {fetchPeers} from '@/cli/fetch-peers';
-import {peerSlug} from '@/lib/peers/peer-slug';
+import {
+  describeLocation as describe,
+  locationParam,
+  modelsPath,
+  resolveLocationFlags,
+  type Location,
+} from '@/cli/location';
 import type {CliInvocation} from '@/lib/cli/args';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
@@ -51,7 +56,7 @@ export async function audit(
     );
   }
 
-  const location = await resolveLocation(client, inv);
+  const location = await resolveLocationFlags(client, inv);
   const models = await client.json<Model[]>(modelsPath(location));
   const targets = auditTargets(models, pattern);
   if (targets.length === 0) {
@@ -90,41 +95,6 @@ export async function audit(
   if (auditExitCode(unresolved) === 2) throw new AuditFindings(output);
   return output;
 }
-
-type Location =
-  | {kind: 'local'}
-  | {kind: 'cold'}
-  | {kind: 'peer'; slug: string; address: string};
-
-async function resolveLocation(
-  client: Client,
-  inv: CliInvocation,
-): Promise<Location> {
-  if (inv.cold) return {kind: 'cold'};
-  if (!inv.peer) return {kind: 'local'};
-  const peers = await fetchPeers(client);
-  const peer = peers.find((p) => peerSlug(p) === inv.peer);
-  if (!peer) {
-    throw new CliError(
-      `Unknown peer '${inv.peer}'. Try: ${peers.map(peerSlug).join(', ')}`,
-    );
-  }
-  return {kind: 'peer', slug: inv.peer, address: peer.address};
-}
-
-// `/api/v1/audit` names a peer by address, not slug.
-const locationParam = (l: Location) =>
-  l.kind === 'cold' ? 'cold-storage' : l.kind === 'local' ? 'local' : l.address;
-
-const modelsPath = (l: Location) =>
-  l.kind === 'cold'
-    ? '/api/v1/cold-storage'
-    : l.kind === 'local'
-      ? '/api/v1/local-models'
-      : `/api/v1/peers/${l.slug}/models`;
-
-const describe = (l: Location) =>
-  l.kind === 'cold' ? 'cold storage' : l.kind === 'local' ? 'local' : l.slug;
 
 /** Stream `/api/v1/audit`, rendering progress as the hashes come in. */
 async function freshAudit(

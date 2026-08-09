@@ -13,6 +13,8 @@ import {version} from '@/cli/commands/version';
 import {get, type TransferContext} from '@/cli/commands/get';
 import {copy} from '@/cli/commands/copy';
 import {audit, AuditFindings} from '@/cli/commands/audit';
+import {rm} from '@/cli/commands/rm';
+import {lemonade} from '@/cli/commands/lemonade';
 
 /**
  * `tj` entry point: parse, resolve the server, dispatch, print. Every exit code
@@ -119,6 +121,10 @@ async function run(
       return copy(client, inv, transferContext(format));
     case 'audit':
       return audit(client, inv, transferContext(format));
+    case 'rm':
+      return rm(client, inv);
+    case 'lemonade':
+      return lemonade(client, inv, color);
     case 'help':
       // Handled before dispatch; listed so the switch stays exhaustive and a
       // new command can't be added without being wired up here.

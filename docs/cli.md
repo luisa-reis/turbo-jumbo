@@ -9,9 +9,6 @@ It's a client for a running Turbo Jumbo server, not a second implementation.
 Everything it reports comes from the same code the web UI uses, so the two can't
 disagree with each other.
 
-> **Deleting isn't here yet.** `tj` reads, downloads, copies and audits today;
-> `rm` and the Lemonade commands are planned for a later phase.
-
 ## Running it
 
 From a checkout:
@@ -335,6 +332,88 @@ saying so. Findings with no automatic repair — a checksum mismatch, a file who
 source can't be determined — are named and left for the web UI, which can ask
 you the questions a CLI can't.
 
+### `tj rm <model> --from <where> --yes`
+
+Deletes a model's files from one storage tier. This is the only irreversible
+command here, so **both halves of the intent have to be typed**:
+
+```console
+$ tj rm gemma-3-270m
+tj rm needs --from local|cold|<peer>: which copy should go?
+Try --dry-run first to see what would be deleted.
+
+$ tj rm gemma-3-270m --from local
+tj rm needs --yes to confirm, since it deletes files.
+Try --dry-run first to see what would go.
+```
+
+`--from` has no default on purpose. A defaulted tier is exactly how someone
+removes the archived copy while meaning the local one — the mistake you cannot
+undo. `--yes` matches the convention the `hf` CLI uses for its destructive
+commands.
+
+`--dry-run` lists what would go and touches nothing:
+
+```console
+$ tj rm gemma-3-270m --from local --dry-run
+Would delete 1 file(s) of unsloth/gemma-3-270m-it-GGUF from local:
+
+FILE                                                            SIZE
+unsloth/gemma-3-270m-it-GGUF/gemma-3-270m-it-UD-IQ2_XXS.gguf  171.8 MiB
+
+total 171.8 MiB
+
+$ tj rm gemma-3-270m --from local --yes
+deleted 1 file(s) of unsloth/gemma-3-270m-it-GGUF from local · 171.8 MiB
+```
+
+An ambiguous pattern is refused rather than resolved:
+
+```console
+$ tj rm qwen --from cold --yes
+'qwen' matches 10 models. Narrow it:
+  Qwen/Qwen3.5-0.8B
+  unsloth/Qwen3-8B-GGUF
+  …
+```
+
+`--quant` narrows to particular quantizations; without it, every file of the
+model on that tier goes.
+
+### `tj lemonade ls` / `tj lemonade sync`
+
+Lemonade keeps its own on-disk cache of models it has pulled, separate from the
+storage Turbo Jumbo manages.
+
+`tj lemonade ls` shows the catalog, marked with what this machine already holds:
+
+```console
+$ tj lemonade ls qwen3.6
+NAME                      REPO                              VARIANT                           SIZE  WHERE
+Qwen3.6-35B-A3B-GGUF      unsloth/Qwen3.6-35B-A3B-GGUF      Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  21.3 GiB
+Qwen3.6-35B-A3B-MTP-GGUF  unsloth/Qwen3.6-35B-A3B-MTP-GGUF  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  21.3 GiB  lemonade, local
+```
+
+An optional second word filters by name or repo. `WHERE` reads `lemonade` for
+Lemonade's own cache and `local` for Turbo Jumbo's fast storage. It lists the
+catalog's models; omni collections and their components aren't shown.
+
+`tj lemonade sync` reconciles the two: it moves Lemonade-only files into Turbo
+Jumbo, deletes Lemonade copies of files Turbo Jumbo already has, mirrors the
+rest back as symlinks, and clears dangling ones. Two of those four **delete**,
+so it needs `--yes` — and `--dry-run` shows the whole plan first:
+
+```console
+$ tj lemonade sync --dry-run
+REPO                        MOVE  DEDUP  LINK  STALE  NOTE
+unsloth/Qwen3.6-35B-A3B…       0      2     1      0
+
+would move 0, deduplicate 2, link 1, remove 0 stale link(s)
+deduplicating and removing stale links deletes files from Lemonade's cache
+```
+
+`--peer <slug>` syncs on that peer instead of this machine.
+
 ### `tj version`
 
 ```console
@@ -482,11 +561,26 @@ $ tj get unsloth/DeepSeek-V4-Flash-0731-GGUF --quant UD-Q4_K_XL --dry-run \
     --format json | jq '.totalBytes'
 ```
 
-## What isn't here yet
+## How the safety flags fit together
 
-- **Phase 4** — `lemonade ls/sync`, and `rm`.
+Three different flags gate three different risks, and the distinction is
+deliberate:
 
-The designs are written up in
-[phase 1](specs/2026-08-08-tj-cli-phase-1-design.md) (conventions and the read
-commands), [phase 2](specs/2026-08-08-tj-cli-phase-2-design.md) (transfers) and
-[phase 3](specs/2026-08-08-tj-cli-phase-3-design.md) (audit).
+|                  |                                                                    |
+| ---------------- | ------------------------------------------------------------------ |
+| `--dry-run`      | On every command that changes anything: show the plan, do nothing  |
+| `--delete-after` | An _option_ on a transfer: also remove the source afterwards       |
+| `--allow-delete` | Widens `audit --fix` to a repair that deletes (duplicates)         |
+| `--yes`          | Confirms a command whose **job** is removal: `rm`, `lemonade sync` |
+
+Nothing prompts, anywhere. A tool meant for cron can't block on a terminal that
+isn't there, and a prompt that gets skipped when non-interactive makes the safe
+path the one that only happens when somebody is watching.
+
+## The design docs
+
+- [Phase 1](specs/2026-08-08-tj-cli-phase-1-design.md) — conventions and the
+  read commands.
+- [Phase 2](specs/2026-08-08-tj-cli-phase-2-design.md) — transfers.
+- [Phase 3](specs/2026-08-08-tj-cli-phase-3-design.md) — audit.
+- [Phase 4](specs/2026-08-08-tj-cli-phase-4-design.md) — removal and Lemonade.

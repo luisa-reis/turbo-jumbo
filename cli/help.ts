@@ -11,6 +11,8 @@ COMMANDS
   get <repo|url>      Download from Hugging Face
   copy <model>        Copy between local, cold storage and peers
   audit <model>|--all Verify files against Hugging Face; exit 2 on findings
+  rm <model>          Delete a model's files from one storage tier
+  lemonade ls|sync    Browse the Lemonade catalog, or reconcile its cache
   version             Server version, and the URL this CLI is pointed at
   help                This text
 
@@ -30,6 +32,11 @@ TRANSFERS (get, copy)
   Nothing prompts. --delete-after must be typed, and --dry-run shows what
   would happen first. Downloads run on the server this CLI points at; to
   fetch onto another machine, point at it with --url.
+
+REMOVING (rm, lemonade sync)
+  --from local|cold|<peer>   Which copy rm deletes. Required: no default
+  -y, --yes           Confirm. Required, since these delete files
+  --dry-run           Show what would go, and stop
 
 AUDIT
   --cached            Last-known verdicts from sidecars: instant, no hashing

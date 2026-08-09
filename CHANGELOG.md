@@ -27,8 +27,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   that repairs everything it found exits `0`, because nothing is wrong any
   more.
 
+  `tj rm` deletes a model from one tier, and asks you to mean it: `--from` has
+  no default, because a defaulted tier is how you delete the archived copy
+  while meaning the local one, and `--yes` has to be typed on top. The Lemonade
+  catalog can be browsed with what you already hold marked on it, and its cache
+  reconciled with Turbo Jumbo's storage.
+
   Nothing prompts, so it works unattended: `--dry-run` prints the plan without
-  transferring, removals have to be typed (`--delete-after`), and exit codes
+  acting, anything that removes files has to be spelled out, and exit codes
   are meaningful, so `tj copy … || alert` does what you would expect. Output is
   a table for people and `--format json` for `jq`; piping never silently
   changes the format. It talks to a running Turbo Jumbo server, so what it

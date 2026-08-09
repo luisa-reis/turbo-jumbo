@@ -20,6 +20,8 @@ export const COMMANDS = [
   'get',
   'copy',
   'audit',
+  'rm',
+  'lemonade',
   'help',
 ] as const;
 export type Command = (typeof COMMANDS)[number];
@@ -45,6 +47,8 @@ export interface CliInvocation {
   fix: boolean;
   allowDelete: boolean;
   cached: boolean;
+  // Removal and sync (phase 4).
+  yes: boolean;
 }
 
 export type ParseResult =
@@ -68,6 +72,7 @@ const OPTIONS = {
   fix: {type: 'boolean'},
   'allow-delete': {type: 'boolean'},
   cached: {type: 'boolean'},
+  yes: {type: 'boolean', short: 'y'},
 } as const;
 
 function isCommand(s: string): s is Command {
@@ -146,5 +151,6 @@ function invocation(
     fix: values.fix ?? false,
     allowDelete: values['allow-delete'] ?? false,
     cached: values.cached ?? false,
+    yes: values.yes ?? false,
   };
 }
