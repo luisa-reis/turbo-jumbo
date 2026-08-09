@@ -20,7 +20,7 @@ import type {
   AuditResult,
   UpdateResult,
 } from '@/lib/audit/audit';
-import {rowAudit, rowUpdates} from '@/lib/audit/row-audit';
+import {companionPaths, rowAudit, rowUpdates} from '@/lib/audit/row-audit';
 import type {RepoFile} from '@/lib/models/repo-files';
 import {
   augmentWithPeerOnlyQuants,
@@ -419,17 +419,13 @@ export function ModelsTableClient({
             renderCell: (item: DisplayRow) => {
               if (item.fileState) return null;
               const results = auditResults ?? new Map<string, AuditResult>();
-              // A model (depth 0) row also shows verdicts for files that
-              // belong to it but aren't on disk — e.g. a synthetic
-              // missing-mmproj verdict keyed `<repoId>/mmproj-F16.gguf`.
-              const companionPaths =
-                item.depth === 0
-                  ? [...results.keys()].filter(
-                      (p) =>
-                        p.startsWith(item.key + '/') && !item.paths.includes(p),
-                    )
-                  : [];
-              const auditPaths = [...item.paths, ...companionPaths];
+              // A row also shows verdicts for files that belong to it but
+              // aren't on disk — e.g. a synthetic missing-mmproj verdict keyed
+              // `<repoId>/mmproj-F16.gguf`, or a split quant's absent shards.
+              const auditPaths = [
+                ...item.paths,
+                ...companionPaths(item, results.keys()),
+              ];
               const failures = auditPaths
                 .map((p) => results.get(p))
                 .filter(

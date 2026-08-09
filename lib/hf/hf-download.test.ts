@@ -4,6 +4,7 @@ import {
   repoDownloadKind,
   defaultDownloadSelection,
   isPickOneSafetensorsRepo,
+  shardSetPaths,
 } from '@/lib/hf/hf-download';
 
 // A Comfy-Org "split_files" component bundle: a VAE plus several text-encoder
@@ -124,6 +125,45 @@ test('repoDownloadFiles picks weights individually for a ggml .bin repo (whisper
 });
 
 const asFiles = (paths: string[]) => paths.map((path) => ({path}));
+
+test('shardSetPaths gathers every shard of the set a filename belongs to', () => {
+  const files = asFiles([
+    'UD-IQ3_S/big-UD-IQ3_S-00001-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00002-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00003-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00004-of-00004.gguf',
+    'UD-IQ4_XS/big-UD-IQ4_XS-00001-of-00002.gguf',
+  ]);
+  expect(shardSetPaths(files, 'big-UD-IQ3_S-00002-of-00004.gguf')).toEqual([
+    'UD-IQ3_S/big-UD-IQ3_S-00001-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00002-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00003-of-00004.gguf',
+    'UD-IQ3_S/big-UD-IQ3_S-00004-of-00004.gguf',
+  ]);
+});
+
+test('shardSetPaths keeps sets of the same base apart by shard count', () => {
+  // A repo that re-uploaded a quant at a different shard count: the two sets
+  // share a base name, so only the matching -of-NNNNN is the file's set.
+  const files = asFiles([
+    'big-Q4_K_M-00001-of-00002.gguf',
+    'big-Q4_K_M-00002-of-00002.gguf',
+    'big-Q4_K_M-00001-of-00003.gguf',
+  ]);
+  expect(shardSetPaths(files, 'big-Q4_K_M-00001-of-00003.gguf')).toEqual([
+    'big-Q4_K_M-00001-of-00003.gguf',
+  ]);
+});
+
+test('shardSetPaths returns nothing for a file that is not a shard', () => {
+  const files = asFiles(['a-Q8_0.gguf', 'big-Q4_K_M-00001-of-00002.gguf']);
+  expect(shardSetPaths(files, 'a-Q8_0.gguf')).toEqual([]);
+});
+
+test('shardSetPaths returns nothing when the listing holds no member of the set', () => {
+  const files = asFiles(['other-Q8_0.gguf']);
+  expect(shardSetPaths(files, 'big-Q4_K_M-00001-of-00002.gguf')).toEqual([]);
+});
 
 test('defaultDownloadSelection takes the whole safetensors model', () => {
   const files = asFiles(repoDownloadFiles(safetensorsRepo));

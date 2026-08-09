@@ -1,5 +1,10 @@
 import {test, expect} from 'bun:test';
-import {rowAudit, rowUpdates} from '@/lib/audit/row-audit';
+import {
+  companionPaths,
+  redownloadableFailures,
+  rowAudit,
+  rowUpdates,
+} from '@/lib/audit/row-audit';
 import type {
   AuditProgressEvent,
   AuditResult,
@@ -246,4 +251,84 @@ test('rowUpdates ignores paths not in the row and is empty without a map', () =>
   ]);
   expect(rowUpdates(['b.gguf'], map)).toEqual([]);
   expect(rowUpdates(['a.gguf'], undefined)).toEqual([]);
+});
+
+const REPO = 'unsloth/Split-Test-GGUF';
+const shardPath = (i: number) =>
+  `${REPO}/UD-IQ3_S/Split-Test-UD-IQ3_S-0000${i}-of-00004.gguf`;
+
+test('companionPaths gives a model row the verdicts of files it lacks', () => {
+  const row = {depth: 0, key: REPO, paths: [shardPath(1)], missingIndices: []};
+  const keys = [shardPath(1), shardPath(2), `${REPO}/mmproj-F16.gguf`];
+  expect(companionPaths(row, keys)).toEqual([
+    shardPath(2),
+    `${REPO}/mmproj-F16.gguf`,
+  ]);
+});
+
+test('companionPaths gives a split quant row its missing shards', () => {
+  const row = {
+    depth: 1,
+    key: `${REPO}::UD-IQ3_S`,
+    paths: [shardPath(1)],
+    missingIndices: [2, 3, 4],
+  };
+  const keys = [shardPath(1), shardPath(2), shardPath(3), shardPath(4)];
+  expect(companionPaths(row, keys)).toEqual([
+    shardPath(2),
+    shardPath(3),
+    shardPath(4),
+  ]);
+});
+
+test('companionPaths keeps another file of the model off a quant row', () => {
+  // The projector belongs to the model, not to this quantization's shard set.
+  const row = {
+    depth: 1,
+    key: `${REPO}::UD-IQ3_S`,
+    paths: [shardPath(1)],
+    missingIndices: [2],
+  };
+  expect(
+    companionPaths(row, [shardPath(1), `${REPO}/mmproj-F16.gguf`]),
+  ).toEqual([]);
+});
+
+test('companionPaths gives a complete quant row nothing', () => {
+  const row = {
+    depth: 1,
+    key: `${REPO}::UD-IQ3_S`,
+    paths: [shardPath(1), shardPath(2)],
+    missingIndices: [],
+  };
+  expect(companionPaths(row, [shardPath(1), shardPath(2)])).toEqual([]);
+});
+
+const incomplete = (file: string, shardGap?: true): AuditResult => ({
+  file,
+  status: 'incomplete',
+  ...(shardGap ? {shardGap} : {}),
+});
+
+test('redownloadableFailures skips a file whose set, not itself, is incomplete', () => {
+  const failures = [
+    incomplete(shardPath(1), true),
+    incomplete(shardPath(2)),
+    incomplete(shardPath(3)),
+  ];
+  expect(redownloadableFailures(failures).map((f) => f.file)).toEqual([
+    shardPath(2),
+    shardPath(3),
+  ]);
+});
+
+test('redownloadableFailures keeps a partially-downloaded file and drops other verdicts', () => {
+  const failures = [
+    incomplete('a.gguf'),
+    result('b.gguf', 'checksum-mismatch'),
+    result('c.gguf', 'misplaced'),
+  ];
+  expect(redownloadableFailures(failures).map((f) => f.file)).toEqual([
+    'a.gguf',
+  ]);
 });

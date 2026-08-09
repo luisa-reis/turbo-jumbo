@@ -114,6 +114,10 @@ export interface AuditResult {
   message?: string;
   hf?: HfSummary; // present whenever an HF source was inferred
   cached?: boolean; // derived from a sidecar (a prior run), not freshly computed
+  // Set on a present shard of a split whose set is missing members: the file
+  // itself is intact, so re-downloading *it* fixes nothing — the absent shards
+  // carry their own verdicts (see lib/audit/missing-shards).
+  shardGap?: boolean;
   // The revisions inspected (latest first) when the file matched none of them;
   // only set on a fresh size/checksum failure, so the UI can show what was
   // ruled out — together with the local file as observed, for comparison:

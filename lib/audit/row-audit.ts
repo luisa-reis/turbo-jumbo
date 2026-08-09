@@ -4,6 +4,7 @@ import type {
   AuditStatus,
   UpdateResult,
 } from '@/lib/audit/audit';
+import {shardSetPaths} from '@/lib/hf/hf-download';
 
 // Ordering for aggregating a row's verdicts: the row shows its worst one.
 const AUDIT_SEVERITY: Record<AuditStatus, number> = {
@@ -89,6 +90,47 @@ export function rowAudit(
     message: worst.message,
     cached: !!worst.cached,
   };
+}
+
+/**
+ * The verdicts a row should display for files that belong to it but aren't on
+ * disk — the synthetic `incomplete` results the audit streams for a missing
+ * projector, an un-downloaded expected file, or a gap in a shard set. They key
+ * at the path the file belongs at, so nothing in the row's own `paths` claims
+ * them:
+ *
+ *  - a model row (depth 0) takes everything keyed under its repo directory;
+ *  - a split quant row takes the absent members of its own shard set, so the
+ *    hovercard's download action survives expanding the model.
+ *
+ * `resultPaths` are the keys of the current audit results.
+ */
+export function companionPaths(
+  row: {depth: number; key: string; paths: string[]; missingIndices: number[]},
+  resultPaths: Iterable<string>,
+): string[] {
+  const keys = [...resultPaths];
+  if (row.depth === 0) {
+    return keys.filter(
+      (p) => p.startsWith(row.key + '/') && !row.paths.includes(p),
+    );
+  }
+  if (row.missingIndices.length === 0 || row.paths.length === 0) return [];
+  const shard = row.paths[0].split('/').pop() ?? '';
+  return shardSetPaths(
+    keys.map((path) => ({path})),
+    shard,
+  ).filter((p) => !row.paths.includes(p));
+}
+
+/**
+ * The failures in a row's hovercard that a re-download can recover: files that
+ * are absent or only partly transferred. A file flagged only because its split
+ * set has a gap (`shardGap`) is not one of them — the file itself is intact,
+ * and it's the *missing* shards, listed alongside it, that need fetching.
+ */
+export function redownloadableFailures(failures: AuditResult[]): AuditResult[] {
+  return failures.filter((f) => f.status === 'incomplete' && !f.shardGap);
 }
 
 /**

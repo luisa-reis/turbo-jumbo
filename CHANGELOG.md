@@ -108,6 +108,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- An interrupted download of a split model can now be finished from the audit
+  hovercard. A quantization missing some of its shards reported which ones were
+  absent and stopped there, offering nothing to press — the same hovercard
+  offers "Download missing files" for every other kind of missing file. It now
+  lists each absent shard with its size and one button that fetches them all,
+  resuming from whatever the interrupted run had already transferred.
 - A sharded model no longer gets a different quantization label on each
   machine. The label is read from one shard's header, and which shard that
   was depended on the order the filesystem happened to list the directory in

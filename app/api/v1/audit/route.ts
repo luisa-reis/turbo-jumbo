@@ -16,6 +16,7 @@ import {hashProgressEmitter} from '@/lib/audit/audit-progress';
 import {clearHfCache} from '@/lib/hf/hf-infer';
 import {detectMissingMmproj} from '@/lib/audit/mmproj';
 import {detectMissingExpectedFiles} from '@/lib/audit/incomplete-models';
+import {detectMissingShards} from '@/lib/audit/missing-shards';
 
 // How many files to audit at once. Each job reads an entire (multi-GB) file to
 // hash it, so this is capped low: too high thrashes a single disk and the runs
@@ -103,10 +104,15 @@ export async function POST(req: Request) {
               const result = duplicateResult(shard.path, dupPaths);
               jobs.push({file: shard.path, run: () => Promise.resolve(result)});
             } else if (incomplete) {
+              // The shard itself is fine as far as this run knows; it's the set
+              // that's broken. `shardGap` keeps it out of the hovercard's
+              // re-download action — detectMissingShards below flags the absent
+              // shards, which are what needs fetching.
               const result: AuditResult = {
                 file: shard.path,
                 status: 'incomplete',
                 message: `missing shards: ${file.missingIndices.join(', ')}`,
+                shardGap: true,
               };
               jobs.push({file: shard.path, run: () => Promise.resolve(result)});
             } else {
@@ -198,6 +204,10 @@ export async function POST(req: Request) {
       // download would include but isn't on disk (e.g. a Kokoro .onnx).
       const missing = await detectMissingExpectedFiles(repoIds, root, 'main');
       for (const r of missing) await emit(r);
+      // Split quants with a gap in their shard set — flag each absent shard,
+      // with the source that lets the hovercard re-fetch it.
+      const shards = await detectMissingShards(models, selected, root, 'main');
+      for (const r of shards) await emit(r);
     }
 
     try {

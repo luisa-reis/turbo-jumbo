@@ -95,6 +95,27 @@ export function isPickOneBinRepo(paths: string[]): boolean {
 }
 
 /**
+ * The paths in `files` that make up the shard set `filename` belongs to — the
+ * `…-00002-of-00004.gguf` family, matched on the base name and the shard count
+ * so two uploads of the same quant at different counts stay apart. Empty when
+ * `filename` isn't a shard name or the listing holds none of its set.
+ */
+export function shardSetPaths(
+  files: Array<{path: string}>,
+  filename: string,
+): string[] {
+  const match = filename.match(/^(.+)-(\d{5})-of-(\d{5})(\.(?:gguf|bin))$/i);
+  if (!match) return [];
+  const [, base, , total, ext] = match;
+  return files
+    .filter((f) => {
+      const name = f.path.split('/').pop() ?? '';
+      return name.startsWith(`${base}-`) && name.endsWith(`-of-${total}${ext}`);
+    })
+    .map((f) => f.path);
+}
+
+/**
  * The files to pre-select in the download picker. A safetensors model is taken
  * whole — the list is already curated to its weights + companions. For a GGUF
  * repo: the named file's shard set or exact match, the full list when a pasted
@@ -115,17 +136,8 @@ export function defaultDownloadSelection(
   if (!filename) {
     return folder ? new Set(files.map((f) => f.path)) : new Set();
   }
-  const shardMatch = filename.match(
-    /^(.+)-(\d{5})-of-(\d{5})(\.(?:gguf|bin))$/i,
-  );
-  if (shardMatch) {
-    const [, base, , total, ext] = shardMatch;
-    const shards = files.filter((f) => {
-      const name = f.path.split('/').pop() ?? '';
-      return name.startsWith(`${base}-`) && name.endsWith(`-of-${total}${ext}`);
-    });
-    if (shards.length > 0) return new Set(shards.map((f) => f.path));
-  }
+  const shards = shardSetPaths(files, filename);
+  if (shards.length > 0) return new Set(shards);
   const exact = files.find((f) => (f.path.split('/').pop() ?? '') === filename);
   if (exact) return new Set([exact.path]);
   return new Set(files.map((f) => f.path));

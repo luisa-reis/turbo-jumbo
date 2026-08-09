@@ -9,7 +9,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {Badge} from '@astryxdesign/core/Badge';
 import {HoverCard} from '@astryxdesign/core/HoverCard';
 import type {AuditResult, AuditStatus, UpdateResult} from '@/lib/audit/audit';
-import type {RowAudit} from '@/lib/audit/row-audit';
+import {redownloadableFailures, type RowAudit} from '@/lib/audit/row-audit';
 import type {RepoFile} from '@/lib/models/repo-files';
 import {formatSize} from '@/lib/models/model-row';
 
@@ -87,7 +87,8 @@ function AuditFailureContent({
   // no per-file button; the group derives their source from a sibling. A
   // projector keeps its own labeled button (its download has a distinct
   // flow), and a lone summary-bearing file keeps a per-file button.
-  const redownloadable = failures.filter((f) => f.status === 'incomplete');
+  const redownloadable = redownloadableFailures(failures);
+  const isRedownloadable = new Set(redownloadable.map((f) => f.file));
   const grouped =
     redownloadable.length > 1 &&
     redownloadable.some((f) => f.hf != null) &&
@@ -108,7 +109,7 @@ function AuditFailureContent({
     <VStack gap={3}>
       <VStack gap={3} xstyle={styles.fileList}>
         {failures.map((f) => {
-          if (grouped && f.status === 'incomplete') {
+          if (grouped && isRedownloadable.has(f.file)) {
             const name = f.file.split('/').pop() ?? f.file;
             const isProjector = name.toLowerCase().startsWith('mmproj');
             return (
@@ -156,7 +157,9 @@ function AuditFailureContent({
           // (Grouped incomplete files render as compact rows above, so this
           // full path only sees a lone incomplete file.)
           const canRedownload =
-            f.status === 'incomplete' && f.hf != null && onRedownload != null;
+            isRedownloadable.has(f.file) &&
+            f.hf != null &&
+            onRedownload != null;
           // A size/checksum failure that scanned the repo's history carries the
           // revisions it ruled out, viewable in a modal.
           const canShowRevisions =
