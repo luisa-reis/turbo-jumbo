@@ -2,13 +2,14 @@ import {CliError, type Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
 import type {TransferContext} from '@/cli/commands/get';
 import {fetchPeers} from '@/cli/fetch-peers';
-import {runTransfer, summarise} from '@/cli/transfer';
+import {runTransfer, summarise, type TransferResult} from '@/cli/transfer';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
   matchEntries,
   planCatalogDownload,
+  planComponentDownload,
   planFlmDownload,
   type DownloadPlan,
   type LemonadeEntry,
@@ -16,11 +17,19 @@ import {
 } from '@/lib/cli/lemonade-get-plan';
 import {formatSize} from '@/lib/format/bytes';
 import type {FlmModel} from '@/lib/lemonade/flm';
+import {missingVariantFiles} from '@/lib/lemonade/lemonade-plan';
 import {
-  matchVariantFiles,
-  missingVariantFiles,
-} from '@/lib/lemonade/lemonade-plan';
-import type {LemonadeModel} from '@/lib/lemonade/lemonade-types';
+  componentDownloadStatus,
+  componentInLemonadeCache,
+  lemonadeDownloadStatus,
+  modelInLemonadeCache,
+} from '@/lib/lemonade/lemonade-status';
+import type {
+  DownloadStatus,
+  InventoryLocation,
+  LemonadeComponent,
+  LemonadeModel,
+} from '@/lib/lemonade/lemonade-types';
 import type {LemonadeSyncPreview} from '@/lib/lemonade/lemonade-sync';
 import type {Model} from '@/lib/models/model-types';
 
@@ -51,12 +60,17 @@ export async function lemonade(
 }
 
 /**
- * The catalog and the FLM models of one Lemonade server, as one list.
+ * Everything the CLI can name: the catalog's llamacpp models, its other
+ * standalone models (vLLM, ONNX, image, speech, TTS — carried as components),
+ * and the FLM models of one Lemonade server.
  *
  * FLM models never appear in the static catalog — a Lemonade server discovers
  * them from its local `flm` binary — so they are fetched per peer. A peer with
  * no `lemonade_url`, or one whose server is down, contributes none rather than
  * failing the command: the catalog half is still worth answering with.
+ *
+ * Omni collections stay out: they are bundles of these entries rather than a
+ * download of their own, and their members are reachable individually.
  */
 async function lemonadeEntries(
   client: Client,
@@ -64,7 +78,9 @@ async function lemonadeEntries(
 ): Promise<LemonadeEntry[]> {
   const slug = await flmPeerSlug(client, inv);
   const [catalog, flm] = await Promise.all([
-    client.json<{models: LemonadeModel[]}>('/api/v1/lemonade-models'),
+    client.json<{models: LemonadeModel[]; extraModels: LemonadeComponent[]}>(
+      '/api/v1/lemonade-models',
+    ),
     slug
       ? client.tryJson<{configured: boolean; models: FlmModel[]}>(
           `/api/v1/lemonade/flm?peer=${encodeURIComponent(slug)}`,
@@ -73,6 +89,11 @@ async function lemonadeEntries(
   ]);
   return [
     ...catalog.models.map((model) => ({kind: 'catalog' as const, model})),
+    // Only the ones with checkpoints to fetch: an entry the catalog names but
+    // gives no repo for can't be downloaded, so listing it would be a lie.
+    ...(catalog.extraModels ?? [])
+      .filter((model) => model.downloadable)
+      .map((model) => ({kind: 'component' as const, model})),
     ...(flm?.models ?? []).map((model) => ({kind: 'flm' as const, model})),
   ];
 }
@@ -129,27 +150,26 @@ async function lemonadeGet(
   }
   const entry = hits[0];
 
-  const {plan, repoFiles} = await resolve(client, entry);
-
   if (inv.deleteAfter && inv.to !== 'cold') {
     throw new CliError(
       '--delete-after only makes sense with --to cold: it removes the local copy after archiving it.',
     );
   }
 
-  const sizeOf = new Map(repoFiles.map((f) => [f.path, f.size]));
-  const chosen = plan.filePaths.map((path) => ({
-    path,
-    size: sizeOf.get(path) ?? 0,
-  }));
-  const total = chosen.reduce((s, f) => s + f.size, 0);
+  // One job per repo: a component's checkpoints can span several (an image
+  // pipeline's UNet and VAE), and a single-repo entry is just the case of one.
+  const jobs = await resolve(client, entry);
+  const total = jobs.reduce((s, j) => s + j.totalBytes, 0);
   const summary = {
     model: entry.model.name,
-    repo: plan.repoId,
-    revision: plan.branch,
-    files: chosen,
+    repos: jobs.map((j) => ({
+      repo: j.plan.repoId,
+      revision: j.plan.branch,
+      files: j.chosen,
+      totalBytes: j.totalBytes,
+      ...(j.plan.fileScope ? {fileScope: j.plan.fileScope} : {}),
+    })),
     totalBytes: total,
-    ...(plan.fileScope ? {fileScope: plan.fileScope} : {}),
     toColdStorage: inv.to === 'cold',
     deleteAfterTransfer: inv.deleteAfter,
   };
@@ -157,38 +177,67 @@ async function lemonadeGet(
   if (inv.dryRun) {
     return {
       json: {dryRun: true, ...summary},
-      table: renderGetPlan(entry.model.name, plan, chosen, total, inv),
-      quiet: chosen.map((f) => f.path),
+      table: renderGetPlan(entry.model.name, jobs, total, inv),
+      quiet: jobs.flatMap((j) => j.chosen.map((f) => f.path)),
     };
   }
 
-  const run = await runTransfer({
-    client,
-    path: '/api/v1/hf-download',
-    body: {
-      repoId: plan.repoId,
-      branch: plan.branch,
-      filePaths: plan.filePaths,
-      ...(plan.fileScope ? {fileScope: plan.fileScope} : {}),
-      sendToCold: inv.to === 'cold',
-      deleteAfterTransfer: inv.deleteAfter,
-    },
-    format: 'text',
-    expectedFiles: chosen.length,
-    showProgress: ctx.showProgress,
-    isTty: ctx.isTty,
-    write: ctx.write,
-  });
-
-  if (run.errors.length > 0) {
-    throw new CliError(
-      `Download failed:\n${run.errors.map((e) => `  ${e}`).join('\n')}`,
-    );
+  const runs: TransferResult[] = [];
+  for (const [i, job] of jobs.entries()) {
+    // Name the repo when there is more than one, so a multi-repo model's
+    // progress bars aren't three anonymous runs in a row.
+    if (jobs.length > 1 && ctx.showProgress) {
+      ctx.write(
+        `${i > 0 ? '\n' : ''}${job.plan.repoId}  (${i + 1}/${jobs.length})\n`,
+      );
+    }
+    const run = await runTransfer({
+      client,
+      path: '/api/v1/hf-download',
+      body: {
+        repoId: job.plan.repoId,
+        branch: job.plan.branch,
+        filePaths: job.plan.filePaths,
+        ...(job.plan.fileScope ? {fileScope: job.plan.fileScope} : {}),
+        sendToCold: inv.to === 'cold',
+        deleteAfterTransfer: inv.deleteAfter,
+      },
+      format: 'text',
+      expectedFiles: job.chosen.length,
+      showProgress: ctx.showProgress,
+      isTty: ctx.isTty,
+      write: ctx.write,
+    });
+    runs.push(run);
+    // A failed repo poisons the rest: half a multi-repo model can't run, so
+    // stop rather than burying the error under the next download.
+    if (run.errors.length > 0) {
+      const left = jobs.length - i - 1;
+      throw new CliError(
+        `Download failed for ${job.plan.repoId}:\n` +
+          run.errors.map((e) => `  ${e}`).join('\n') +
+          (left > 0 ? `\nStopped: ${left} more repo(s) not attempted.` : ''),
+      );
+    }
   }
 
+  // One repo reports exactly as `tj get` does; several are rolled into one
+  // line, so a three-repo model doesn't end with three separate summaries.
+  const rolled: TransferResult = {
+    progress: {
+      filesDone: runs.reduce((s, r) => s + (r.progress?.filesDone ?? 0), 0),
+      filesTotal: runs.reduce((s, r) => s + (r.progress?.filesTotal ?? 0), 0),
+      bytesDone: runs.reduce((s, r) => s + (r.progress?.bytesDone ?? 0), 0),
+      bytesTotal: runs.reduce((s, r) => s + (r.progress?.bytesTotal ?? 0), 0),
+      errors: runs.flatMap((r) => r.progress?.errors ?? []),
+    },
+    errors: [],
+    elapsedMs: runs.reduce((s, r) => s + r.elapsedMs, 0),
+    expectedFiles: runs.reduce((s, r) => s + r.expectedFiles, 0),
+  };
   return {
-    json: {...summary, elapsedMs: run.elapsedMs},
-    table: summarise('downloaded', run),
+    json: {...summary, elapsedMs: rolled.elapsedMs},
+    table: summarise('downloaded', rolled),
     quiet: [],
   };
 }
@@ -203,12 +252,28 @@ async function lemonadeGet(
 async function resolve(
   client: Client,
   entry: LemonadeEntry,
-): Promise<{plan: DownloadPlan; repoFiles: HfFile[]}> {
+): Promise<DownloadJob[]> {
   const listing = (repoId: string, branch: string) =>
     client.json<HfFile[]>(
       `/api/v1/hf-files?${new URLSearchParams({repoId, branch})}`,
     );
   const local = () => client.json<Model[]>('/api/v1/local-models');
+
+  if (entry.kind === 'component') {
+    const repos = [...new Set(entry.model.checkpoints.map((c) => c.repoId))];
+    const [listings, targetModels] = await Promise.all([
+      Promise.all(
+        repos.map(
+          async (repoId) => [repoId, await listing(repoId, 'main')] as const,
+        ),
+      ),
+      local(),
+    ]);
+    const sizes = new Map(listings);
+    const result = planComponentDownload(entry.model, sizes, targetModels);
+    if (!result.ok) throw new CliError(result.error);
+    return result.plans.map((plan) => job(plan, sizes.get(plan.repoId) ?? []));
+  }
 
   if (entry.kind === 'flm') {
     const source = entry.model.source;
@@ -225,20 +290,37 @@ async function resolve(
       listing(source.repoId, source.revision),
       local(),
     ]);
-    return {
-      plan: unwrap(planFlmDownload(source, repoFiles, targetModels)),
-      repoFiles,
-    };
+    return [
+      job(unwrap(planFlmDownload(source, repoFiles, targetModels)), repoFiles),
+    ];
   }
 
   const [repoFiles, targetModels] = await Promise.all([
     listing(entry.model.repoId, 'main'),
     local(),
   ]);
-  return {
-    plan: unwrap(planCatalogDownload(entry.model, repoFiles, targetModels)),
-    repoFiles,
-  };
+  return [
+    job(
+      unwrap(planCatalogDownload(entry.model, repoFiles, targetModels)),
+      repoFiles,
+    ),
+  ];
+}
+
+/** One repo's download, with the sizes its plan is reported in. */
+interface DownloadJob {
+  plan: DownloadPlan;
+  chosen: HfFile[];
+  totalBytes: number;
+}
+
+function job(plan: DownloadPlan, repoFiles: HfFile[]): DownloadJob {
+  const sizeOf = new Map(repoFiles.map((f) => [f.path, f.size]));
+  const chosen = plan.filePaths.map((path) => ({
+    path,
+    size: sizeOf.get(path) ?? 0,
+  }));
+  return {plan, chosen, totalBytes: chosen.reduce((s, f) => s + f.size, 0)};
 }
 
 const unwrap = (r: PlanResult): DownloadPlan => {
@@ -248,8 +330,7 @@ const unwrap = (r: PlanResult): DownloadPlan => {
 
 function renderGetPlan(
   name: string,
-  plan: DownloadPlan,
-  chosen: HfFile[],
+  jobs: DownloadJob[],
   total: number,
   inv: CliInvocation,
 ): string {
@@ -258,15 +339,20 @@ function renderGetPlan(
     {header: 'SIZE', value: (f) => formatSize(f.size), align: 'right'},
   ];
   const dest = inv.to === 'cold' ? 'local storage, then cold' : 'local storage';
-  const at =
-    plan.branch === 'main' ? plan.repoId : `${plan.repoId}@${plan.branch}`;
+  const count = jobs.reduce((s, j) => s + j.chosen.length, 0);
+  const scoped = jobs.some((j) => j.plan.fileScope);
   return [
-    `Would download ${chosen.length} file(s) for ${name} from ${at} to ${dest}:`,
-    '',
-    renderTable(columns, chosen),
+    `Would download ${count} file(s) for ${name} to ${dest}:`,
+    ...jobs.flatMap((j) => {
+      const at =
+        j.plan.branch === 'main'
+          ? j.plan.repoId
+          : `${j.plan.repoId}@${j.plan.branch}`;
+      return ['', `${at}`, renderTable(columns, j.chosen)];
+    }),
     '',
     `total ${formatSize(total)}${inv.deleteAfter ? ' · local copy removed after archiving' : ''}`,
-    ...(plan.fileScope
+    ...(scoped
       ? ['', 'These files would be recorded as the model’s complete set.']
       : []),
   ].join('\n');
@@ -276,8 +362,9 @@ interface CatalogRow {
   name: string;
   repoId: string;
   variant: string;
-  // Which runtime the entry is for: `llamacpp` for the GGUF catalog, `flm` for
-  // a live server's NPU models. They come from different places and download
+  // Which runtime the entry is for: `llamacpp` for the GGUF catalog, `vllm` /
+  // `oga-*` / `sd-cpp` and friends for its other standalone models, `flm` for a
+  // live server's NPU models. They come from different places and download
   // differently, so the column earns its width.
   recipe: string;
   sizeGb: number;
@@ -287,16 +374,61 @@ interface CatalogRow {
 /** A catalog GGUF model's row. */
 function row(m: LemonadeModel, cache: Model[], local: Model[]): CatalogRow {
   const where: string[] = [];
-  if (holds(cache, m)) where.push('lemonade');
-  if (holds(local, m)) where.push('local');
+  if (modelInLemonadeCache(m, cache)) where.push('lemonade');
   return {
     name: m.name,
     repoId: m.repoId,
     variant: m.variant ?? '(whole repo)',
     recipe: 'llamacpp',
     sizeGb: m.sizeGb,
-    where: where.join(', '),
+    where: whereWith(where, lemonadeDownloadStatus(m, localOnly(local)).status),
   };
+}
+
+/**
+ * A standalone non-llamacpp model's row — vLLM, ONNX, image, speech, TTS. Its
+ * checkpoints can span several repos, so `REPO` lists them; one is the usual
+ * case. `VARIANT` names the files they pin, and reads `(whole repo)` when the
+ * catalog names none, which is what a vLLM checkpoint normally does.
+ */
+function componentRow(
+  c: LemonadeComponent,
+  cache: Model[],
+  local: Model[],
+): CatalogRow {
+  const where: string[] = [];
+  if (componentInLemonadeCache(c, cache)) where.push('lemonade');
+  const variants = [
+    ...new Set(c.checkpoints.map((cp) => cp.variant ?? '(whole repo)')),
+  ];
+  return {
+    name: c.name,
+    repoId: [...new Set(c.checkpoints.map((cp) => cp.repoId))].join(', '),
+    variant: variants.join(', '),
+    recipe: c.recipe,
+    sizeGb: c.sizeGb,
+    where: whereWith(
+      where,
+      componentDownloadStatus(c, localOnly(local)).status,
+    ),
+  };
+}
+
+// The local storage scan as the status functions take it.
+const localOnly = (local: Model[]): InventoryLocation[] => [
+  {name: 'local', models: local, isLocal: true},
+];
+
+/**
+ * The WHERE cell. A partial local copy says so rather than reading as held —
+ * the whole point of the column is knowing what you'd have to fetch, and half a
+ * model is not having it.
+ */
+function whereWith(before: string[], status: DownloadStatus): string {
+  const where = [...before];
+  if (status === 'complete') where.push('local');
+  else if (status === 'partial') where.push('local (partial)');
+  return where.join(', ');
 }
 
 /**
@@ -308,21 +440,28 @@ function row(m: LemonadeModel, cache: Model[], local: Model[]): CatalogRow {
 function flmRow(m: FlmModel, local: Model[]): CatalogRow {
   const where: string[] = [];
   if (m.downloaded) where.push('lemonade');
-  if (
-    m.source &&
-    m.source.files.length > 0 &&
-    missingVariantFiles(m.source.files, local, m.source.repoId).length === 0
-  ) {
-    where.push('local');
-  }
   return {
     name: m.name,
     repoId: m.source?.repoId ?? '',
     variant: m.checkpoint,
     recipe: 'flm',
     sizeGb: m.sizeGb,
-    where: where.join(', '),
+    where: whereWith(where, flmLocalStatus(m, local)),
   };
+}
+
+/**
+ * How much of an FLM model Turbo Jumbo storage holds, judged against the exact
+ * files FastFlowLM's registry names — more precise than a whole-repo presence
+ * check, because the repo carries kernels for other targets that aren't part of
+ * this model. A tag the registry doesn't name has no file list to judge.
+ */
+function flmLocalStatus(m: FlmModel, local: Model[]): DownloadStatus {
+  const files = m.source?.files ?? [];
+  if (!m.source || files.length === 0) return 'none';
+  const missing = missingVariantFiles(files, local, m.source.repoId);
+  if (missing.length === 0) return 'complete';
+  return missing.length < files.length ? 'partial' : 'none';
 }
 
 /** `tj lemonade ls` — the catalog, marked with what is already on this machine. */
@@ -340,9 +479,11 @@ async function lemonadeLs(
   const pattern = inv.positionals[1]?.toLowerCase();
 
   const rows: CatalogRow[] = entries
-    .map((e) =>
-      e.kind === 'flm' ? flmRow(e.model, local) : row(e.model, cache, local),
-    )
+    .map((e) => {
+      if (e.kind === 'flm') return flmRow(e.model, local);
+      if (e.kind === 'component') return componentRow(e.model, cache, local);
+      return row(e.model, cache, local);
+    })
     .filter(
       (r) =>
         !pattern ||
@@ -368,28 +509,6 @@ async function lemonadeLs(
     table: renderTable(columns, rows, color),
     quiet: rows.map((r) => r.name),
   };
-}
-
-/**
- * Whether a storage tier holds a catalog entry, resolved **within that entry's
- * own repo**.
- *
- * The variant is often a bare quant token (`UD-Q4_K_XL`, `Q8_0`) rather than a
- * filename — 38 of the 84 catalog entries at the time of writing — so matching
- * it against every file on the machine reports any model's `Q8_0` as this
- * entry's. `matchVariantFiles` is the resolver the Lemonade downloader already
- * uses, and it works from one repo's file list, which is exactly the scoping
- * that keeps the answer honest.
- */
-function holds(models: Model[], m: LemonadeModel): boolean {
-  const repo = models.find((x) => x.name === m.repoId);
-  if (!repo) return false;
-  const files = repo.files.flatMap((f) =>
-    f.isSplit
-      ? f.files.map((s) => ({path: s.path, size: s.size}))
-      : [{path: f.path, size: f.size}],
-  );
-  return matchVariantFiles(files, m.variant, m.mmproj).length > 0;
 }
 
 /** `tj lemonade sync` — preview with `--dry-run`, run with `--yes`. */

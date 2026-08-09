@@ -5,18 +5,26 @@
 // so what the CLI fetches and what the dialog fetches cannot drift apart.
 
 import type {FlmModel, FlmSource} from '@/lib/lemonade/flm';
-import type {LemonadeModel} from '@/lib/lemonade/lemonade-types';
+import type {
+  LemonadeComponent,
+  LemonadeModel,
+} from '@/lib/lemonade/lemonade-types';
 import {
   matchVariantFiles,
   missingVariantFiles,
+  planRepoJobs,
+  resolveCheckpointFiles,
 } from '@/lib/lemonade/lemonade-plan';
 import type {Model} from '@/lib/models/model-types';
 
-/** A downloadable Lemonade entry: a catalog GGUF model, or a live server's FLM
- *  model. Collections and non-llamacpp components aren't listed or fetched by
- *  the CLI, so they have no kind here. */
+/** A downloadable Lemonade entry: a catalog GGUF model, one of the catalog's
+ *  other standalone models (vLLM, ONNX, image, speech, TTS — carried as
+ *  components), or a live server's FLM model. Omni collections aren't listed
+ *  or fetched by the CLI, so they have no kind here. */
 export type LemonadeEntry =
-  {kind: 'catalog'; model: LemonadeModel} | {kind: 'flm'; model: FlmModel};
+  | {kind: 'catalog'; model: LemonadeModel}
+  | {kind: 'component'; model: LemonadeComponent}
+  | {kind: 'flm'; model: FlmModel};
 
 /** A resolved download: what to ask `/api/v1/hf-download` for. */
 export interface DownloadPlan {
@@ -29,6 +37,10 @@ export interface DownloadPlan {
 
 export type PlanResult =
   {ok: true; plan: DownloadPlan} | {ok: false; error: string};
+
+/** A component's download: one plan per repo its checkpoints name. */
+export type MultiPlanResult =
+  {ok: true; plans: DownloadPlan[]} | {ok: false; error: string};
 
 /**
  * The entries a `tj lemonade get <pattern>` could mean. Refuses to guess the
@@ -78,6 +90,61 @@ export function planCatalogDownload(
       filePaths: missing.length > 0 ? missing : all,
     },
   };
+}
+
+/**
+ * A component's download — a vLLM or ONNX model, or any other catalog entry
+ * that isn't a single llamacpp GGUF. Its checkpoints can span several repos
+ * (an image pipeline's UNet and VAE), so this yields one plan per repo, in the
+ * order the catalog names them, and the caller runs them in sequence.
+ *
+ * A repo the target already holds in full is dropped rather than re-requested:
+ * unlike a single-repo download, there is something else left to do. When
+ * *nothing* is left, the whole thing is re-requested rather than planning an
+ * empty run that would report a success having checked nothing.
+ *
+ * A checkpoint resolving to no file at all means the catalog names something
+ * its repo no longer has. That fails the whole plan: half a multi-repo model —
+ * an image pipeline without its VAE — can't run, so fetching the rest of it
+ * would be worse than fetching none.
+ */
+export function planComponentDownload(
+  component: LemonadeComponent,
+  listings: Map<string, Array<{path: string; size: number}>>,
+  targetModels: Model[],
+): MultiPlanResult {
+  const plans: DownloadPlan[] = [];
+  const complete: DownloadPlan[] = [];
+  const unresolved: string[] = [];
+  for (const job of planRepoJobs(component.checkpoints)) {
+    const files = listings.get(job.repoId) ?? [];
+    const all = [
+      ...new Set(job.variants.flatMap((v) => resolveCheckpointFiles(files, v))),
+    ];
+    if (all.length === 0) {
+      unresolved.push(
+        `${job.repoId} (${job.variants.join(', ') || 'whole repo'})`,
+      );
+      continue;
+    }
+    const missing = missingVariantFiles(all, targetModels, job.repoId);
+    const plan = {
+      repoId: job.repoId,
+      branch: 'main',
+      filePaths: missing.length > 0 ? missing : all,
+    };
+    if (missing.length > 0) plans.push(plan);
+    else complete.push(plan);
+  }
+  if (unresolved.length > 0) {
+    return {
+      ok: false,
+      error:
+        `Couldn't find the catalog's files for ${component.name} in: ` +
+        `${unresolved.join('; ')}.`,
+    };
+  }
+  return {ok: true, plans: plans.length > 0 ? plans : complete};
 }
 
 /**

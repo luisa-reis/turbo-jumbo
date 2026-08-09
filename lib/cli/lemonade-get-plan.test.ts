@@ -2,10 +2,14 @@ import {test, expect} from 'bun:test';
 import {
   matchEntries,
   planCatalogDownload,
+  planComponentDownload,
   planFlmDownload,
   type LemonadeEntry,
 } from '@/lib/cli/lemonade-get-plan';
-import type {LemonadeModel} from '@/lib/lemonade/lemonade-types';
+import type {
+  LemonadeComponent,
+  LemonadeModel,
+} from '@/lib/lemonade/lemonade-types';
 import type {FlmModel} from '@/lib/lemonade/flm';
 import type {Model} from '@/lib/models/model-types';
 
@@ -209,4 +213,151 @@ test('planFlmDownload falls back to the whole repo when the registry names no fi
   expect(result.ok).toBe(true);
   if (result.ok)
     expect(result.plan.fileScope).toEqual(['config.json', 'model.q4nx']);
+});
+
+const component = (
+  name: string,
+  checkpoints: LemonadeComponent['checkpoints'],
+): LemonadeComponent => ({
+  name,
+  recipe: 'vllm',
+  modality: 'chat',
+  suggested: false,
+  labels: [],
+  sizeGb: 20,
+  downloadable: true,
+  checkpoints,
+});
+
+const listing = (
+  entries: Array<[string, Array<{path: string; size: number}>]>,
+) => new Map(entries);
+
+test('planComponentDownload takes a whole-repo checkpoint', () => {
+  const c = component('Qwen3.6-27B-FP16-vLLM', [
+    {repoId: 'Qwen/Qwen3.6-27B', variant: null},
+  ]);
+  const result = planComponentDownload(
+    c,
+    listing([
+      [
+        'Qwen/Qwen3.6-27B',
+        [
+          {path: 'model.safetensors', size: 10},
+          {path: 'config.json', size: 1},
+        ],
+      ],
+    ]),
+    [],
+  );
+  expect(result).toEqual({
+    ok: true,
+    plans: [
+      {
+        repoId: 'Qwen/Qwen3.6-27B',
+        branch: 'main',
+        filePaths: ['model.safetensors', 'config.json'],
+      },
+    ],
+  });
+});
+
+test('planComponentDownload gives each repo of a multi-repo model its own plan', () => {
+  const c = component('Flux', [
+    {repoId: 'org/unet', variant: null},
+    {repoId: 'org/vae', variant: null},
+  ]);
+  const result = planComponentDownload(
+    c,
+    listing([
+      ['org/unet', [{path: 'unet.safetensors', size: 10}]],
+      ['org/vae', [{path: 'vae.safetensors', size: 2}]],
+    ]),
+    [],
+  );
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.plans.map((p) => p.repoId)).toEqual(['org/unet', 'org/vae']);
+  }
+});
+
+test('planComponentDownload collapses two checkpoints of one repo into a plan', () => {
+  const c = component('Two-variants', [
+    {repoId: 'org/repo', variant: 'a.gguf'},
+    {repoId: 'org/repo', variant: 'b.gguf'},
+  ]);
+  const result = planComponentDownload(
+    c,
+    listing([
+      [
+        'org/repo',
+        [
+          {path: 'a.gguf', size: 1},
+          {path: 'b.gguf', size: 2},
+          {path: 'c.gguf', size: 3},
+        ],
+      ],
+    ]),
+    [],
+  );
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.plans).toHaveLength(1);
+    expect(result.plans[0].filePaths).toEqual(['a.gguf', 'b.gguf']);
+  }
+});
+
+test('planComponentDownload skips a repo the target already has in full', () => {
+  const c = component('Two-repos', [
+    {repoId: 'org/have', variant: null},
+    {repoId: 'org/want', variant: null},
+  ]);
+  const result = planComponentDownload(
+    c,
+    listing([
+      ['org/have', [{path: 'w.safetensors', size: 1}]],
+      ['org/want', [{path: 'w.safetensors', size: 1}]],
+    ]),
+    held('org/have', ['w.safetensors']),
+  );
+  expect(result.ok).toBe(true);
+  // Nothing missing in org/have, so only the repo that needs bytes is planned —
+  // a multi-repo model shouldn't re-request what's already whole.
+  if (result.ok)
+    expect(result.plans.map((p) => p.repoId)).toEqual(['org/want']);
+});
+
+test('planComponentDownload refuses when a checkpoint resolves to nothing', () => {
+  // A catalog file the repo no longer has: a half-downloaded multi-repo model
+  // can't run, so this fails rather than quietly fetching the other repo.
+  const c = component('Drifted', [
+    {repoId: 'org/unet', variant: 'missing.safetensors'},
+    {repoId: 'org/vae', variant: null},
+  ]);
+  const result = planComponentDownload(
+    c,
+    listing([
+      ['org/unet', [{path: 'other.safetensors', size: 1}]],
+      ['org/vae', [{path: 'vae.safetensors', size: 2}]],
+    ]),
+    [],
+  );
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.error).toContain('org/unet');
+    expect(result.error).toContain('missing.safetensors');
+  }
+});
+
+test('planComponentDownload re-checks everything when the target has it all', () => {
+  const c = component('Whole', [{repoId: 'org/repo', variant: null}]);
+  const result = planComponentDownload(
+    c,
+    listing([['org/repo', [{path: 'w.safetensors', size: 1}]]]),
+    held('org/repo', ['w.safetensors']),
+  );
+  expect(result.ok).toBe(true);
+  // The only repo is complete: rather than planning nothing and reporting a
+  // success that did nothing, the whole thing is re-requested.
+  if (result.ok) expect(result.plans[0].filePaths).toEqual(['w.safetensors']);
 });

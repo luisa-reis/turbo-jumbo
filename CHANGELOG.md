@@ -34,9 +34,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
   from with `tj lemonade get`, and its cache reconciled with Turbo Jumbo's
   storage.
 
-  That listing reaches past the static catalog to FastFlowLM's NPU models,
-  which only exist inside a running Lemonade server — it discovers them from
-  its local `flm` binary, so they appear in no catalog file. `tj lemonade get`
+  That listing covers the whole catalog, not just its GGUF models: the vLLM,
+  ONNX, image, speech and TTS entries are there too, with a `RECIPE` column
+  telling them apart and `WHERE` saying `local (partial)` when only some of a
+  model's files are present. One that spans several repos — an image pipeline's
+  UNet and VAE — downloads a repo at a time, skipping any already held in full,
+  and stops rather than continuing past a failure, because half such a model
+  can't be loaded.
+
+  It also reaches past the static catalog to FastFlowLM's NPU models, which
+  only exist inside a running Lemonade server — it discovers them from its
+  local `flm` binary, so they appear in no catalog file. `tj lemonade get`
   downloads one from the Hugging Face repo FastFlowLM's registry pins for its
   tag, at the pinned revision, recording that file list as the model's complete
   set: the repo also carries NPU kernels for other targets, which would

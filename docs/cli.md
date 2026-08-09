@@ -404,25 +404,32 @@ storage Turbo Jumbo manages.
 `tj lemonade ls` shows the catalog, marked with what this machine already holds:
 
 ```console
-$ tj lemonade ls qwen3.6
-NAME                      REPO                              VARIANT                          RECIPE        SIZE  WHERE
-Qwen3.6-35B-A3B-GGUF      unsloth/Qwen3.6-35B-A3B-GGUF      Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  llamacpp  21.3 GiB
-Qwen3.6-35B-A3B-MTP-GGUF  unsloth/Qwen3.6-35B-A3B-MTP-GGUF  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  llamacpp  21.3 GiB  lemonade, local
-Qwen3.6-35B-A3B-FLM       FastFlowLM/Qwen3.6-35B-A3B        qwen3.6-moe:35b-a3b              flm       19.8 GiB  lemonade
+$ tj lemonade ls qwen3.6-27b
+NAME                          REPO                      VARIANT                      RECIPE        SIZE  WHERE
+Qwen3.6-27B-GGUF              unsloth/Qwen3.6-27B-GGUF  Qwen3.6-27B-UD-Q4_K_XL.gguf  llamacpp  16.0 GiB  lemonade, local
+Qwen3.6-27B-FP16-vLLM         Qwen/Qwen3.6-27B          (whole repo)                 vllm      54.0 GiB
+Qwen3.6-27B-FP8-vLLM-lowconc  Qwen/Qwen3.6-27B-FP8      (whole repo)                 vllm      28.0 GiB
+Qwen3.6-27B-FLM               FastFlowLM/Qwen3.6-27B    qwen3.6:27b                  flm       19.8 GiB  lemonade
 ```
 
 An optional second word filters by name or repo. `WHERE` reads `lemonade` for
-Lemonade's own side and `local` for Turbo Jumbo's fast storage. It lists the
-catalog's models; omni collections and their components aren't shown.
+Lemonade's own side and `local` for Turbo Jumbo's fast storage — `local
+(partial)` when only some of the model's files are there, because half a model
+is not having it. Omni collections aren't listed: they are bundles of these
+entries rather than a download of their own, and their members appear here
+individually.
 
-`RECIPE` separates two different kinds of entry. `llamacpp` rows come from the
-static catalog. `flm` rows are FastFlowLM's NPU models, which never appear in
-that catalog at all — a Lemonade server discovers them from its local `flm`
-binary, so they are read live from one server (`--peer <slug>`, or this
-machine). A server that isn't configured for FLM, or isn't answering, simply
-contributes no `flm` rows.
+`RECIPE` separates three kinds of entry that come from different places.
+`llamacpp` rows are the catalog's GGUF models. `vllm`, `oga-*`, `sd-cpp` and
+the rest are its other standalone models, which pin whole repos rather than a
+quantization — a `VARIANT` of `(whole repo)` — and can name more than one, in
+which case `REPO` lists them all. `flm` rows are FastFlowLM's NPU models, which
+never appear in the catalog at all: a Lemonade server discovers them from its
+local `flm` binary, so they are read live from one server (`--peer <slug>`, or
+this machine). A server that isn't configured for FLM, or isn't answering,
+simply contributes no `flm` rows.
 
-`tj lemonade get <model>` downloads either kind into Turbo Jumbo storage,
+`tj lemonade get <model>` downloads any of them into Turbo Jumbo storage,
 taking the name as `ls` prints it (a substring is enough; an ambiguous one is
 listed rather than guessed at):
 
@@ -440,6 +447,31 @@ you. A tag the registry doesn't name has no Hugging Face source, and the
 command says so rather than guessing: the web UI's fallback there is to have
 the Lemonade server pull into its own FLM store, which is a different place
 than Turbo Jumbo storage.
+
+A model whose checkpoints span several repos — an image pipeline's UNet and
+VAE — is fetched one repo at a time, in the order the catalog names them, and
+a repo already held in full is skipped rather than re-requested:
+
+```console
+$ tj lemonade get Flux-pipeline --dry-run
+Would download 2 file(s) for Flux-pipeline to local storage:
+
+org/flux-unet
+FILE                  SIZE
+unet.safetensors  18.6 GiB
+
+org/flux-vae
+FILE                SIZE
+vae.safetensors  3.7 GiB
+
+total 22.4 GiB
+```
+
+A failed repo **stops** the run rather than continuing to the next: half a
+multi-repo model can't be loaded, so fetching the rest of it would be worse
+than fetching none. The same goes for a checkpoint that resolves to no file at
+all, which means the catalog and the repo have drifted apart — that fails
+before anything is transferred.
 
 `--to cold`, `--delete-after` and `--dry-run` work as they do on `tj get`.
 
