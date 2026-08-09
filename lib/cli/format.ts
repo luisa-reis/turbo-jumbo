@@ -20,16 +20,39 @@ export function isFormatFlag(s: string): s is FormatFlag {
 /**
  * The format a run should use. Piping never changes it — switching to JSON
  * off-TTY would silently break `tj ls | grep`, so machine-readable output is
- * asked for explicitly. What the TTY does decide is decoration: colour is
- * dropped when stdout isn't a terminal, so redirected output holds no escape
- * codes, and a machine format is never coloured at all.
+ * asked for explicitly.
  */
-export function resolveFormat(
-  flag: FormatFlag | undefined,
-  isTty: boolean,
-): {format: OutputFormat; color: boolean} {
-  const format: OutputFormat = flag ?? 'table';
-  return {format, color: isTty && format === 'table'};
+export function resolveFormat(flag: FormatFlag | undefined): OutputFormat {
+  return flag ?? 'table';
+}
+
+/** When to colourize. `auto` means "if a person is looking". */
+export const COLOR_VALUES = ['auto', 'always', 'never'] as const;
+export type ColorFlag = (typeof COLOR_VALUES)[number];
+
+export function isColorFlag(s: string): s is ColorFlag {
+  return (COLOR_VALUES as readonly string[]).includes(s);
+}
+
+/**
+ * Whether to colour the output.
+ *
+ * A machine format is never coloured, whatever was asked for: a wrapper that
+ * forces colour on must not be able to corrupt a payload someone is parsing.
+ * Otherwise `NO_COLOR` (any non-empty value, per no-color.org) turns it off,
+ * and an explicit `--color always` overrides even that — a flag typed on the
+ * spot outranks the environment it was typed in.
+ */
+export function resolveColor(opts: {
+  flag: ColorFlag | undefined;
+  format: OutputFormat;
+  isTty: boolean;
+  noColor: boolean;
+}): boolean {
+  if (opts.format !== 'table') return false;
+  if (opts.flag === 'always') return true;
+  if (opts.flag === 'never') return false;
+  return opts.isTty && !opts.noColor;
 }
 
 /**

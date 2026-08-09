@@ -73,8 +73,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Output is a table for people, and `--output-format` gives it to a machine
   instead: `json` for `jq`, `csv` for a spreadsheet, `toon` for dropping into
   a model's context without paying for JSON's braces, and `lines` for `xargs`.
-  Piping never silently changes the format. It talks to a running Turbo Jumbo
-  server, so what it reports and what the web UI shows cannot drift apart.
+  Piping never silently changes the format. Colour follows `--color` and
+  `NO_COLOR`, is dropped when output isn't a terminal, and never appears in a
+  machine format at all — forcing it on can't corrupt something being parsed.
+  It talks to a running Turbo Jumbo server, so what it reports and what the
+  web UI shows cannot drift apart.
 
   Documented with worked examples in [docs/cli.md](docs/cli.md).
 

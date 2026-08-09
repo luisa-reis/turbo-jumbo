@@ -2,6 +2,7 @@ import {test, expect} from 'bun:test';
 import {
   isFormatFlag,
   renderTable,
+  resolveColor,
   resolveFormat,
   toCsv,
   type Column,
@@ -9,22 +10,40 @@ import {
 
 test('the default is a table, never JSON when piped', () => {
   // Switching to JSON off-TTY would silently break `tj ls | grep`.
-  expect(resolveFormat(undefined, false).format).toBe('table');
-  expect(resolveFormat(undefined, true).format).toBe('table');
+  expect(resolveFormat(undefined)).toBe('table');
 });
 
 test('an explicit format is honoured regardless of the TTY', () => {
-  expect(resolveFormat('json', true).format).toBe('json');
-  expect(resolveFormat('lines', true).format).toBe('lines');
+  expect(resolveFormat('json')).toBe('json');
+  expect(resolveFormat('lines')).toBe('lines');
 });
 
+const colour = (o: Partial<Parameters<typeof resolveColor>[0]>) =>
+  resolveColor({
+    flag: undefined,
+    format: 'table',
+    isTty: true,
+    noColor: false,
+    ...o,
+  });
+
 test('colour is only for a table on a terminal', () => {
-  expect(resolveFormat(undefined, true).color).toBe(true);
-  expect(resolveFormat(undefined, false).color).toBe(false);
-  // Machine formats are parsed; escape codes would corrupt every one of them.
-  expect(resolveFormat('json', true).color).toBe(false);
-  expect(resolveFormat('csv', true).color).toBe(false);
-  expect(resolveFormat('toon', true).color).toBe(false);
+  expect(colour({})).toBe(true);
+  expect(colour({isTty: false})).toBe(false);
+  // Machine formats are parsed; escape codes would corrupt every one of them,
+  // so no flag can turn colour on for them.
+  for (const format of ['json', 'csv', 'toon', 'lines'] as const) {
+    expect(colour({format})).toBe(false);
+    expect(colour({format, flag: 'always'})).toBe(false);
+  }
+});
+
+test('--color overrides the terminal, and NO_COLOR overrides the default', () => {
+  expect(colour({flag: 'always', isTty: false})).toBe(true);
+  expect(colour({flag: 'never'})).toBe(false);
+  expect(colour({noColor: true})).toBe(false);
+  // A flag typed on the spot outranks the environment it was typed in.
+  expect(colour({flag: 'always', noColor: true})).toBe(true);
 });
 
 test('isFormatFlag accepts only the documented values', () => {

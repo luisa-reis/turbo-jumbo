@@ -57,6 +57,7 @@ AUDIT
 OPTIONS
   --output-format <f> table (default), json, csv, toon, or lines
   --url <url>         Server to talk to
+  --color <when>      auto (default), always, never
   -h, --help          Show this text
 
 SERVER

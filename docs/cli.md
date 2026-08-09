@@ -558,6 +558,12 @@ decoration, so colour is dropped when output isn't a terminal, never appears
 in a machine format at all, and redirected output holds no escape codes. This
 keeps `tj ls | grep` working. When a script needs to read the output, say so:
 
+`--color` takes `auto` (the default), `always` or `never`, and `NO_COLOR` in
+the environment turns colour off the way it does everywhere else. An explicit
+`--color always` overrides `NO_COLOR` — a flag typed on the spot outranks the
+environment it was typed in — but it cannot colour a machine format, so a
+wrapper that forces colour on can't corrupt a payload someone is parsing.
+
 ```console
 $ tj ls --output-format json
 [

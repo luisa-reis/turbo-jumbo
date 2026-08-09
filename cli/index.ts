@@ -2,7 +2,7 @@
 import {createInterface} from 'node:readline/promises';
 import {parseCli, type CliInvocation} from '@/lib/cli/args';
 import type {ConfirmIo} from '@/lib/cli/confirm';
-import {resolveFormat, type OutputFormat} from '@/lib/cli/format';
+import {resolveColor, resolveFormat, type OutputFormat} from '@/lib/cli/format';
 import {resolveServerUrl} from '@/lib/cli/server-url';
 import {CliError, UsageError, createClient, type Client} from '@/cli/client';
 import {render, type CommandOutput} from '@/cli/output';
@@ -103,7 +103,14 @@ async function main(argv: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  const {format, color} = resolveFormat(inv.outputFormat, process.stdout.isTTY);
+  const format = resolveFormat(inv.outputFormat);
+  const color = resolveColor({
+    flag: inv.color,
+    format,
+    isTty: Boolean(process.stdout.isTTY),
+    // no-color.org: any non-empty value means don't.
+    noColor: (process.env.NO_COLOR ?? '') !== '',
+  });
   const client = createClient(
     resolveServerUrl({
       flag: inv.url,

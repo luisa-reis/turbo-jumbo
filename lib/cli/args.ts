@@ -1,5 +1,12 @@
 import {parseArgs} from 'node:util';
-import {FORMAT_VALUES, isFormatFlag, type FormatFlag} from '@/lib/cli/format';
+import {
+  COLOR_VALUES,
+  FORMAT_VALUES,
+  isColorFlag,
+  isFormatFlag,
+  type ColorFlag,
+  type FormatFlag,
+} from '@/lib/cli/format';
 
 /**
  * Command-line parsing for `tj`. Built on node's own `parseArgs` rather than a
@@ -30,6 +37,7 @@ export interface CliInvocation {
   command: Command;
   positionals: string[];
   outputFormat?: FormatFlag;
+  color?: ColorFlag;
   url?: string;
   peer?: string;
   local: boolean;
@@ -59,6 +67,7 @@ export type ParseResult =
 
 const OPTIONS = {
   'output-format': {type: 'string'},
+  color: {type: 'string'},
   url: {type: 'string'},
   peer: {type: 'string'},
   local: {type: 'boolean'},
@@ -135,6 +144,14 @@ export function parseCli(argv: string[]): ParseResult {
     };
   }
 
+  const colour = values.color;
+  if (colour !== undefined && !isColorFlag(colour)) {
+    return {
+      ok: false,
+      error: `Unknown --color '${colour}'. Try one of: ${COLOR_VALUES.join(', ')}.`,
+    };
+  }
+
   if (values.peer !== undefined && values.peer.trim() === '') {
     return {ok: false, error: '--peer needs a peer slug.'};
   }
@@ -153,6 +170,7 @@ function invocation(
     command,
     positionals,
     outputFormat: values['output-format'] as FormatFlag | undefined,
+    color: values.color as ColorFlag | undefined,
     url: values.url,
     peer: values.peer,
     local: values.local ?? false,
