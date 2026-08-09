@@ -22,6 +22,26 @@ export async function POST(req: Request) {
 
   await fsp.mkdir(nodePath.dirname(full), {recursive: true});
 
+  // A non-zero offset appends, so it has to name exactly the end of what is
+  // already here. Senders resume from a prefix they verified moments earlier
+  // (see `peerResumeOffset`); if the file changed since, appending would splice
+  // bytes into the wrong place and leave a plausible-looking corrupt file. Fail
+  // instead, and let the sender start over.
+  if (offset > 0) {
+    let currentSize: number | null;
+    try {
+      currentSize = (await fsp.stat(full)).size;
+    } catch {
+      currentSize = null;
+    }
+    if (currentSize !== offset) {
+      return new Response(
+        `Offset ${offset} does not match the ${currentSize ?? 'missing'} byte(s) already here`,
+        {status: 409},
+      );
+    }
+  }
+
   if (!req.body) {
     // Empty file or missing body — create/truncate when this is the first chunk.
     if (offset === 0) await fsp.writeFile(full, new Uint8Array(0));

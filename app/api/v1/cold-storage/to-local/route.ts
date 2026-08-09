@@ -1,23 +1,12 @@
 import {coldStorageDir, localModelsDir} from '@/lib/config';
 import {propagateFileMeta} from '@/lib/storage/copy-meta';
+import {streamCopyResumable} from '@/lib/storage/file-transfer';
 import {logger} from '@/lib/util/logger';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 import nodePath from 'path';
 import {promises as fsp} from 'fs';
-import {createReadStream, createWriteStream} from 'fs';
-import {pipeline} from 'stream/promises';
-import {Transform} from 'stream';
 
 const EMIT_INTERVAL = 8 * 1024 * 1024; // 8 MB
-
-function makeCounter(onBytes: (n: number) => void): Transform {
-  return new Transform({
-    transform(chunk, _enc, cb) {
-      onBytes(chunk.length);
-      cb(null, chunk);
-    },
-  });
-}
 
 function resolveWithin(base: string, file: string): string | null {
   const resolved = nodePath.resolve(base, file);
@@ -130,23 +119,32 @@ export async function POST(req: Request) {
           emit();
 
           let nextEmitAt = EMIT_INTERVAL;
-          const counter = makeCounter((n) => {
-            fileDone += n;
-            bytesDone += n;
-            if (fileDone >= nextEmitAt) {
-              nextEmitAt = fileDone + EMIT_INTERVAL;
-              emit();
-            }
-          });
-
-          await pipeline(
-            createReadStream(src),
-            counter,
-            createWriteStream(dst),
-            {
-              signal,
+          // Pick up an interrupted pull rather than starting the file again:
+          // whatever is already here is kept when it hash-matches the archive's
+          // same-length prefix, and only the tail streams. The bytes kept count
+          // as done so the totals still add up.
+          await streamCopyResumable(src, dst, {
+            signal,
+            onResume: (offset) => {
+              if (offset > 0) {
+                logger.info(
+                  `[cold→local] resuming ${file} at ${offset}/${fileTotal} bytes`,
+                );
+                fileDone = offset;
+                bytesDone += offset;
+                nextEmitAt = fileDone + EMIT_INTERVAL;
+                emit();
+              }
             },
-          );
+            onChunk: (n) => {
+              fileDone += n;
+              bytesDone += n;
+              if (fileDone >= nextEmitAt) {
+                nextEmitAt = fileDone + EMIT_INTERVAL;
+                emit();
+              }
+            },
+          });
 
           filesDone++;
           fileDone = fileTotal;

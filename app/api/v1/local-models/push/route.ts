@@ -1,5 +1,6 @@
 import {localModelsDir} from '@/lib/config';
 import {readFileMetaWithRepoHead, sendFileMeta} from '@/lib/storage/copy-meta';
+import {peerResumeOffset} from '@/lib/storage/peer-resume';
 import {logger} from '@/lib/util/logger';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 import nodePath from 'path';
@@ -68,7 +69,26 @@ export async function POST(req: Request) {
       continue;
     }
 
-    for (let offset = 0; offset < fileSize; offset += CHUNK_SIZE) {
+    // Pick up where an interrupted push left off: what the destination already
+    // holds is sent again only if it isn't a verified prefix of this file.
+    const start = await peerResumeOffset({
+      peer: toPeer,
+      file,
+      srcFull: full,
+      srcSize: fileSize,
+    });
+    if (start > 0) {
+      logger.info(
+        `[push] resuming ${file} → ${toPeer} at ${start}/${fileSize} bytes`,
+      );
+    }
+    if (start >= fileSize) {
+      // Already there, byte for byte. Its provenance may still be missing.
+      await sendMetaFor(file);
+      continue;
+    }
+
+    for (let offset = start; offset < fileSize; offset += CHUNK_SIZE) {
       const chunkEnd = Math.min(offset + CHUNK_SIZE, fileSize);
       logger.debug(`[push] upload chunk ${file} offset=${offset} → ${toPeer}`);
       const readable = createReadStream(full, {

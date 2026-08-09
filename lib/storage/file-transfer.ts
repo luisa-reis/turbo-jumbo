@@ -37,13 +37,14 @@ export function localSha256(
   return streamHash(fullPath, {signal, onBytes});
 }
 
-/** SHA256 of the first `length` bytes of a file (see `streamHash`). */
-function sha256Region(
+/** SHA256 of the first `length` bytes of a file (see `streamHash`). `length`
+ *  must be at least 1 — a zero-length region has no prefix to compare. */
+export function sha256Region(
   fullPath: string,
   length: number,
-  onBytes?: (n: number) => void,
+  opts: {signal?: AbortSignal; onBytes?: (n: number) => void} = {},
 ): Promise<string> {
-  return streamHash(fullPath, {end: length - 1, onBytes});
+  return streamHash(fullPath, {end: length - 1, ...opts});
 }
 
 /**
@@ -82,8 +83,8 @@ export async function resumeOffset(
       onVerify(hashed, total);
     });
   const [dstSha, srcSha] = await Promise.all([
-    sha256Region(dstFull, dstSize, onBytes),
-    sha256Region(srcFull, dstSize, onBytes),
+    sha256Region(dstFull, dstSize, {onBytes}),
+    sha256Region(srcFull, dstSize, {onBytes}),
   ]);
   return dstSha === srcSha ? dstSize : 0;
 }

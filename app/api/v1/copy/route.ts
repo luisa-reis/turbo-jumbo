@@ -9,6 +9,7 @@ import {
   resolveSupportFiles,
   supportFileSources,
 } from '@/lib/storage/support-files';
+import {peerResumeOffset} from '@/lib/storage/peer-resume';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
 import {promises as fsp} from 'fs';
@@ -396,7 +397,45 @@ export async function POST(req: Request) {
                   });
                   if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 } else {
-                  for (let offset = 0; offset < f.size; offset += CHUNK_SIZE) {
+                  // Resume an interrupted upload: when what the peer already
+                  // holds is a verified prefix of this file, only the tail
+                  // travels. Reported through the same verifying/resumed phases
+                  // as a copy within one machine.
+                  phase = 'verifying';
+                  emit();
+                  let verified = false;
+                  let nextVerifyEmit = 0;
+                  const start = await peerResumeOffset({
+                    peer: dest,
+                    file: f.path,
+                    srcFull: src,
+                    srcSize: f.size,
+                    signal,
+                    onVerify: (done, total) => {
+                      verified = true;
+                      verifyDone = done;
+                      verifyTotal = total;
+                      if (done >= nextVerifyEmit) {
+                        nextVerifyEmit = done + EMIT_INTERVAL;
+                        emit();
+                      }
+                    },
+                  });
+                  phase = 'copying';
+                  if (verified) resume = start > 0 ? 'resumed' : 'from-start';
+                  if (start > 0) {
+                    // The bytes already there count as done, so the bar still
+                    // reaches the total it was given.
+                    fileDone = start;
+                    bytesDone += start;
+                  }
+                  emit();
+
+                  for (
+                    let offset = start;
+                    offset < f.size;
+                    offset += CHUNK_SIZE
+                  ) {
                     signal.throwIfAborted();
                     const chunkEnd = Math.min(offset + CHUNK_SIZE, f.size);
                     const readable = createReadStream(src, {

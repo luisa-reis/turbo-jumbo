@@ -152,6 +152,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
   in the download, copy, delete and conflict dialogs. They were a mix of two
   sizes before; the smaller one suits lists this dense and keeps table rows
   from being taller than the text in them.
+- A copy interrupted partway to another machine now picks up where it stopped
+  instead of starting the file again. Copies within one machine already did
+  this; sending to a peer did not, because the sender can't see the receiver's
+  disk — so a 4 GiB shard cut off near the end cost the whole 4 GiB a second
+  time. The receiver now says how many bytes it holds and the SHA256 of exactly
+  those bytes, and when the sender's own first bytes hash the same, the partial
+  is kept and only the rest travels. Anything else — different bytes, a longer
+  file than the one being sent, a machine that can't answer — is sent in full,
+  so a half-written file is never completed with the tail of a different one.
+  A file already there in its entirety now costs the reading of it rather than
+  the sending of it.
+
+  Pulling a model out of cold storage was the last copy that always started
+  over; it resumes too.
 
 ### Fixed
 
