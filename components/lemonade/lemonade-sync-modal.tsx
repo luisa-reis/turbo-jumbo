@@ -8,6 +8,8 @@ import {Text} from '@astryxdesign/core/Text';
 import {Button} from '@astryxdesign/core/Button';
 import {Badge} from '@astryxdesign/core/Badge';
 import {List, ListItem} from '@astryxdesign/core/List';
+import {HoverCard} from '@astryxdesign/core/HoverCard';
+import {Icon} from '@astryxdesign/core/Icon';
 import {CopyNameButton} from '@/components/controls/copy-name-button';
 
 // Mirrors the API shapes in lib/lemonade/lemonade-sync.ts (kept local so this client
@@ -56,6 +58,39 @@ interface Placement {
 }
 
 type Phase = 'loading' | 'preview' | 'running' | 'done' | 'error';
+
+/**
+ * The full account of what a sync does, for the hovercard beside the summary.
+ *
+ * Everything the old paragraph said, in about half the words: which file goes
+ * which way, and how the two Lemonade directories are kept apart. The dialog
+ * itself says only what the button is for — a wall of mechanics above a list of
+ * changes competes with the list, which is the part that is actually specific
+ * to this run.
+ */
+function SyncExplainer() {
+  return (
+    // Narrower than the dialog it explains: unconstrained, three sentences of
+    // prose lay themselves out as three very long lines across the window.
+    <VStack gap={2} maxWidth={380}>
+      <Text type="supporting">
+        A file only Lemonade has moves into Turbo Jumbo. A file both have loses
+        Lemonade&apos;s duplicate. Either way Lemonade keeps a symlink, so it
+        still finds the model where it expects to.
+      </Text>
+      <Text type="supporting">
+        Models only Turbo Jumbo has are lent back the same way, and links whose
+        files are gone are dropped.
+      </Text>
+      <Text type="supporting">
+        Entries are sorted as they go: Lemonade&apos;s cache for the models it
+        lists, its extra-models directory for everything else this machine holds
+        — so a model it never listed is still served from the copy you already
+        have.
+      </Text>
+    </VStack>
+  );
+}
 
 export function LemonadeSyncModal({
   syncUrl,
@@ -237,21 +272,21 @@ export function LemonadeSyncModal({
         content={
           <LayoutContent>
             <VStack gap={4}>
-              <Text type="supporting">
-                Moves models that exist only in Lemonade into Turbo Jumbo&apos;s
-                file structure, and deduplicates files Turbo Jumbo already holds
-                — then replaces the Lemonade copies with symbolic links into
-                Turbo Jumbo. Catalog models Turbo Jumbo already has but Lemonade
-                hasn&apos;t downloaded are linked into Lemonade&apos;s cache,
-                and stale links whose files were deleted are removed.
-              </Text>
-              <Text type="supporting">
-                It also keeps Lemonade&apos;s two directories in order: its
-                cache holds what Lemonade lists, and its extra-models directory
-                is offered everything else this machine holds — so a model
-                Lemonade has never heard of can be served from the copy you
-                already have.
-              </Text>
+              {/* The short version carries the point; the hovercard carries
+                  the mechanics, for whoever wants to know what will move. */}
+              <HStack gap={1} vAlign="center">
+                <Text type="supporting">
+                  Leaves Lemonade and Turbo Jumbo sharing one copy of each file
+                  instead of keeping two.
+                </Text>
+                <HoverCard
+                  placement="below"
+                  label="What consolidating does"
+                  content={<SyncExplainer />}
+                >
+                  <Icon icon="info" size="sm" />
+                </HoverCard>
+              </HStack>
 
               {phase === 'loading' && (
                 <Text type="body">Finding models to sync…</Text>
