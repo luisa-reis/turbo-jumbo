@@ -9,8 +9,8 @@ export interface CheckProgress {
   done: number;
   total: number;
   file: string;
-  // True while both copies of `file` are being read to compare md5s — the slow
-  // path, taken only when the sidecars have no usable SHA256 for them.
+  // True while a copy of `file` is being read to hash it — the slow path,
+  // taken only for a side whose sidecar holds no usable SHA256.
   hashing: boolean;
 }
 
@@ -33,11 +33,11 @@ export interface ConflictItem {
   sourceSize: number;
   destSize: number;
   sizeMatch: boolean;
-  // Which digest the two copies were compared with, and the result. The check
-  // prefers the SHA256 both sidecars already record (no bytes read) and falls
-  // back to md5-ing both copies; null means it couldn't compare at all — the
-  // sizes differ, or one side offered no digest.
-  digest: 'sha256' | 'md5' | null;
+  // Whether the two copies were compared, and the result. The check takes each
+  // side's SHA256 from its sidecar when it can (no bytes read) and hashes only
+  // a side that has no record; null means it couldn't compare at all — the
+  // sizes differ, or a side offered no digest and wasn't allowed to hash.
+  digest: 'sha256' | null;
   digestMatch: boolean | null;
   sourceDigest: string | null;
   destDigest: string | null;

@@ -19,11 +19,11 @@ import type {Peer} from '@/lib/config';
 export type {ConflictItem};
 
 // Digests are identity, not reading material: enough to eyeball two rows
-// against each other, with the algorithm named so sha256 and md5 rows are
-// never mistaken for each other.
-function shortDigest(value: string | null, algo: 'sha256' | 'md5' | null) {
+// against each other, with the algorithm named so a digest is never mistaken
+// for some other kind of hex.
+function shortDigest(value: string | null, algo: 'sha256' | null) {
   if (!value) return '—';
-  return `${algo ?? '?'}:${value.slice(0, 12)}…`;
+  return `${algo ?? 'sha256'}:${value.slice(0, 12)}…`;
 }
 
 interface ConflictsModalProps {

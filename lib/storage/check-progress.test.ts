@@ -67,9 +67,13 @@ test('an empty check skips nothing', () => {
   expect(skipListFor([])).toEqual([]);
 });
 
-test('identity is digest agreement, whatever the digest was', () => {
-  expect(isIdenticalAtDestination(conflict({digest: 'md5'}))).toBe(true);
-  expect(isIdenticalAtDestination(conflict({digestMatch: null}))).toBe(false);
+test('identity is digest agreement, and nothing weaker', () => {
+  expect(isIdenticalAtDestination(conflict())).toBe(true);
+  // Same size, no digest: the check was told not to read, or a peer too old to
+  // answer in SHA256 offered nothing. Unknown is not identical.
+  expect(
+    isIdenticalAtDestination(conflict({digest: null, digestMatch: null})),
+  ).toBe(false);
 });
 
 test('the status label names the slow stretch', () => {

@@ -4,47 +4,35 @@ import {
   supportFileSources,
 } from '@/lib/storage/support-files';
 import {recordedSha256} from '@/lib/storage/recorded-digest';
+import {localSha256} from '@/lib/storage/file-transfer';
 import {logger} from '@/lib/util/logger';
 import {isObject, isStringArray, readJsonBody} from '@/lib/util/request';
 import nodePath from 'path';
 import {promises as fsp} from 'fs';
-import {execFile} from 'child_process';
-import {promisify} from 'util';
-
-const execFileP = promisify(execFile);
 
 type SourceFile = {path: string; from: string; size: number};
 
-async function localMd5(fullPath: string): Promise<string> {
-  const {stdout} = await execFileP('md5sum', [fullPath]);
-  return stdout.split(/\s+/)[0];
-}
-
-async function peerChecksumData(
+/**
+ * A peer's SHA256 for one of its files. With `recorded` the peer answers from
+ * the file's sidecar and reads no bytes, returning null when it holds no
+ * trustworthy record; without it the peer hashes the file then and there.
+ *
+ * It is the same digest of the same bytes either way, so a recorded answer
+ * from one side compares directly against a computed one from the other, and
+ * only the side that lacks a record has to pay for a read.
+ *
+ * null also covers a peer too old to answer in SHA256 at all — an undecided
+ * pair is copied rather than wrongly called identical.
+ */
+async function peerSha256(
   peerAddr: string,
   file: string,
-): Promise<{size: number; md5: string} | null> {
-  try {
-    const res = await fetch(
-      `http://${peerAddr}/api/v1/local-models/checksum?file=${encodeURIComponent(file)}`,
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as {size: number; md5: string};
-  } catch {
-    return null;
-  }
-}
-
-// The SHA256 a peer's sidecar already recorded for a file, without asking it
-// to hash anything. null when it has no usable record — or when it predates
-// the `recorded` parameter and answered with an md5 instead.
-async function peerRecordedSha256(
-  peerAddr: string,
-  file: string,
+  opts: {recorded: boolean},
 ): Promise<string | null> {
+  const recorded = opts.recorded ? '&recorded=1' : '';
   try {
     const res = await fetch(
-      `http://${peerAddr}/api/v1/local-models/checksum?file=${encodeURIComponent(file)}&recorded=1`,
+      `http://${peerAddr}/api/v1/local-models/checksum?file=${encodeURIComponent(file)}${recorded}`,
     );
     if (!res.ok) return null;
     const data = (await res.json()) as {sha256?: string | null};
@@ -63,11 +51,12 @@ async function peerRecordedSha256(
 // file list. Hashing a large model reads every byte through the slowest disk
 // involved, so the client needs to see (and be able to abandon) the wait.
 //
-// Digests come from the sidecars whenever both copies still match their
-// recorded size and predate their sidecar — `tjmodel.json` already holds the
-// SHA256 computed at download time, so the common "already there, unchanged"
-// case reads no file bytes at all. Only when a side has no trustworthy record
-// does this fall back to md5-ing both copies.
+// Every digest here is a SHA256 of the file's bytes, whether it was recorded
+// at download time or computed on the spot, so the two are interchangeable.
+// A copy still matching its sidecar's recorded size and predating it answers
+// from `tjmodel.json` and reads nothing — the common "already there,
+// unchanged" case costs no I/O at all — and only a side with no trustworthy
+// record is hashed.
 export async function POST(req: Request) {
   const body = await readJsonBody<{
     files: SourceFile[];
@@ -78,11 +67,11 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const {files, toColdStorage, toPeers} = body;
-  // Whether a same-size pair neither sidecar can vouch for may be settled by
-  // md5-ing both copies. On by default, for the Copy button: a person asked
-  // for the comparison and is watching it run. `tj copy` turns it off — it
-  // reads a file only to copy it, so a pair it can't settle for free is
-  // copied instead of read twice to find out it needn't be.
+  // Whether a side no sidecar can vouch for may be settled by hashing it. On
+  // by default, for the Copy button: a person asked for the comparison and is
+  // watching it run. `tj copy` turns it off — it reads a file only to copy it,
+  // so a pair it can't settle for free is copied instead of read to find out
+  // it needn't be.
   const hashFallback = body.hashFallback !== false;
   if (
     !Array.isArray(files) ||
@@ -105,10 +94,10 @@ export async function POST(req: Request) {
   // Same up-front validation as /api/v1/copy, and for the same reason: every
   // host this talks to arrives in the request body (`toPeers`, and each file's
   // `from`) and is fetched as `http://<host>/…`, so an unconfined caller could
-  // aim the server at an arbitrary host. Checking a file also reads it — an md5
-  // of both copies when neither side has a trustworthy recorded digest — so the
-  // paths are confined to their base too, or a local source could be made to
-  // hash a file outside the model tree and report the digest back.
+  // aim the server at an arbitrary host. Checking a file also reads it — a
+  // SHA256 of any side with no trustworthy recorded digest — so the paths are
+  // confined to their base too, or a local source could be made to hash a file
+  // outside the model tree and report the digest back.
   const knownPeers = new Set(config.peers.map((p) => p.address));
   if (toPeers.some((p) => !knownPeers.has(p))) {
     return new Response('Unknown peer', {status: 400});
@@ -165,7 +154,7 @@ export async function POST(req: Request) {
     sourceSize: number;
     destSize: number;
     sizeMatch: boolean;
-    digest: 'sha256' | 'md5' | null;
+    digest: 'sha256' | null;
     digestMatch: boolean | null;
     sourceDigest: string | null;
     destDigest: string | null;
@@ -204,9 +193,9 @@ export async function POST(req: Request) {
       try {
         const {path: file, from, size: sourceSize} = f;
 
-        // Both digests for a side, resolved lazily and cached per file: the
-        // recorded one costs a sidecar read (or a peer request), the md5 costs
-        // a full read of the file.
+        // Both of the source's digests, resolved lazily and cached per file:
+        // the recorded one costs a sidecar read (or a peer request), the
+        // computed one costs a full read of the file.
         let sourceRecordedCache: string | null | undefined = undefined;
         const getSourceRecorded = async (): Promise<string | null> => {
           if (sourceRecordedCache !== undefined) return sourceRecordedCache;
@@ -216,33 +205,38 @@ export async function POST(req: Request) {
           } else if (from === localPeerAddr) {
             result = localBase ? await recordedSha256(localBase, file) : null;
           } else {
-            result = await peerRecordedSha256(from, file);
+            result = await peerSha256(from, file, {recorded: true});
           }
           sourceRecordedCache = result;
           return result;
         };
 
-        let sourceMd5Cache: string | null | undefined = undefined;
-        const getSourceMd5 = async (): Promise<string | null> => {
-          if (sourceMd5Cache !== undefined) return sourceMd5Cache;
+        let sourceComputedCache: string | null | undefined = undefined;
+        const getSourceComputed = async (): Promise<string | null> => {
+          if (sourceComputedCache !== undefined) return sourceComputedCache;
+          // null base = the source is another peer, which hashes its own copy.
+          const base =
+            from === 'cold-storage'
+              ? coldBase
+              : from === localPeerAddr
+                ? localBase
+                : null;
           let result: string | null;
-          if (from === 'cold-storage') {
-            try {
-              result = await localMd5(nodePath.resolve(coldBase, file));
-            } catch {
-              result = null;
-            }
-          } else if (from === localPeerAddr) {
-            try {
-              result = await localMd5(nodePath.resolve(localBase, file));
-            } catch {
-              result = null;
-            }
+          if (base === null) {
+            result = await peerSha256(from, file, {recorded: false});
+          } else if (!base) {
+            result = null; // that tier isn't configured on this host
           } else {
-            const cs = await peerChecksumData(from, file);
-            result = cs?.md5 ?? null;
+            try {
+              result = await localSha256(
+                nodePath.resolve(base, file),
+                req.signal,
+              );
+            } catch {
+              result = null; // unreadable, or the client gave up mid-hash
+            }
           }
-          sourceMd5Cache = result;
+          sourceComputedCache = result;
           return result;
         };
 
@@ -252,7 +246,7 @@ export async function POST(req: Request) {
 
           let destSize: number | null = null;
           let destRecordedFn: () => Promise<string | null>;
-          let destMd5Fn: () => Promise<string | null>;
+          let destComputedFn: () => Promise<string | null>;
 
           if (destination === 'cold-storage') {
             const destPath = nodePath.resolve(coldBase, file);
@@ -263,9 +257,9 @@ export async function POST(req: Request) {
               continue;
             }
             destRecordedFn = () => recordedSha256(coldBase, file);
-            destMd5Fn = async () => {
+            destComputedFn = async () => {
               try {
-                return await localMd5(destPath);
+                return await localSha256(destPath, req.signal);
               } catch {
                 return null;
               }
@@ -279,9 +273,9 @@ export async function POST(req: Request) {
               continue;
             }
             destRecordedFn = () => recordedSha256(localBase, file);
-            destMd5Fn = async () => {
+            destComputedFn = async () => {
               try {
-                return await localMd5(destPath);
+                return await localSha256(destPath, req.signal);
               } catch {
                 return null;
               }
@@ -300,33 +294,30 @@ export async function POST(req: Request) {
             } catch {
               continue;
             }
-            destRecordedFn = () => peerRecordedSha256(destination, file);
-            destMd5Fn = async () => {
-              const cs = await peerChecksumData(destination, file);
-              return cs?.md5 ?? null;
-            };
+            destRecordedFn = () =>
+              peerSha256(destination, file, {recorded: true});
+            destComputedFn = () =>
+              peerSha256(destination, file, {recorded: false});
           }
 
           const sizeMatch = sourceSize === destSize;
-          let digest: 'sha256' | 'md5' | null = null;
+          let digest: 'sha256' | null = null;
           let digestMatch: boolean | null = null;
           let sourceDigest: string | null = null;
           let destDigest: string | null = null;
 
           if (sizeMatch) {
             // Differing sizes already answer the question, so only same-size
-            // pairs need a digest. Try the recorded SHA256s first — both sides
-            // answer from their sidecars without reading a byte.
-            const [srcSha, dstSha] = await Promise.all([
+            // pairs need a digest. Ask each side's sidecar first — that reads
+            // no bytes — and hash only the side that couldn't answer. Both are
+            // SHA256 of the same bytes, so a recorded digest compares directly
+            // against a computed one and a single missing record costs one
+            // read rather than two.
+            [sourceDigest, destDigest] = await Promise.all([
               getSourceRecorded(),
               destRecordedFn(),
             ]);
-            if (srcSha && dstSha) {
-              digest = 'sha256';
-              sourceDigest = srcSha;
-              destDigest = dstSha;
-              digestMatch = srcSha === dstSha;
-            } else if (hashFallback) {
+            if ((!sourceDigest || !destDigest) && hashFallback) {
               await write({
                 type: 'progress',
                 done: pairsDone,
@@ -335,17 +326,17 @@ export async function POST(req: Request) {
                 hashing: true,
               });
               [sourceDigest, destDigest] = await Promise.all([
-                getSourceMd5(),
-                destMd5Fn(),
+                sourceDigest ?? getSourceComputed(),
+                destDigest ?? destComputedFn(),
               ]);
-              if (sourceDigest !== null && destDigest !== null) {
-                digest = 'md5';
-                digestMatch = sourceDigest === destDigest;
-              }
             }
-            // Without the fallback the pair is left undecided (digest null), and
-            // an undecided file is not identical — the caller copies it rather
-            // than reading both copies to find out.
+            if (sourceDigest && destDigest) {
+              digest = 'sha256';
+              digestMatch = sourceDigest === destDigest;
+            }
+            // Otherwise the pair is left undecided (digest null), and an
+            // undecided file is not identical — the caller copies it rather
+            // than reading it to find out it needn't have.
           }
 
           conflicts.push({

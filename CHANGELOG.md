@@ -134,6 +134,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
   reading them, and the Copy button now reports which file it's on ("Verifying
   12/48…") with a Cancel check button beside it, instead of sitting on
   "Checking…" for minutes with no way out.
+
+  That reading is now a SHA256, the same digest recorded when a file is
+  downloaded, in place of the MD5 it used to fall back to. Because both are
+  now the same digest of the same bytes, a file whose record one machine has
+  and the other lacks needs only the one side hashed rather than both — and
+  the reported digests can be read against each other and against an audit.
+  A peer still running an older version answers in MD5, which reads as no
+  answer at all: those files are copied rather than compared, so a fleet
+  part-way through an upgrade loses the shortcut but never mistakes two
+  different files for the same one.
+
 - Updated the UI toolkit (Astryx 0.3.0) and framework (Next.js 16.3, React
   19.2.8), so some controls may look subtly different.
 - Every checkbox is now the compact size — the row and select-all boxes in the
