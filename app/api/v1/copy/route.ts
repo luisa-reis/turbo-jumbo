@@ -5,6 +5,10 @@ import {
   readFileMetaWithRepoHead,
   sendFileMeta,
 } from '@/lib/storage/copy-meta';
+import {
+  resolveSupportFiles,
+  supportFileSources,
+} from '@/lib/storage/support-files';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
 import {promises as fsp} from 'fs';
@@ -85,8 +89,34 @@ export async function POST(req: Request) {
     return new Response('Unknown source', {status: 400});
   }
 
+  // A model's support files (config.json, tokenizer, safetensors index) ride
+  // along with its weights, resolved here rather than by the caller: the weight
+  // scan only tracks weights, so no caller's selection can name them. Doing it
+  // in the copy itself covers every route in — the UI (whose pre-check expanded
+  // the same list already, so this finds nothing new), `tj copy`, which skips
+  // that check by design, and the cold-storage resume — instead of only the one
+  // that happens to ask first. Sources are the ones already validated above
+  // plus this host's own tiers, so this opens no new host to talk to.
+  const support = await resolveSupportFiles(
+    files.map((f) => f.path),
+    supportFileSources({
+      froms: files.map((f) => f.from),
+      coldBase,
+      localBase,
+      localPeerAddr,
+    }),
+    {
+      onError: (from, message) =>
+        logger.warn(
+          `[copy] support-file expansion failed for ${from}: ${message}`,
+        ),
+    },
+  );
+  const allFiles: SourceFile[] =
+    support.length > 0 ? [...files, ...support] : files;
+
   // Validate local-source paths up-front.
-  for (const f of files) {
+  for (const f of allFiles) {
     if (f.from === 'cold-storage') {
       if (!resolveWithin(coldBase, f.path))
         return new Response('Invalid path', {status: 400});
@@ -100,7 +130,7 @@ export async function POST(req: Request) {
 
   let filesTotal = 0;
   let bytesTotal = 0;
-  for (const f of files) {
+  for (const f of allFiles) {
     for (const dest of destinations) {
       if (dest === f.from || shouldSkip(f.path, dest)) continue;
       filesTotal++;
@@ -207,14 +237,14 @@ export async function POST(req: Request) {
     await emit(); // initial event — awaited so the client receives the opening frame
 
     logger.info(
-      `[copy] start: ${files.length} file(s) → ${destinations.join(', ') || '(no destinations)'}`,
+      `[copy] start: ${allFiles.length} file(s) → ${destinations.join(', ') || '(no destinations)'}`,
     );
 
     try {
       // Per-destination, group files by their source so peer→peer pushes can batch.
       for (const dest of destinations) {
         const bySource = new Map<string, SourceFile[]>();
-        for (const f of files) {
+        for (const f of allFiles) {
           if (f.from === dest || shouldSkip(f.path, dest)) continue;
           if (!bySource.has(f.from)) bySource.set(f.from, []);
           bySource.get(f.from)!.push(f);
@@ -622,7 +652,7 @@ export async function POST(req: Request) {
       // destination, hence excluded here.)
       if (deleteAfterCopy && toColdStorage) {
         const bySource = new Map<string, SourceFile[]>();
-        for (const f of files) {
+        for (const f of allFiles) {
           if (f.from === 'cold-storage') continue;
           if (shouldSkip(f.path, 'cold-storage')) continue;
           if (!coldDone.has(f.path)) continue;
@@ -658,7 +688,7 @@ export async function POST(req: Request) {
       }
 
       logger.info(
-        `[copy] done: ${files.length} file(s)${
+        `[copy] done: ${allFiles.length} file(s)${
           errors.length ? `, ${errors.length} failure(s)` : ''
         }`,
       );
@@ -666,7 +696,7 @@ export async function POST(req: Request) {
       await safeClose();
     } catch (err) {
       if (signal.aborted) {
-        logger.info(`[copy] cancelled: ${files.length} file(s)`);
+        logger.info(`[copy] cancelled: ${allFiles.length} file(s)`);
       } else {
         logger.error(`[copy] error:`, err);
       }

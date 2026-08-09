@@ -139,6 +139,25 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Copying a whole-repo model — a safetensors checkpoint and anything else that
+  isn't a single self-contained file — now brings its config, tokenizer and
+  safetensors index along even when the model is already in cold storage.
+  Those support files sit outside the weight scan, so a copy has to go and
+  look for them, and it only ever looked in the one place each weight file was
+  read from. A model held both locally and in cold storage reads from cold
+  storage — it's the cheaper disk — and an archive written before support
+  files travelled at all holds the weights alone, so the search came back
+  empty and the copy carried bare weights. The destination got a model that
+  no loader would open, with nothing to say anything was missing. Every tier
+  is now asked, and each support file is taken from whichever one actually
+  has it.
+
+  `tj copy` never carried them at all: the search lived in the pre-copy
+  conflict check, which the command skips on purpose because it has no way to
+  ask a human what to overwrite. It has moved into the copy itself, so every
+  way of starting one — the button, the command, and the cold-storage
+  resume — carries the same files.
+
 - An interrupted download of a split model can now be finished from the audit
   hovercard. A quantization missing some of its shards reported which ones were
   absent and stopped there, offering nothing to press — the same hovercard
