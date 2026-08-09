@@ -254,7 +254,7 @@ put that file into cold storage, so a skipped file would keep its source
 forever; the copy resumes and rewrites nothing when the archive already
 matches, so little is lost.
 
-### `--dry-run`
+### `-n`, `--dry-run`
 
 On both commands: resolve everything, print the plan, transfer nothing.
 

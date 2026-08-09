@@ -72,7 +72,7 @@ const OPTIONS = {
   to: {type: 'string'},
   from: {type: 'string'},
   'delete-after': {type: 'boolean'},
-  'dry-run': {type: 'boolean'},
+  'dry-run': {type: 'boolean', short: 'n'},
   fix: {type: 'boolean'},
   'allow-delete': {type: 'boolean'},
   cached: {type: 'boolean'},

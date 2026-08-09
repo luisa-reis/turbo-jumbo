@@ -30,7 +30,7 @@ TRANSFERS (get, copy)
   --to cold|<peer>    Where it ends up. get takes cold; copy takes either
   --from local|cold|<peer>   Where copy reads from (default: wherever it is)
   --delete-after      Remove the source once the copy is verified
-  --dry-run           Print the plan and stop
+  -n, --dry-run       Print the plan and stop
 
   Transfers never prompt. --delete-after must be typed, and --dry-run shows
   what would happen first. Downloads run on the server this CLI points at; to
@@ -39,7 +39,7 @@ TRANSFERS (get, copy)
 REMOVING (rm, lemonade sync)
   --from local|cold|<peer>   Which copy rm deletes. Required: no default
   -y, --yes           Answer the confirmation ahead of time
-  --dry-run           Show what would go, and stop
+  -n, --dry-run       Show what would go, and stop
 
   These two ask before deleting, naming what will go; type "yes" to agree.
   With no terminal to ask (cron, redirected input) they refuse instead, so

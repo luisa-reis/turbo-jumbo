@@ -83,3 +83,11 @@ test('--exact is collected for a scoped download', () => {
 test('--exact defaults to off', () => {
   expect(ok(['get', 'org/repo']).exact).toBe(false);
 });
+
+test('-n is --dry-run', () => {
+  // The short form every tool spells the same way; a plan is what you ask for
+  // most often, and -n is what the fingers already type.
+  expect(ok(['copy', 'qwen', '--to', 'cold', '-n']).dryRun).toBe(true);
+  expect(ok(['copy', 'qwen', '--to', 'cold', '--dry-run']).dryRun).toBe(true);
+  expect(ok(['copy', 'qwen', '--to', 'cold']).dryRun).toBe(false);
+});
