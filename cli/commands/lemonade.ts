@@ -539,7 +539,11 @@ async function lemonadeSync(
       {header: 'DEDUP', value: (p) => String(p.dedupCount), align: 'right'},
       {header: 'LINK', value: (p) => String(p.linkCount), align: 'right'},
       {header: 'STALE', value: (p) => String(p.staleCount), align: 'right'},
-      {header: 'NOTE', value: (p) => (p.blocked ? p.blocked : '')},
+      {
+        header: 'NOTE',
+        value: (p) =>
+          p.emptyEntry ? 'empty — entry removed' : (p.blocked ?? ''),
+      },
     ];
     const totals = preview.reduce(
       (a, p) => ({
@@ -547,8 +551,9 @@ async function lemonadeSync(
         dedup: a.dedup + p.dedupCount,
         link: a.link + p.linkCount,
         stale: a.stale + p.staleCount,
+        empty: a.empty + (p.emptyEntry ? 1 : 0),
       }),
-      {move: 0, dedup: 0, link: 0, stale: 0},
+      {move: 0, dedup: 0, link: 0, stale: 0, empty: 0},
     );
     const nothing =
       preview.length === 0 && placement.length === 0 && extra.length === 0;
@@ -565,8 +570,22 @@ async function lemonadeSync(
               ? [
                   renderTable(columns, preview, color),
                   '',
-                  `would move ${totals.move}, deduplicate ${totals.dedup}, ` +
-                    `link ${totals.link}, remove ${totals.stale} stale link(s)`,
+                  // Only what a run will actually do: a line of zeroes under a
+                  // table of changes reads as "nothing will happen".
+                  [
+                    totals.move > 0 ? `move ${totals.move}` : null,
+                    totals.dedup > 0 ? `deduplicate ${totals.dedup}` : null,
+                    totals.link > 0 ? `link ${totals.link}` : null,
+                    totals.stale > 0
+                      ? `remove ${totals.stale} stale link(s)`
+                      : null,
+                    totals.empty > 0
+                      ? `remove ${totals.empty} empty entry(s)`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')
+                    .replace(/^./, (c) => `would ${c}`),
                   // DEDUP and STALE are deletions; say so rather than letting
                   // two neutral-looking columns hide it.
                   `deduplicating and removing stale links deletes files from Lemonade's cache`,

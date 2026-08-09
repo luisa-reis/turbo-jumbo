@@ -188,6 +188,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
   is sorted at all, since an unanswered request looks exactly like "Lemonade
   lists nothing" and acting on it would sweep the whole library into `extra`.
 
+  Consolidating also clears out cache entries that have nothing left in them.
+  Archiving a model deletes its local files, the links in Lemonade`s cache then
+  dangle, and an earlier run drops those links — leaving a directory holding a
+  revision marker and an empty snapshot. Lemonade reads that as a downloaded
+  model, and lists one it cannot load. The whole entry now goes, and a model
+  that is still held gets a working entry back in the same run.
+
   Sync also keeps `extra/` in step with local storage: a model that stops being
   held, or that the catalog picks up later, has its links cleared away. A
   directory there containing a real file is left alone entirely — Lemonade

@@ -21,6 +21,7 @@ interface Preview {
   dedupCount: number;
   linkCount: number;
   staleCount: number;
+  emptyEntry?: boolean;
   blocked?: 'no-revision';
 }
 interface FileResult {
@@ -31,6 +32,7 @@ interface FileResult {
     | 'materialized'
     | 'already-linked'
     | 'stale-removed'
+    | 'entry-removed'
     | 'skipped'
     | 'error';
   message?: string;
@@ -203,6 +205,12 @@ export function LemonadeSyncModal({
         `${fileCountLabel(p.staleCount)} · ${p.rev.slice(0, 12)}`,
     },
     {
+      title: 'Removing empty entries (model no longer here)',
+      hint: 'Lemonade reads these as downloaded models it cannot load.',
+      items: preview.filter((p) => p.emptyEntry),
+      describe: () => 'nothing left in the snapshot',
+    },
+    {
       title: 'Skipped — cannot link into Lemonade',
       hint: 'These models have no recorded revision. Audit them to record one, then consolidate again.',
       items: preview.filter((p) => p.blocked),
@@ -240,6 +248,11 @@ export function LemonadeSyncModal({
       [
         counts.materialized ?? 0,
         (n: number) => `${n} linked into Lemonade`,
+        'success',
+      ],
+      [
+        counts['entry-removed'] ?? 0,
+        (n: number) => `${n} empty ${plural(n, 'entry', 'entries')} removed`,
         'success',
       ],
       [

@@ -99,8 +99,13 @@ export type SyncFileStatus =
   | 'materialized' // Turbo Jumbo had it, Lemonade didn't — created a Lemonade symlink
   | 'already-linked' // the Lemonade entry was already a symlink — left alone
   | 'stale-removed' // the entry was a dangling symlink (target gone) — deleted
+  | 'entry-removed' // the whole cache entry was an empty husk — deleted
   | 'skipped' // Turbo Jumbo holds a *different* file — left alone
   | 'error';
+
+/** The repoPath used for a result about the cache entry itself rather than a
+ *  file inside it. */
+export const EMPTY_ENTRY = '(empty cache entry)';
 
 export interface SyncFileResult {
   repoPath: string;
@@ -245,6 +250,9 @@ export interface LemonadeSyncPreview {
   dedupCount: number; // files Turbo Jumbo already holds — Lemonade copy deleted
   linkCount: number; // files to materialize as Lemonade symlinks into Turbo Jumbo
   staleCount: number; // dangling snapshot symlinks (target gone) to delete
+  // The entry has no files left at all: refs/main and an empty snapshot, which
+  // Lemonade still reads as a downloaded model. The whole entry goes.
+  emptyEntry?: boolean;
   // A model the sync wants to materialize but can't: its sidecar records no
   // repoCommit, so there's no revision to name the snapshot dir. Surfaced so
   // "nothing to sync" isn't conflated with "can't sync"; a run skips it.
@@ -281,7 +289,8 @@ export async function previewLemonadeSync(
         else if (action === 'dedup') dedupCount++;
         else if (action === 'stale') staleCount++;
       }
-      if (moveCount + dedupCount + staleCount > 0)
+      const emptyEntry = entries.length === 0;
+      if (emptyEntry || moveCount + dedupCount + staleCount > 0)
         out.push({
           repoId: repo.repoId,
           side: sideOfDir(dir, sides, repo.repoId, listedSet),
@@ -290,6 +299,7 @@ export async function previewLemonadeSync(
           dedupCount,
           linkCount: 0,
           staleCount,
+          ...(emptyEntry ? {emptyEntry: true} : {}),
         });
     }
   }
@@ -573,6 +583,36 @@ export async function syncLemonadeRepo(
   const files: SyncFileResult[] = [];
   const movedEntries: TjModelFile[] = [];
 
+  // An entry with nothing left in its snapshot: the weights were archived and
+  // deleted, and a previous run dropped the links that then dangled. What
+  // remains — refs/main and an empty snapshot directory — is what Lemonade
+  // reads to decide a model is downloaded, so the husk keeps a model it cannot
+  // load on its list. Drop the whole entry. A model that is still available
+  // gets a proper one back from the materialize pass.
+  if (entries.length === 0) {
+    try {
+      await fsp.rm(repo.dir, {recursive: true, force: true});
+      logger.info(`[lemonade-sync] removed empty cache entry ${repo.repoId}`);
+      return {
+        repoId: repo.repoId,
+        rev: repo.rev,
+        files: [{repoPath: EMPTY_ENTRY, status: 'entry-removed'}],
+      };
+    } catch (e) {
+      return {
+        repoId: repo.repoId,
+        rev: repo.rev,
+        files: [
+          {
+            repoPath: EMPTY_ENTRY,
+            status: 'error',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        ],
+      };
+    }
+  }
+
   for (const entry of entries) {
     try {
       const {dst, action} = await planFile(tj, repo.repoId, entry);
@@ -669,7 +709,8 @@ export async function syncLemonadeToTurboJumbo(
           (f) =>
             f.status === 'linked' ||
             f.status === 'deduplicated' ||
-            f.status === 'stale-removed',
+            f.status === 'stale-removed' ||
+            f.status === 'entry-removed',
         )
       ) {
         out.push(result);

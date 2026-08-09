@@ -749,3 +749,44 @@ test('preview predicts the run when entries are still at the old cache root', as
   ]);
   await fsp.rm(root, {recursive: true, force: true});
 });
+
+test('an entry with an empty snapshot is removed, husk and all', async () => {
+  // What archiving a model leaves behind: the weights went to cold storage and
+  // the local copies were deleted, an earlier run dropped the links that then
+  // dangled, and refs/main plus an empty snapshot dir remained — which is
+  // exactly what Lemonade reads to call a model downloaded.
+  const {root, tj, sides} = await mkdirs();
+  const rev = 'huskrev';
+  const dir = path.join(sides.builtin, 'models--org--archived');
+  await write(sides.builtin, 'models--org--archived/refs/main', rev);
+  await fsp.mkdir(path.join(dir, 'snapshots', rev), {recursive: true});
+
+  expect(await previewLemonadeSync(tj, sides)).toEqual([
+    {
+      repoId: 'org/archived',
+      side: 'builtin',
+      rev,
+      moveCount: 0,
+      dedupCount: 0,
+      linkCount: 0,
+      staleCount: 0,
+      emptyEntry: true,
+    },
+  ]);
+
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
+  expect(result.files).toEqual([
+    {repoPath: '(empty cache entry)', status: 'entry-removed'},
+  ]);
+  expect(existsSync(dir)).toBe(false);
+  await fsp.rm(root, {recursive: true, force: true});
+});
+
+test('an entry that still holds a file is never removed as empty', async () => {
+  const {root, tj, sides} = await mkdirs();
+  await lemonadeRepo(sides.builtin, 'org', 'alive', 'r1', {'a.bin': 'A'});
+  const [result] = await syncLemonadeToTurboJumbo(tj, sides);
+  expect(result.files.map((f) => f.status)).toEqual(['linked']);
+  expect(existsSync(path.join(sides.builtin, 'models--org--alive'))).toBe(true);
+  await fsp.rm(root, {recursive: true, force: true});
+});
