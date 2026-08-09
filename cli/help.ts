@@ -14,7 +14,7 @@ COMMANDS
   rm <model>          Delete a model's files from one storage tier
   lemonade ls|get|sync  Browse the Lemonade catalog, download from it, or
                       reconcile its cache
-  version             Server version, and the URL this CLI is pointed at
+  version             Server and CLI versions, and the URL this CLI points at
   help                This text
 
 FILTERS (ls)
@@ -61,6 +61,7 @@ OPTIONS
   -v, --verbose       Say what is being done; repeat for more (-vv, -vvv)
   -q, --silent        Errors only. --quiet is accepted, for other tools' sake
   -h, --help          Show this text
+  --version           This CLI's version; add -v for the build detail
 
 VERBOSITY
   One dial: --silent, then the default, then -v, -vv, -vvv. -v says what is

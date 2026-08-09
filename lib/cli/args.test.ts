@@ -114,3 +114,12 @@ test('--quiet is accepted, though --silent is what we document', () => {
 test('asking to be quiet and loud at once is a usage error', () => {
   expect(err(['ls', '-q', '-v'])).toContain('same dial');
 });
+
+test('--version is a flag, and needs no command', () => {
+  // A bare `tj --version` names no command; the parser calls that help, so
+  // the entry point has to check the flag first.
+  expect(ok(['--version']).version).toBe(true);
+  expect(ok(['--version']).command).toBe('help');
+  expect(ok(['--version', '-v']).verbosity).toBe(1);
+  expect(ok(['ls']).version).toBe(false);
+});

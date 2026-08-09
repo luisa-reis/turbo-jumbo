@@ -541,11 +541,30 @@ $ tj version
 COMPONENT  VERSION
 server     0.1.0 (dev)
 commit     38c4fea5f
+cli        0.1.0 (dev)
 url        http://192.0.2.10:3000
 ```
 
 The URL is part of the answer on purpose — the commonest confusion with a client
-tool is being pointed at a different machine than you assumed.
+tool is being pointed at a different machine than you assumed. Both versions
+are listed for the same reason: a client and a server that have drifted apart
+is exactly when you want to see the two side by side.
+
+For this CLI alone, `--version` answers without reaching for a server at all —
+which is when you most want to know which `tj` you are running:
+
+```console
+$ tj --version
+tj 0.1.0 (dev)
+
+$ tj --version -v
+tj 0.1.0 (dev)
+  commit   38c4fea5f
+  bun      1.3.9
+  platform linux-x64
+```
+
+Build detail rides the verbosity dial rather than a second flag.
 
 ## Output formats
 

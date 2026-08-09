@@ -46,6 +46,7 @@ export interface CliInvocation {
   cold: boolean;
   all: boolean;
   help: boolean;
+  version: boolean;
   // Transfers (phase 2).
   quant: string[];
   file: string[];
@@ -82,6 +83,7 @@ const OPTIONS = {
   cold: {type: 'boolean'},
   all: {type: 'boolean'},
   help: {type: 'boolean', short: 'h'},
+  version: {type: 'boolean'},
   // Repeatable: several quantizations, or several files, in one transfer.
   quant: {type: 'string', multiple: true},
   file: {type: 'string', multiple: true},
@@ -193,6 +195,7 @@ function invocation(
     cold: values.cold ?? false,
     all: values.all ?? false,
     help: values.help ?? false,
+    version: values.version ?? false,
     quant: values.quant ?? [],
     file: values.file ?? [],
     exact: values.exact ?? false,

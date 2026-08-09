@@ -12,7 +12,7 @@ import {ls} from '@/cli/commands/ls';
 import {where} from '@/cli/commands/where';
 import {disk} from '@/cli/commands/disk';
 import {peers} from '@/cli/commands/peers';
-import {version} from '@/cli/commands/version';
+import {cliVersion, version} from '@/cli/commands/version';
 import {get, type TransferContext} from '@/cli/commands/get';
 import {copy} from '@/cli/commands/copy';
 import {audit, AuditFindings} from '@/cli/commands/audit';
@@ -101,6 +101,14 @@ async function main(argv: string[]): Promise<number> {
     return EXIT_USAGE;
   }
   const inv = parsed.value;
+
+  // Before the help branch: a bare `tj --version` names no command, and the
+  // parser calls that help. Neither needs a server — which is exactly when
+  // you most want to know which tj you are running.
+  if (inv.version) {
+    process.stdout.write(`${cliVersion(inv.verbosity >= 1)}\n`);
+    return EXIT_OK;
+  }
 
   if (inv.command === 'help' || inv.help) {
     process.stdout.write(HELP);

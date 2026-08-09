@@ -79,6 +79,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   It talks to a running Turbo Jumbo server, so what it reports and what the
   web UI shows cannot drift apart.
 
+  `tj --version` answers which CLI you are running without needing a server
+  to answer it, and `--version -v` adds the commit and build detail; `tj
+version` lists the server's and the CLI's side by side, since a client and
+  server that have drifted apart is exactly when you want to see both.
+
   How much it says is one dial rather than a pair of flags: `--silent`, the
   default, then `-v`, `-vv`, `-vvv`, saying what is being done, then each
   request and its timing, then the bodies. Every line is tagged with the level
