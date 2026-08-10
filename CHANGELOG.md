@@ -122,7 +122,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   with which. `antirez/deepseek-v4-gguf` states that its MTP head is "optional,
   not standalone" and needs a specific loader, and nothing in thirteen
   filenames could have told you that. Repos without a card simply don't show
-  the panel.
+  the panel. Cards that open with a banner of HTML — most of unsloth's do —
+  are reduced to the words that banner was wrapping, so the panel opens on
+  the prose rather than on a screenful of tags.
 
 - The download modal now marks what the target machine already has in cold
   storage, so you can see before starting that a quantization you were about to

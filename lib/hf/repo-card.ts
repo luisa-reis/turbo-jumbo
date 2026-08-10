@@ -36,6 +36,66 @@ export function stripFrontmatter(markdown: string): string {
   return m ? markdown.slice(m[0].length).replace(/^\s*\n/, '') : markdown;
 }
 
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  '#39': "'",
+  nbsp: ' ',
+};
+
+/** One stretch of card that is definitely not fenced code. */
+function stripTags(part: string): string {
+  return (
+    part
+      .replace(/<img\b[^>]*>/gi, '')
+      // A badge is an image wrapped in a link, so dropping the image leaves an
+      // anchor with nothing to label it. As markdown that is `[](url)`, which
+      // renders as the literal brackets rather than a link.
+      .replace(/<a\b[^>]*>\s*<\/a>/gi, '')
+      // Anchors that still have words are worth keeping — a card's links are
+      // half its usefulness — so they become markdown the renderer can draw.
+      .replace(
+        /<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
+        '[$2]($1)',
+      )
+      .replace(/<\/?(?:strong|b)\b[^>]*>/gi, '**')
+      .replace(/<\/?(?:em|i)\b[^>]*>/gi, '_')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?[a-z][^>]*>/gi, '')
+      .replace(
+        /&(amp|lt|gt|quot|#39|nbsp);/gi,
+        (whole, name: string) => ENTITIES[name.toLowerCase()] ?? whole,
+      )
+      // Removing a wrapper leaves its indentation stranded.
+      .replace(/[ \t]+$/gm, '')
+  );
+}
+
+/**
+ * Reduce a card's raw HTML to the words it was wrapping.
+ *
+ * Cards routinely open with a banner of `<div>`s, badge images and links —
+ * unsloth's all do. A markdown renderer won't render third-party HTML, and
+ * rightly so, which leaves the panel opening on a screenful of tags with the
+ * prose that matters pushed below it. Keeping the text and dropping the markup
+ * gets the first screen back.
+ *
+ * Fenced code is left exactly as written: HTML inside a fence is the example,
+ * not the packaging. Splitting on the fences is what keeps them intact —
+ * swapping them out for placeholders invites the tidying below to eat the
+ * placeholder instead.
+ */
+export function stripHtml(markdown: string): string {
+  return markdown
+    .split(/(```[\s\S]*?```)/g)
+    .map((part) => (part.startsWith('```') ? part : stripTags(part)))
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const cache = new Map<string, RepoCard | null>();
 
 /**
@@ -61,7 +121,7 @@ export async function fetchRepoCard(
       {headers: HEADERS},
     );
     if (res.ok) {
-      const body = stripFrontmatter(await res.text()).trim();
+      const body = stripHtml(stripFrontmatter(await res.text()));
       if (body) {
         card = {
           markdown: body.slice(0, MAX_CHARS),
