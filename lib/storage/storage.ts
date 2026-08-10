@@ -44,6 +44,13 @@ export interface FileEntry {
 export interface Usage {
   free: number;
   total: number;
+  /**
+   * Which filesystem this root sits on. Opaque — compare two for equality,
+   * never interpret. Models and cold storage sharing one filesystem means
+   * their free space is a single pool, which the download warnings depend on
+   * knowing.
+   */
+  device: string;
 }
 
 /**

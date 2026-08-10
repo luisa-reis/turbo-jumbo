@@ -1,6 +1,7 @@
 import {localModelsDir, coldStorageDir} from '@/lib/config';
 import {logger} from '@/lib/util/logger';
 import {downloadDiskUsage} from '@/lib/storage/disk-usage';
+import {storage} from '@/lib/storage/storage-instance';
 
 // Free/total bytes of the filesystems a download touches — the local models
 // directory (where it lands) and cold storage (the optional copy target) — so
@@ -10,9 +11,7 @@ export async function GET() {
     return new Response('No local peer configured', {status: 400});
   }
   try {
-    return Response.json(
-      await downloadDiskUsage(localModelsDir, coldStorageDir),
-    );
+    return Response.json(await downloadDiskUsage(storage));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.warn(`[disk-usage] statfs failed: ${msg}`);

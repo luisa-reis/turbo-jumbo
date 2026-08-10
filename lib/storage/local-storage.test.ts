@@ -206,8 +206,11 @@ test('link replaces a link pointing at the wrong thing', async () => {
 
 test('usage reports the filesystem holding a root', async () => {
   const {storage} = await tmpStorage();
-  const {free, total} = await storage.usage('models');
+  const {free, total, device} = await storage.usage('models');
   expect(total).toBeGreaterThan(0);
   expect(free).toBeGreaterThan(0);
   expect(free).toBeLessThanOrEqual(total);
+  expect(device).not.toBe('');
+  // Both temp roots are on one filesystem, which is what sameDevice detects.
+  expect((await storage.usage('cold')).device).toBe(device);
 });

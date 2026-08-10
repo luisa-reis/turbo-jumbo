@@ -2,6 +2,7 @@ import {config, localPeer, localModelsDir, coldStorageDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {downloadDiskUsage} from '@/lib/storage/disk-usage';
+import {storage} from '@/lib/storage/storage-instance';
 
 // Free/total bytes of a specific peer's models filesystem. The local peer reads
 // its own statfs; a remote peer is asked over its own /api/v1/disk-usage, so a
@@ -19,9 +20,7 @@ export async function GET(
       return new Response('No local peer configured', {status: 400});
     }
     try {
-      return Response.json(
-        await downloadDiskUsage(localModelsDir, coldStorageDir),
-      );
+      return Response.json(await downloadDiskUsage(storage));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(`[disk-usage] statfs on ${peer.name} failed: ${msg}`);

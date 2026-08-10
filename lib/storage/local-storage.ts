@@ -196,10 +196,15 @@ export function createLocalStorage(roots: Roots): Storage {
     },
 
     async usage(root: Root): Promise<Usage> {
-      const s = await statfs(rootDir(root));
+      const dir = rootDir(root);
+      const [s, st] = await Promise.all([statfs(dir), fsp.stat(dir)]);
       // bavail, not bfree: the space actually usable, which is what a download
       // will be allowed to write.
-      return {free: s.bsize * s.bavail, total: s.bsize * s.blocks};
+      return {
+        free: s.bsize * s.bavail,
+        total: s.bsize * s.blocks,
+        device: String(st.dev),
+      };
     },
   };
 }
