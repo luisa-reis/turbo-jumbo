@@ -12,6 +12,8 @@ import {IconButton} from '@astryxdesign/core/IconButton';
 import {Icon} from '@astryxdesign/core/Icon';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
+import {Collapsible} from '@astryxdesign/core/Collapsible';
+import {Link} from '@astryxdesign/core/Link';
 import {
   DownloadModal,
   buildTjGetCommand,
@@ -27,6 +29,7 @@ import {formatSize} from '@/lib/format/bytes';
 import {defaultDownloadSelection, repoDownloadKind} from '@/lib/hf/hf-download';
 import {quantGroups, type QuantGroup} from '@/lib/hf/quant-groups';
 import {coldStoredPaths} from '@/lib/hf/cold-presence';
+import type {RepoCard} from '@/lib/hf/repo-card';
 import {parseHfUrl} from '@/lib/hf/hf-url';
 import type {Model} from '@/lib/models/model-types';
 
@@ -70,6 +73,15 @@ const styles = stylex.create({
   fileList: {flexGrow: 1, minHeight: 0, overflowY: 'auto'},
   // A quantization's own files, shown only when it's expanded.
   shardRow: {paddingInlineStart: 'var(--spacing-8)'},
+  // The card is shown as its own markdown: the repo has no dependency that
+  // renders it, and a Files table is legible as source — which is the part
+  // people come here to read. Bounded so it can't crowd out the file list.
+  cardBody: {
+    maxHeight: '24vh',
+    overflowY: 'auto',
+    whiteSpace: 'pre-wrap',
+    fontFamily: 'monospace',
+  },
 });
 
 /**
@@ -107,6 +119,9 @@ export function HfDownloadPicker({
   const [files, setFiles] = useState<HfFile[] | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
+  // The repo's own card. Null while unknown or absent — plenty of repos ship
+  // weights and no card, and the panel simply isn't there.
+  const [card, setCard] = useState<RepoCard | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
   // Off by default: quantization rows are the whole story for a normal download.
@@ -162,6 +177,27 @@ export function HfDownloadPicker({
   const isInvalid =
     url.trim() !== '' && url === debouncedUrl && parsed === null;
 
+  // The card follows the repo, not the folder: opening a quantization's
+  // directory doesn't change which card describes it, so this refetches on the
+  // repo and branch alone.
+  const cardRepo = parsed ? `${parsed.repoId}@${parsed.branch}` : null;
+  useEffect(() => {
+    if (!cardRepo) return;
+    const [repoId, branch] = cardRepo.split('@');
+    let cancelled = false;
+    fetch(`/api/v1/hf-card?${new URLSearchParams({repoId, branch})}`)
+      .then((r) => (r.ok ? (r.json() as Promise<RepoCard | null>) : null))
+      // A card that won't load is not worth an error: the file list is the
+      // job, and the card is context beside it.
+      .catch(() => null)
+      .then((c) => {
+        if (!cancelled) setCard(c);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cardRepo]);
+
   // Fetch file list from HF API whenever parsed URL changes. Resetting state
   // synchronously here is the intended "re-sync to the new URL" behaviour.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -170,6 +206,7 @@ export function HfDownloadPicker({
       setFiles(null);
       setFilesError(null);
       setFilesLoading(false);
+      setCard(null);
       setSelectedPaths(new Set());
       setFilter('');
       setShowFiles(false);
@@ -436,6 +473,24 @@ export function HfDownloadPicker({
           <Text type="supporting">
             Enter a Hugging Face URL or org/repo to list its files.
           </Text>
+        )}
+        {card && (
+          <Collapsible
+            defaultIsOpen={false}
+            trigger={<Text type="supporting">Model card</Text>}
+          >
+            <VStack gap={2}>
+              <Text type="supporting" xstyle={styles.cardBody}>
+                {card.markdown}
+              </Text>
+              <Text type="supporting">
+                {card.truncated ? 'Cut short — read the rest on ' : 'On '}
+                <Link href={card.url} isExternalLink>
+                  the Hub
+                </Link>
+              </Text>
+            </VStack>
+          </Collapsible>
         )}
         {hasFiles && (
           <HStack gap={3} vAlign="center">

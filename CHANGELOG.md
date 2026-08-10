@@ -116,6 +116,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
   quantizations of the 153 GiB weight it actually belongs to, with nothing
   saying the two went together.
 
+- **The download modal now shows the repo's model card**, collapsed above the
+  file list. A file list says what a repo contains; only the card says what any
+  of it is for — which quantization suits how much RAM, and which files pair
+  with which. `antirez/deepseek-v4-gguf` states that its MTP head is "optional,
+  not standalone" and needs a specific loader, and nothing in thirteen
+  filenames could have told you that. Repos without a card simply don't show
+  the panel. It's the card's own markdown rather than rendered prose, which
+  reads fine for the Files table most cards lead with and less well for the
+  ones that open with HTML banners.
+
 - The download modal now marks what the target machine already has in cold
   storage, so you can see before starting that a quantization you were about to
   pull down is sitting on an archive disk you already own. A partly-archived
