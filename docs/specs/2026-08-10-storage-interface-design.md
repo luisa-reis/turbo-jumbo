@@ -220,16 +220,44 @@ The first step is worth doing whether or not an agent is ever written:
 At no point is there a non-working system, and the 13,328 lines of tests in
 `lib/` survive, because the code they test does not move.
 
+### Where step 2 has got to
+
+Done:
+
+- The interface and `LocalStorage`, with `storage-instance.ts` as the single
+  place that decides which implementation is real.
+- `disk-usage.ts` and both disk-usage routes. This is what added `device` to
+  `Usage`: `downloadDiskUsage` needs to know whether two roots share a
+  filesystem, and `statfs` alone does not say.
+
+Remaining call sites, easiest first so an interruption lands somewhere
+coherent:
+
+1. `storage/delete-file.ts` — `remove` with `pruneEmptyDirs` was derived from it
+2. `models/tjmeta.ts`, `models/model-sidecar.ts` — `read`/`write`
+3. `storage/support-files.ts`, `storage/recorded-digest.ts`
+4. `audit/fix-duplicates.ts`
+5. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
+6. `models/models.ts` — the scan becomes one `list`; the cache lands here
+7. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
+8. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+   API, which is specified above but not yet written in code
+
+## Decided
+
+- **Live with `hf`.** The agent image carries Python and `huggingface_hub`.
+  Losing Xet on 100 GiB pulls costs more than the megabytes save, and routing
+  every download through one fat box doubles traffic for a model wanted
+  elsewhere. "Scanty" means no Node, no Next, no UI build — not no Python.
+- **Cache the inventory.** Worth doing for its own sake, before any agent
+  exists: the scan is uncached today, so every models-table request re-walks
+  the tree and re-reads safetensors headers. Invisible on local disk, and the
+  thing that would make a remote walk unusable. It belongs with the
+  `models.ts` migration, and the cache lives with whoever owns the
+  filesystem — the agent — rather than the UI host caching responses.
+
 ## Open questions
 
-- **`hf` is Python.** Downloads spawn it, and Xet acceleration comes with it.
-  An image carrying Python and `huggingface_hub` is not scanty. The options are
-  to accept the payload, reimplement download natively and lose Xet, or give
-  one box a fat image and distribute agent-to-agent afterwards.
-- **Inventory caching.** The scan is uncached today: every models-table request
-  re-walks and re-reads headers. Invisible on local disk, not once it is a
-  network call. The agent should cache its inventory and invalidate on change
-  rather than the UI host caching responses.
 - **Authorization.** A shared token per agent is the floor. Worth deciding
   whether agents authenticate each other for `send`, or trust a token minted by
   the control host.
