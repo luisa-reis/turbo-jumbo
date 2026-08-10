@@ -85,10 +85,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   without the transfer flags scrolling past first. `tj --help-all` prints the
   lot, for when grep is the reader.
 
-  `tj --version` answers which CLI you are running without needing a server
-  to answer it, and `--version -v` adds the commit and build detail; `tj
-version` lists the server's and the CLI's side by side, since a client and
-  server that have drifted apart is exactly when you want to see both.
+  `tj --version` answers which CLI you are running without needing a server to
+  answer it, and `--version -v` adds the commit and build detail; `tj version`
+  lists the server's and the CLI's side by side, since a client and server
+  that have drifted apart is exactly when you want to see both.
 
   How much it says is one dial rather than a pair of flags: `--silent`, the
   default, then `-v`, `-vv`, `-vvv`, saying what is being done, then each
@@ -107,6 +107,15 @@ version` lists the server's and the CLI's side by side, since a client and
   single file — refetching one shard of a set whose siblings you moved off to
   free space — an "Individual files" switch lets you open a quantization and
   pick from inside it. A part-selected quantization says so on its row.
+
+  Files that pair with a quantization rather than being one are named as such —
+  `mmproj (F16)`, `mtp (F32)` — instead of borrowing whatever precision their
+  filename happens to end in. An MTP head called
+  `DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf` used to list as an `F32`
+  quantization: 3.5 GiB, entirely plausible, sitting among the real
+  quantizations of the 153 GiB weight it actually belongs to, with nothing
+  saying the two went together.
+
 - The download modal now marks what the target machine already has in cold
   storage, so you can see before starting that a quantization you were about to
   pull down is sitting on an archive disk you already own. A partly-archived

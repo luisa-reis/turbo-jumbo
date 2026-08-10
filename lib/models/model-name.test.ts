@@ -3,6 +3,7 @@ import {
   modelDisplayName,
   repoIdFromModelUrl,
   isMmprojFilename,
+  companionKind,
 } from '@/lib/models/model-name';
 
 test('repoIdFromModelUrl extracts org/repo from a model URL', () => {
@@ -40,4 +41,26 @@ test('isMmprojFilename rejects non-projectors and non-gguf', () => {
   expect(isMmprojFilename('mmproj')).toBe(false);
   expect(isMmprojFilename('mmproj-readme.txt')).toBe(false);
   expect(isMmprojFilename('Qwen3-Q4_0.gguf')).toBe(false);
+});
+
+test('companionKind names the companions a weight is paired with', () => {
+  // Not standalone models: each rides along with a quantization, so neither
+  // the download list nor the models table should file them as one.
+  expect(companionKind('mmproj-F16.gguf')).toBe('mmproj');
+  expect(companionKind('DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf')).toBe('mtp');
+  expect(companionKind('Qwen3-8B-draft-Q4_K_M.gguf')).toBe('draft');
+});
+
+test('companionKind ignores the token inside a word', () => {
+  // "mtparser", "redraft" — a delimiter has to bound the token, or half the
+  // Hub turns into companions.
+  expect(companionKind('mtparser-Q4_K_M.gguf')).toBeNull();
+  expect(companionKind('model-redraft-Q8_0.gguf')).toBeNull();
+  expect(companionKind('Qwen3-8B-Q4_K_M.gguf')).toBeNull();
+});
+
+test('companionKind only speaks for weights it could pair with', () => {
+  // The repo README mentioning MTP is not a file; only weight files qualify.
+  expect(companionKind('README.md')).toBeNull();
+  expect(companionKind('mtp-notes.txt')).toBeNull();
 });

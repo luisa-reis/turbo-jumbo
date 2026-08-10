@@ -124,3 +124,27 @@ test('gives each group a distinct key', () => {
   const groups = quantGroups(deepseekFiles);
   expect(new Set(groups.map((g) => g.key)).size).toBe(groups.length);
 });
+
+test('labels an MTP head as a companion, not as an F32 quantization', () => {
+  // antirez/deepseek-v4-gguf: the head's name ends in a dtype, so the quant
+  // parser read "F32" and listed 3.5 GiB as a peer of the 153 GiB weight it
+  // belongs to. Nothing said the two went together.
+  const groups = quantGroups([
+    file('DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf', 3_807_602_400),
+    file(
+      'DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf',
+      164_600_000_000,
+    ),
+  ]);
+  expect(groups.map((g) => g.label)).toEqual([
+    'mtp (F32)',
+    'DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix',
+  ]);
+  expect(groups.map((g) => g.companion)).toEqual(['mtp', null]);
+});
+
+test('an ordinary weight is not a companion', () => {
+  const [group] = quantGroups([file('Qwen3-8B-Q4_K_M.gguf')]);
+  expect(group.label).toBe('Q4_K_M');
+  expect(group.companion).toBeNull();
+});

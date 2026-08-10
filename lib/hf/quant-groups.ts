@@ -1,6 +1,6 @@
 import {SPLIT_RE, extractQuant} from '@/lib/models/quant';
 import {WEIGHT_EXT_RE, ggmlModelVariant} from '@/lib/models/weight-files';
-import {isMmprojFilename} from '@/lib/models/model-name';
+import {companionKind, type CompanionKind} from '@/lib/models/model-name';
 
 /**
  * One thing a user picks in the download modal: a single weight file, or the
@@ -16,6 +16,8 @@ export interface QuantGroup {
   /** The directory holding the files, or null at the repo root. Shown to tell
    *  apart two quantizations that happen to share a label. */
   folder: string | null;
+  /** Set when this isn't a model of its own but something to pair with one. */
+  companion: CompanionKind | null;
   paths: string[];
   size: number;
   fileCount: number;
@@ -63,20 +65,24 @@ export function quantGroups(
     // variant names itself, otherwise the quant token, otherwise the bare
     // filename — a tokenless weight still needs something to pick.
     //
-    // An mmproj projector is called out rather than labelled by its quant: it
-    // is a companion to a quantization, not one of them, and a repo shipping an
-    // F16 projector beside an F16 weight (ggml-org/gemma-3-4b-it-GGUF) would
-    // otherwise offer two rows both reading "F16".
+    // A companion is called out rather than labelled by its quant: it pairs
+    // with a quantization instead of being one. A repo shipping an F16
+    // projector beside an F16 weight (ggml-org/gemma-3-4b-it-GGUF) would
+    // otherwise offer two rows both reading "F16", and an MTP head whose name
+    // ends in a dtype (antirez/deepseek-v4-gguf) would read "F32" and pass for
+    // a small standalone quantization of the model it actually belongs to.
     const quant = extractQuant(base);
     const plain =
       ggmlModelVariant(base) ??
       (quant === 'unknown' ? base.replace(WEIGHT_EXT_RE, '') : quant);
-    const label = isMmprojFilename(base) ? `mmproj (${plain})` : plain;
+    const companion = companionKind(base);
+    const label = companion ? `${companion} (${plain})` : plain;
 
     groups.set(key, {
       key,
       label,
       folder,
+      companion,
       paths: [f.path],
       size: f.size,
       fileCount: 1,
