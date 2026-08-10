@@ -14,6 +14,7 @@ import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
 import {Link} from '@astryxdesign/core/Link';
+import {Markdown} from '@astryxdesign/core/Markdown';
 import {
   DownloadModal,
   buildTjGetCommand,
@@ -73,15 +74,11 @@ const styles = stylex.create({
   fileList: {flexGrow: 1, minHeight: 0, overflowY: 'auto'},
   // A quantization's own files, shown only when it's expanded.
   shardRow: {paddingInlineStart: 'var(--spacing-8)'},
-  // The card is shown as its own markdown: the repo has no dependency that
-  // renders it, and a Files table is legible as source — which is the part
-  // people come here to read. Bounded so it can't crowd out the file list.
-  cardBody: {
-    maxHeight: '24vh',
-    overflowY: 'auto',
-    whiteSpace: 'pre-wrap',
-    fontFamily: 'monospace',
-  },
+  // Bounded so an expanded card can't crowd out the file list it is there to
+  // help you read; it scrolls inside that. A wide table still loses its long
+  // cells — Astryx clips inline code rather than wrapping it, and no overflow
+  // on this container changes that — which is what the Hub link is for.
+  cardBody: {maxHeight: '24vh', overflowY: 'auto'},
 });
 
 /**
@@ -480,9 +477,15 @@ export function HfDownloadPicker({
             trigger={<Text type="supporting">Model card</Text>}
           >
             <VStack gap={2}>
-              <Text type="supporting" xstyle={styles.cardBody}>
+              <Markdown
+                density="compact"
+                // The card's own `#` is a section inside a dialog, not the
+                // page's title, so its headings start below the dialog's.
+                headingLevelStart={3}
+                xstyle={styles.cardBody}
+              >
                 {card.markdown}
-              </Text>
+              </Markdown>
               <Text type="supporting">
                 {card.truncated ? 'Cut short — read the rest on ' : 'On '}
                 <Link href={card.url} isExternalLink>
