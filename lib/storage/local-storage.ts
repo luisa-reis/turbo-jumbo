@@ -13,6 +13,7 @@ import {readSafetensorsDtype} from '@/lib/models/safetensors';
 import {
   MAX_SMALL_FILE,
   type FileEntry,
+  type LinkOutcome,
   type ListOptions,
   type Ref,
   type RemoveOptions,
@@ -212,15 +213,46 @@ export function createLocalStorage(roots: Roots): Storage {
       await fsp.copyFile(resolve(from), dst);
     },
 
-    async link(links: Array<{target: Ref; at: Ref}>): Promise<void> {
+    async link(
+      links: Array<{target: Ref; at: Ref}>,
+      opts: {dryRun?: boolean} = {},
+    ): Promise<LinkOutcome[]> {
+      const out: LinkOutcome[] = [];
       for (const {target, at} of links) {
         const linkPath = resolve(at);
-        await fsp.mkdir(nodePath.dirname(linkPath), {recursive: true});
-        // Replace rather than fail: a link pointing at the wrong target is
-        // exactly what a sync run exists to correct.
-        await fsp.rm(linkPath, {force: true});
-        await fsp.symlink(resolve(target), linkPath);
+        const targetPath = resolve(target);
+        let present = false;
+        let current: string | null = null; // readlink, when it is a symlink
+        try {
+          const st = await fsp.lstat(linkPath);
+          present = true;
+          if (st.isSymbolicLink())
+            current = await fsp.readlink(linkPath).catch(() => '');
+        } catch {
+          /* nothing there yet */
+        }
+        if (!present) {
+          if (!opts.dryRun) {
+            await fsp.mkdir(nodePath.dirname(linkPath), {recursive: true});
+            await fsp.symlink(targetPath, linkPath);
+          }
+          out.push('created');
+        } else if (current === null) {
+          // A real file. Somebody's own model — never replaced with a link.
+          out.push('skipped');
+        } else if (current === targetPath) {
+          out.push('kept');
+        } else {
+          // Replace rather than fail: a link pointing at the wrong target is
+          // exactly what a sync run exists to correct.
+          if (!opts.dryRun) {
+            await fsp.rm(linkPath, {force: true});
+            await fsp.symlink(targetPath, linkPath);
+          }
+          out.push('replaced');
+        }
       }
+      return out;
     },
 
     async usage(root: Root): Promise<Usage> {

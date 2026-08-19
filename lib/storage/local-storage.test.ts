@@ -246,9 +246,45 @@ test('link replaces a link pointing at the wrong thing', async () => {
   await storage.write({root: 'models', path: 'wrong.gguf'}, bytes('w'));
   const at = {root: 'lemonade', path: 'extra/m/x.gguf'} as const;
 
-  await storage.link([{target: {root: 'models', path: 'wrong.gguf'}, at}]);
-  await storage.link([{target: {root: 'models', path: 'right.gguf'}, at}]);
+  expect(
+    await storage.link([{target: {root: 'models', path: 'wrong.gguf'}, at}]),
+  ).toEqual(['created']);
+  expect(
+    await storage.link([{target: {root: 'models', path: 'right.gguf'}, at}]),
+  ).toEqual(['replaced']);
   expect(text(await storage.read(at))).toBe('r');
+  // Already right: nothing to do, and the outcome says so.
+  expect(
+    await storage.link([{target: {root: 'models', path: 'right.gguf'}, at}]),
+  ).toEqual(['kept']);
+});
+
+test('link never overwrites a real file, only symlinks', async () => {
+  // Lemonade calls the extra dir user-managed: a real file there is somebody's
+  // own model, not something a sync may replace with a link.
+  const {storage} = await tmpStorage();
+  await storage.write({root: 'models', path: 'real.gguf'}, bytes('r'));
+  const at = {root: 'lemonade', path: 'extra/m/own.gguf'} as const;
+  await storage.write(at, bytes('the user put this here'));
+
+  expect(
+    await storage.link([{target: {root: 'models', path: 'real.gguf'}, at}]),
+  ).toEqual(['skipped']);
+  expect(text(await storage.read(at))).toBe('the user put this here');
+});
+
+test('a dry-run link reports outcomes without touching anything', async () => {
+  // The sync preview is a dry run of the sync, so the two can't disagree.
+  const {storage} = await tmpStorage();
+  await storage.write({root: 'models', path: 'a.gguf'}, bytes('a'));
+  const at = {root: 'lemonade', path: 'extra/m/a.gguf'} as const;
+
+  expect(
+    await storage.link([{target: {root: 'models', path: 'a.gguf'}, at}], {
+      dryRun: true,
+    }),
+  ).toEqual(['created']);
+  await expect(storage.read(at)).rejects.toThrow(); // nothing was created
 });
 
 test('usage reports the filesystem holding a root', async () => {

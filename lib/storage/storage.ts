@@ -78,6 +78,9 @@ export interface ListOptions {
   strict?: boolean;
 }
 
+/** What `link` did (or, on a dry run, would do) at one path. */
+export type LinkOutcome = 'created' | 'replaced' | 'kept' | 'skipped';
+
 export interface RemoveOptions {
   /**
    * After removing, delete directories the removal left empty, walking up to
@@ -107,8 +110,17 @@ export interface Storage {
 
   copy(from: Ref, to: Ref): Promise<void>;
 
-  /** Bulk symlink creation, for Lemonade's extra-models directory. */
-  link(links: Array<{target: Ref; at: Ref}>): Promise<void>;
+  /**
+   * Bulk symlink creation, for Lemonade's extra-models directory. Replaces a
+   * link pointing elsewhere, keeps a correct one, and never touches a real
+   * file — that is somebody's own model, not ours to swap for a link. With
+   * `dryRun` nothing changes and the outcomes say what a real run would do,
+   * so a sync preview is a dry run of the sync and the two can't disagree.
+   */
+  link(
+    links: Array<{target: Ref; at: Ref}>,
+    opts?: {dryRun?: boolean},
+  ): Promise<LinkOutcome[]>;
 
   usage(root: Root): Promise<Usage>;
 }
