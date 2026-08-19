@@ -259,11 +259,13 @@ Done:
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `audit/fix-duplicates.ts`
-2. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
-3. `models/models.ts` — the scan becomes one `list`; the cache lands here
-4. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
-5. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+1. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
+2. `models/models.ts` — the scan becomes one `list`; the cache lands here
+3. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
+   with them — fix-duplicates looked easy but its I/O is really audit.ts's
+   full-path helpers (`resolveSource`, `localSha256`, `findHistoricalMatch`,
+   `moveFileWithMeta`), so the two migrate together
+4. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided
