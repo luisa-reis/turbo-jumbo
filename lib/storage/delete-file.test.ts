@@ -6,6 +6,7 @@ import {
   cleanupWeightlessModelDirs,
   deleteFileWithMeta,
 } from '@/lib/storage/delete-file';
+import {createLocalStorage} from '@/lib/storage/local-storage';
 import {readModelSidecar} from '@/lib/models/model-sidecar';
 
 async function write(base: string, rel: string, content: string) {
@@ -43,15 +44,16 @@ async function tjModel(
 }
 
 async function mkbase() {
-  return fsp.mkdtemp(path.join(os.tmpdir(), 'tj-delete-'));
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-delete-'));
+  return {base, storage: createLocalStorage({models: base})};
 }
 
 test('deletes the file and drops its sidecar entry, keeping the rest', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'org/repo', {'a.gguf': 'AAA', 'b.gguf': 'BBB'});
   await write(base, 'org/repo/a.gguf.tjmeta.json', '{}'); // legacy sidecar
 
-  await deleteFileWithMeta(base, 'org/repo/a.gguf');
+  await deleteFileWithMeta(storage, 'models', base, 'org/repo/a.gguf');
 
   expect(existsSync(path.join(base, 'org/repo/a.gguf'))).toBe(false);
   expect(existsSync(path.join(base, 'org/repo/a.gguf.tjmeta.json'))).toBe(
@@ -65,7 +67,7 @@ test('deletes the file and drops its sidecar entry, keeping the rest', async () 
 });
 
 test('deleting the last file removes sidecars, .cache, and emptied dirs', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'org/solo', {'only.gguf': 'DATA'});
   await write(base, 'org/solo/only.gguf.tjmeta.json', '{}');
   await write(
@@ -74,7 +76,7 @@ test('deleting the last file removes sidecars, .cache, and emptied dirs', async 
     'META',
   );
 
-  await deleteFileWithMeta(base, 'org/solo/only.gguf');
+  await deleteFileWithMeta(storage, 'models', base, 'org/solo/only.gguf');
 
   // The whole husk is gone: model dir and the now-empty org dir.
   expect(existsSync(path.join(base, 'org/solo'))).toBe(false);
@@ -85,11 +87,11 @@ test('deleting the last file removes sidecars, .cache, and emptied dirs', async 
 });
 
 test('keeps the org dir when a sibling model remains', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'org/gone', {'x.gguf': 'X'});
   await tjModel(base, 'org/stays', {'y.gguf': 'Y'});
 
-  await deleteFileWithMeta(base, 'org/gone/x.gguf');
+  await deleteFileWithMeta(storage, 'models', base, 'org/gone/x.gguf');
 
   expect(existsSync(path.join(base, 'org/gone'))).toBe(false);
   expect(existsSync(path.join(base, 'org/stays/y.gguf'))).toBe(true);
@@ -97,13 +99,18 @@ test('keeps the org dir when a sibling model remains', async () => {
 });
 
 test('a nested file prunes emptied subdirectories but not shared ones', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'org/nested', {
     'sub/dir/model.bin': 'DATA',
     'top.gguf': 'TOP',
   });
 
-  await deleteFileWithMeta(base, 'org/nested/sub/dir/model.bin');
+  await deleteFileWithMeta(
+    storage,
+    'models',
+    base,
+    'org/nested/sub/dir/model.bin',
+  );
 
   // sub/dir and sub are emptied and pruned; the model dir keeps top.gguf.
   expect(existsSync(path.join(base, 'org/nested/sub'))).toBe(false);
@@ -114,10 +121,10 @@ test('a nested file prunes emptied subdirectories but not shared ones', async ()
 });
 
 test('a file without any sidecar still deletes and prunes', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await write(base, 'org/bare/loose.gguf', 'DATA');
 
-  await deleteFileWithMeta(base, 'org/bare/loose.gguf');
+  await deleteFileWithMeta(storage, 'models', base, 'org/bare/loose.gguf');
 
   expect(existsSync(path.join(base, 'org/bare'))).toBe(false);
   expect(existsSync(path.join(base, 'org'))).toBe(false);
@@ -126,10 +133,10 @@ test('a file without any sidecar still deletes and prunes', async () => {
 });
 
 test('a top-level file outside any model dir just gets deleted', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await write(base, 'stray.gguf', 'DATA');
 
-  await deleteFileWithMeta(base, 'stray.gguf');
+  await deleteFileWithMeta(storage, 'models', base, 'stray.gguf');
 
   expect(existsSync(path.join(base, 'stray.gguf'))).toBe(false);
   expect(existsSync(base)).toBe(true);
@@ -137,7 +144,7 @@ test('a top-level file outside any model dir just gets deleted', async () => {
 });
 
 test('cleanup removes a model dir left with only support files', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'Qwen/wr', {
     'model-00001-of-00002.safetensors': 'W1',
     'model-00002-of-00002.safetensors': 'W2',
@@ -146,9 +153,19 @@ test('cleanup removes a model dir left with only support files', async () => {
   });
   await write(base, 'Qwen/wr/.cache/huggingface/x', 'bookkeeping');
 
-  await deleteFileWithMeta(base, 'Qwen/wr/model-00001-of-00002.safetensors');
-  await deleteFileWithMeta(base, 'Qwen/wr/model-00002-of-00002.safetensors');
-  await cleanupWeightlessModelDirs(base, [
+  await deleteFileWithMeta(
+    storage,
+    'models',
+    base,
+    'Qwen/wr/model-00001-of-00002.safetensors',
+  );
+  await deleteFileWithMeta(
+    storage,
+    'models',
+    base,
+    'Qwen/wr/model-00002-of-00002.safetensors',
+  );
+  await cleanupWeightlessModelDirs(storage, 'models', [
     'Qwen/wr/model-00001-of-00002.safetensors',
     'Qwen/wr/model-00002-of-00002.safetensors',
   ]);
@@ -161,15 +178,15 @@ test('cleanup removes a model dir left with only support files', async () => {
 });
 
 test('cleanup leaves the dir alone while any weight file remains', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   await tjModel(base, 'org/multi', {
     'a-Q4.gguf': 'AAA',
     'b-Q8.gguf': 'BBBB',
     'notes.txt': 'n',
   });
 
-  await deleteFileWithMeta(base, 'org/multi/a-Q4.gguf');
-  await cleanupWeightlessModelDirs(base, ['org/multi/a-Q4.gguf']);
+  await deleteFileWithMeta(storage, 'models', base, 'org/multi/a-Q4.gguf');
+  await cleanupWeightlessModelDirs(storage, 'models', ['org/multi/a-Q4.gguf']);
 
   expect(existsSync(path.join(base, 'org/multi/b-Q8.gguf'))).toBe(true);
   expect(existsSync(path.join(base, 'org/multi/notes.txt'))).toBe(true);
@@ -177,19 +194,42 @@ test('cleanup leaves the dir alone while any weight file remains', async () => {
 });
 
 test('cleanup counts weights in subdirectories and never touches hub-cache layouts', async () => {
-  const base = await mkbase();
+  const {base, storage} = await mkbase();
   // Weights live below the dir the deleted file sat in: still not weightless.
   await write(base, 'org/deep/sub/real.safetensors', 'W');
   await write(base, 'org/deep/gone.gguf', 'W');
   await write(base, 'org/deep/config.json', '{}');
   await fsp.rm(path.join(base, 'org/deep/gone.gguf'));
-  await cleanupWeightlessModelDirs(base, ['org/deep/gone.gguf']);
+  await cleanupWeightlessModelDirs(storage, 'models', ['org/deep/gone.gguf']);
   expect(existsSync(path.join(base, 'org/deep/config.json'))).toBe(true);
 
   // A hub-cache snapshot path is owned by the hub layout — no dir removal.
   const snap = 'models--o--r/snapshots/abc';
   await write(base, `${snap}/config.json`, '{}');
-  await cleanupWeightlessModelDirs(base, [`${snap}/model.safetensors`]);
+  await cleanupWeightlessModelDirs(storage, 'models', [
+    `${snap}/model.safetensors`,
+  ]);
   expect(existsSync(path.join(base, snap, 'config.json'))).toBe(true);
   await fsp.rm(base, {recursive: true, force: true});
+});
+
+test('cleanup never deletes a directory it could not fully inspect', async () => {
+  // An unreadable corner hides weights from the walk. "Couldn't look" must
+  // read as "keeps something", never as "weightless".
+  const {base, storage} = await mkbase();
+  await write(base, 'org/opaque/gone.gguf', 'W');
+  await write(base, 'org/opaque/config.json', '{}');
+  const locked = path.join(base, 'org/opaque/locked');
+  await fsp.mkdir(locked);
+  await fsp.chmod(locked, 0o000);
+  try {
+    await fsp.rm(path.join(base, 'org/opaque/gone.gguf'));
+    await cleanupWeightlessModelDirs(storage, 'models', [
+      'org/opaque/gone.gguf',
+    ]);
+    expect(existsSync(path.join(base, 'org/opaque/config.json'))).toBe(true);
+  } finally {
+    await fsp.chmod(locked, 0o755);
+    await fsp.rm(base, {recursive: true, force: true});
+  }
 });

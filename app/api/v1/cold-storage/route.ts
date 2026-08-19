@@ -5,6 +5,7 @@ import {
   cleanupWeightlessModelDirs,
   deleteFileWithMeta,
 } from '@/lib/storage/delete-file';
+import {storage} from '@/lib/storage/storage-instance';
 import {logger} from '@/lib/util/logger';
 import {scanModels} from '@/lib/models/models';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
@@ -32,12 +33,12 @@ export async function DELETE(req: Request) {
       logger.info(`[dry-run] would delete cold-storage: ${full}`);
     } else {
       const rel = nodePath.relative(base, full);
-      await deleteFileWithMeta(base, rel);
+      await deleteFileWithMeta(storage, 'cold', base, rel);
       deleted.push(rel);
     }
   }
   // A model dir stripped of its last weight takes its support files
   // (config/tokenizer/…) with it — they belong to the deleted weights.
-  await cleanupWeightlessModelDirs(base, deleted);
+  await cleanupWeightlessModelDirs(storage, 'cold', deleted);
   return Response.json({ok: true, dryRun: body.dryRun ?? false});
 }

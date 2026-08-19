@@ -10,6 +10,7 @@ import {logger} from '@/lib/util/logger';
 import {scanModels, annotateColdStorage} from '@/lib/models/models';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 import {deleteFileWithMeta} from '@/lib/storage/delete-file';
+import {storage} from '@/lib/storage/storage-instance';
 import nodePath from 'path';
 
 // Proxy a peer's models through the local server: scan locally for the local
@@ -78,7 +79,12 @@ export async function DELETE(
       if (body.dryRun) {
         logger.info(`[dry-run] would delete peer ${peer.name}: ${full}`);
       } else {
-        await deleteFileWithMeta(base, nodePath.relative(base, full));
+        await deleteFileWithMeta(
+          storage,
+          'models',
+          base,
+          nodePath.relative(base, full),
+        );
       }
     }
     return Response.json({ok: true, dryRun: body.dryRun ?? false});

@@ -97,8 +97,16 @@ export interface Usage {
 }
 
 export interface Storage {
-  /** Recursive inventory. The only traversal verb. */
-  list(root: Root, opts?: {under?: string}): Promise<FileEntry[]>;
+  /**
+   * Recursive inventory. The only traversal verb. `dtype` reads safetensors
+   * headers during the walk; `strict` fails on an unreadable entry instead
+   * of returning a truncated inventory — for callers whose next move is a
+   * delete, where "couldn't look" must never read as "nothing there".
+   */
+  list(
+    root: Root,
+    opts?: {under?: string; dtype?: boolean; strict?: boolean},
+  ): Promise<FileEntry[]>;
 
   /** A small file — sidecars, `server_models.json`. Fails past the cap. */
   read(ref: Ref): Promise<Uint8Array>;
@@ -229,18 +237,23 @@ Done:
 - `disk-usage.ts` and both disk-usage routes. This is what added `device` to
   `Usage`: `downloadDiskUsage` needs to know whether two roots share a
   filesystem, and `statfs` alone does not say.
+- `delete-file.ts` and its three routes. This taught the local prune the
+  hf-CLI `.cache`-counts-as-empty rule, and added `strict` to `list` so the
+  weightless-directory cleanup can tell "no weights" from "couldn't look".
+  `deleteFileWithMeta` still takes a transitional `basePath` for the sidecar
+  helpers, which the next step removes.
 
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `storage/delete-file.ts` — `remove` with `pruneEmptyDirs` was derived from it
-2. `models/tjmeta.ts`, `models/model-sidecar.ts` — `read`/`write`
-3. `storage/support-files.ts`, `storage/recorded-digest.ts`
-4. `audit/fix-duplicates.ts`
-5. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
-6. `models/models.ts` — the scan becomes one `list`; the cache lands here
-7. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
-8. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+1. `models/tjmeta.ts`, `models/model-sidecar.ts` — `read`/`write`; also drops
+   the transitional `basePath` from `deleteFileWithMeta`
+2. `storage/support-files.ts`, `storage/recorded-digest.ts`
+3. `audit/fix-duplicates.ts`
+4. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
+5. `models/models.ts` — the scan becomes one `list`; the cache lands here
+6. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
+7. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided

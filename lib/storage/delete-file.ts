@@ -1,4 +1,3 @@
-import {promises as fsp} from 'fs';
 import path from 'path';
 import {pathImpliedRepo} from '@/lib/audit/audit-verdict';
 import {parseHubCachePath} from '@/lib/hf/hf-cache';
@@ -6,29 +5,32 @@ import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {modelDirForRepo, removeFileMeta} from '@/lib/models/model-sidecar';
 import {metaPath, readMetaResolved} from '@/lib/models/tjmeta';
 import {isWeightFile} from '@/lib/models/weight-files';
+import type {Root, Storage} from '@/lib/storage/storage';
 
 /**
  * Delete a model file along with its provenance records, then prune the
  * directories the deletion emptied: the file's entry leaves its model sidecar
  * (`tjmodel.json`, which `removeFileMeta` deletes outright when no entries
  * remain), a legacy per-file `.tjmeta.json` is removed, and every ancestor
- * directory up to (but never including) `basePath` that is left empty — or
- * holding only the hf CLI's `.cache` download bookkeeping — is removed. So
- * deleting a model's last file removes the whole directory husk instead of
- * leaving a ghost the audit and Lemonade sync would keep tripping over.
+ * directory left empty — or holding only the hf CLI's `.cache` download
+ * bookkeeping — is removed by the storage's prune. So deleting a model's last
+ * file removes the whole directory husk instead of leaving a ghost the audit
+ * and Lemonade sync would keep tripping over.
+ *
+ * `basePath` is transitional: the sidecar helpers still speak absolute paths,
+ * and it leaves this signature when `tjmeta.ts`/`model-sidecar.ts` migrate to
+ * the `Storage` interface.
  */
 export async function deleteFileWithMeta(
+  storage: Storage,
+  root: Root,
   basePath: string,
   relPath: string,
 ): Promise<void> {
-  const base = path.resolve(basePath);
-  const full = path.join(base, relPath);
-
   // Read provenance before deleting — it names the sidecar that owns the file.
-  const meta = await readMetaResolved(base, relPath);
+  const meta = await readMetaResolved(basePath, relPath);
 
-  await fsp.rm(full, {force: true});
-  await fsp.rm(metaPath(full), {force: true});
+  await storage.remove([{root, path: relPath}]);
 
   // Drop the file's entry from its model sidecar. The owning repo comes from
   // the recorded provenance when there is one, else from the file's placement.
@@ -38,9 +40,14 @@ export async function deleteFileWithMeta(
     pathImpliedRepo(relPath)?.repoId ||
     '';
   const loc = repoId ? modelDirForRepo(relPath, repoId) : null;
-  if (loc) await removeFileMeta(base, loc.dir, loc.key);
+  if (loc) await removeFileMeta(basePath, loc.dir, loc.key);
 
-  await pruneEmptyDirs(base, path.dirname(full));
+  // The legacy per-file sidecar goes last, carrying the prune: by now the
+  // model sidecar may have deleted itself, so the prune sees the directory's
+  // final state instead of stopping on a tjmodel.json about to disappear.
+  await storage.remove([{root, path: metaPath(relPath)}], {
+    pruneEmptyDirs: true,
+  });
 }
 
 /**
@@ -53,67 +60,39 @@ export async function deleteFileWithMeta(
  * a hub-cache layout (`models--…` — the hub structure owns refs/snapshots).
  */
 export async function cleanupWeightlessModelDirs(
-  basePath: string,
+  storage: Storage,
+  root: Root,
   relPaths: string[],
 ): Promise<void> {
-  const base = path.resolve(basePath);
   const dirs = new Set<string>();
   for (const rel of relPaths) {
     if (parseHubCachePath(rel)) continue;
-    const dir = path.resolve(base, path.dirname(rel));
-    if (dir !== base && dir.startsWith(base + path.sep)) dirs.add(dir);
+    const dir = path.posix.dirname(rel);
+    if (dir === '.' || dir === '') continue;
+    if (dir.split('/').some((seg) => seg === '..')) continue;
+    dirs.add(dir);
   }
   for (const dir of dirs) {
-    if (await holdsWeightFile(dir)) continue;
-    await fsp.rm(dir, {recursive: true, force: true});
-    await pruneEmptyDirs(base, path.dirname(dir));
+    if (await holdsWeightFile(storage, root, dir)) continue;
+    await storage.remove([{root, path: dir}], {pruneEmptyDirs: true});
   }
 }
 
-// Whether any weight file survives under `dir` (recursively). An unreadable
-// directory reports true — never delete what can't be inspected; a missing
-// one reports false (deleteFileWithMeta may have pruned it already).
-async function holdsWeightFile(dir: string): Promise<boolean> {
+// Whether any weight file survives under `dir` (recursively). The list is
+// strict because this answer authorizes a recursive delete: an inventory
+// with a hole reports true — never delete what can't be fully inspected —
+// while a missing directory lists empty and reports false
+// (deleteFileWithMeta may have pruned it already).
+async function holdsWeightFile(
+  storage: Storage,
+  root: Root,
+  dir: string,
+): Promise<boolean> {
   let entries;
   try {
-    entries = await fsp.readdir(dir, {withFileTypes: true});
-  } catch (e) {
-    return !(e instanceof Error && 'code' in e && e.code === 'ENOENT');
+    entries = await storage.list(root, {under: dir, strict: true});
+  } catch {
+    return true;
   }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (await holdsWeightFile(path.join(dir, e.name))) return true;
-    } else if (e.isFile() && isWeightFile(e.name)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Remove `dir` and its ancestors (up to, excluding, `base`) while each is
- *  empty; a directory holding only the hf CLI's `.cache` bookkeeping counts
- *  as empty. Stops at the first directory with real content. */
-async function pruneEmptyDirs(base: string, dir: string): Promise<void> {
-  for (
-    let d = path.resolve(dir);
-    d !== base && d.startsWith(base + path.sep);
-    d = path.dirname(d)
-  ) {
-    let entries: string[];
-    try {
-      entries = await fsp.readdir(d);
-    } catch {
-      return; // already gone or unreadable — nothing to prune
-    }
-    if (entries.length === 1 && entries[0] === '.cache') {
-      await fsp.rm(path.join(d, '.cache'), {recursive: true, force: true});
-      entries = [];
-    }
-    if (entries.length > 0) return;
-    try {
-      await fsp.rmdir(d);
-    } catch {
-      return; // e.g. a file appeared concurrently — leave it be
-    }
-  }
+  return entries.some((e) => e.kind === 'file' && isWeightFile(e.path));
 }
