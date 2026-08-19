@@ -11,6 +11,25 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The Lemonade catalog now explains a partially-downloaded model file by
+  file.** Multi-checkpoint entries — an image model needing its weights, a
+  text encoder and a VAE from three different repos — used to show one
+  "partial" badge with no way to see which file was the gap. Hovering the
+  badge now lists every checkpoint with its own state: downloaded, in
+  Lemonade's cache, sitting in cold storage, on another peer, or not
+  downloaded anywhere. A checkpoint that exists only in cold storage gets a
+  "Copy from cold storage" button right there, so completing the model no
+  longer means re-downloading a file you already have. The yellow cache badge
+  also dims when Lemonade's cache holds only part of the entry — Lemonade
+  won't list the model until every checkpoint is cached.
+
+- **The models table flags files other Lemonade models depend on.** A file
+  that a multi-checkpoint catalog entry lists as one of its checkpoints — a
+  text encoder living in a different repo than the image model that needs
+  it — now carries a "dependency" badge on its row, in the local and
+  cold-storage views alike. The hovercard names the models that break if the
+  file is deleted or archived.
+
 - **`tj`, a companion command-line tool.** It answers the questions you would
   otherwise open a browser for, and it fits in a shell script: `tj ls` shows
   every model and quantization and where each one is held, `tj where` locates
