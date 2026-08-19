@@ -127,7 +127,7 @@ export async function previewSync(): Promise<SyncPreview> {
     return {preview: [], placement: [], extra: []};
   const {catalog, listed} = await lemonadeKnowledge();
   const [placement, preview, extra] = await Promise.all([
-    planPlacement(lemonadeDir, listed),
+    planPlacement(storage, listed),
     previewLemonadeSync(localModelsDir, s, catalog, listed),
     previewExtraModels(storage, extraPlans(listed)),
   ]);
@@ -150,7 +150,7 @@ export async function runSync(): Promise<{
   const {catalog, listed} = await lemonadeKnowledge();
   // Sort the cache before consolidating it, so the passes below see every entry
   // on the side it belongs on rather than wherever it happened to be.
-  const placement = await placeRepos(lemonadeDir, listed);
+  const placement = await placeRepos(storage, listed);
   const results = await syncLemonadeToTurboJumbo(localModelsDir, s, catalog);
   // Last, because it reflects what local storage holds once the passes above
   // have finished moving things into it.

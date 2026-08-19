@@ -3,6 +3,7 @@ import {promises as fsp} from 'fs';
 import os from 'os';
 import path from 'path';
 import {placeRepos, planPlacement} from '@/lib/lemonade/lemonade-place';
+import {createLocalStorage} from '@/lib/storage/local-storage';
 import {listedRepoIds, sideFor} from '@/lib/lemonade/lemonade-sides';
 
 const LISTED = listedRepoIds(
@@ -39,7 +40,7 @@ test('entries left at the cache root are sorted onto both sides', async () => {
     'models--unsloth--gemma-3-270m-it-GGUF',
     'models--unsloth--DeepSeek-V4-Flash-0731-GGUF',
   ]);
-  const done = await placeRepos(root, LISTED);
+  const done = await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   expect(done.every((p) => p.status === 'moved')).toBe(true);
 
   expect(
@@ -60,7 +61,7 @@ test('entries left at the cache root are sorted onto both sides', async () => {
 
 test('the files inside travel with the directory', async () => {
   const root = await cacheRoot(['models--unsloth--gemma-3-270m-it-GGUF']);
-  await placeRepos(root, LISTED);
+  await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   const moved = path.join(
     root,
     'builtin',
@@ -76,7 +77,7 @@ test('a repo already on the right side is left where it is', async () => {
   const root = await cacheRoot([
     path.join('builtin', 'models--unsloth--gemma-3-270m-it-GGUF'),
   ]);
-  const done = await placeRepos(root, LISTED);
+  const done = await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   expect(done.map((p) => p.status)).toEqual(['in-place']);
 });
 
@@ -86,7 +87,7 @@ test('a repo the catalog has since picked up moves back from extra', async () =>
   const root = await cacheRoot([
     path.join('extra', 'models--unsloth--gemma-3-270m-it-GGUF'),
   ]);
-  const done = await placeRepos(root, LISTED);
+  const done = await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   expect(done.map((p) => p.status)).toEqual(['moved']);
   expect(
     await exists(
@@ -100,7 +101,7 @@ test('the same repo on both sides is reported, and neither copy is touched', asy
     path.join('builtin', 'models--unsloth--gemma-3-270m-it-GGUF'),
     path.join('extra', 'models--unsloth--gemma-3-270m-it-GGUF'),
   ]);
-  const done = await placeRepos(root, LISTED);
+  const done = await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   const conflict = done.find((p) => p.status === 'conflict');
   expect(conflict?.repoId).toBe('unsloth/gemma-3-270m-it-GGUF');
   // One of them is stale, but which one holds real bytes is not a guess worth
@@ -121,8 +122,8 @@ test('nothing moves when Lemonade could not say what it lists', async () => {
     'models--unsloth--gemma-3-270m-it-GGUF',
     'models--unsloth--DeepSeek-V4-Flash-0731-GGUF',
   ]);
-  expect(await planPlacement(root, new Set())).toEqual([]);
-  expect(await placeRepos(root, new Set())).toEqual([]);
+  expect(await planPlacement(createLocalStorage({lemonade: root}), new Set())).toEqual([]);
+  expect(await placeRepos(createLocalStorage({lemonade: root}), new Set())).toEqual([]);
   expect(
     await exists(path.join(root, 'models--unsloth--gemma-3-270m-it-GGUF')),
   ).toBe(true);
@@ -130,7 +131,7 @@ test('nothing moves when Lemonade could not say what it lists', async () => {
 
 test('planning reports the moves without making them', async () => {
   const root = await cacheRoot(['models--unsloth--gemma-3-270m-it-GGUF']);
-  const plan = await planPlacement(root, LISTED);
+  const plan = await planPlacement(createLocalStorage({lemonade: root}), LISTED);
   expect(plan.map((p) => [p.repoId, p.side, p.status])).toEqual([
     ['unsloth/gemma-3-270m-it-GGUF', 'builtin', 'moved'],
   ]);
@@ -142,7 +143,7 @@ test('planning reports the moves without making them', async () => {
 test('directories that are not cache entries are ignored', async () => {
   const root = await cacheRoot(['models--unsloth--gemma-3-270m-it-GGUF']);
   await fsp.mkdir(path.join(root, 'tmp-not-a-repo'), {recursive: true});
-  const done = await placeRepos(root, LISTED);
+  const done = await placeRepos(createLocalStorage({lemonade: root}), LISTED);
   expect(done.map((p) => p.repoId)).toEqual(['unsloth/gemma-3-270m-it-GGUF']);
   expect(await exists(path.join(root, 'tmp-not-a-repo'))).toBe(true);
 });
