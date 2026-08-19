@@ -13,6 +13,17 @@ import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
 import {peerSlug} from '@/lib/peers/peer-slug';
+import {fileBasename} from '@/lib/peers/peer-paths';
+import {
+  checkpointDependents,
+  dependentsForFile,
+  type DependentRef,
+} from '@/lib/lemonade/checkpoint-dependents';
+import type {
+  LemonadeComponent,
+  LemonadeModel,
+  OmniCollection,
+} from '@/lib/lemonade/lemonade-types';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {PeerModels} from '@/lib/peers/peer-models';
 import type {
@@ -125,6 +136,11 @@ export function ModelsTableClient({
   const [lemonadeNames, setLemonadeNames] = useState<Map<string, string[]>>(
     new Map(),
   );
+  // File → catalog-entry dependency edges (multi-checkpoint entries only), so
+  // a quant row can say which Lemonade model needs exactly that file.
+  const [lemonadeDeps, setLemonadeDeps] = useState<Map<string, DependentRef[]>>(
+    new Map(),
+  );
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -132,17 +148,9 @@ export function ModelsTableClient({
         const res = await fetch('/api/v1/lemonade-models');
         if (!res.ok) return;
         const data = (await res.json()) as {
-          models?: Array<{name: string; repoId: string}>;
-          extraModels?: Array<{
-            name: string;
-            checkpoints: Array<{repoId: string}>;
-          }>;
-          collections?: Array<{
-            components: Array<{
-              name: string;
-              checkpoints: Array<{repoId: string}>;
-            }>;
-          }>;
+          models?: LemonadeModel[];
+          extraModels?: LemonadeComponent[];
+          collections?: OmniCollection[];
         };
         const map = new Map<string, string[]>();
         const add = (repoId: string, name: string) => {
@@ -156,7 +164,10 @@ export function ModelsTableClient({
         for (const col of data.collections ?? [])
           for (const comp of col.components ?? [])
             for (const cp of comp.checkpoints) add(cp.repoId, comp.name);
-        if (!cancelled) setLemonadeNames(map);
+        if (!cancelled) {
+          setLemonadeNames(map);
+          setLemonadeDeps(checkpointDependents(data));
+        }
       } catch {
         /* no catalog, no hints */
       }
@@ -320,6 +331,16 @@ export function ModelsTableClient({
           onToggle={toggle}
           lemonadeNames={
             item.depth === 0 ? lemonadeNames.get(item.parentName) : undefined
+          }
+          dependents={
+            item.depth === 1
+              ? dependentsForFile(
+                  lemonadeDeps,
+                  item.parentName,
+                  item.filename ?? fileBasename(item.paths[0] ?? item.label),
+                  item.label,
+                )
+              : undefined
           }
           incomplete={
             item.depth === 0 && (incompleteRepos?.has(item.parentName) ?? false)

@@ -239,6 +239,25 @@ function FileHover({row, children}: {row: DisplayRow; children: ReactNode}) {
   return <>{children}</>;
 }
 
+// Flags a file another catalog entry lists as one of its checkpoints — the
+// text encoder or VAE of an image model, say — which its own row can't show:
+// the file lives in a different repo from the model that needs it.
+function DependencyBadge({dependents}: {dependents?: string[]}) {
+  if (!dependents || dependents.length === 0) return null;
+  return (
+    <HoverCard
+      placement="above"
+      content={`Needed by the Lemonade catalog ${
+        dependents.length === 1 ? 'entry' : 'entries'
+      }: ${dependents.join(', ')}. Deleting or archiving this file breaks ${
+        dependents.length === 1 ? 'it' : 'them'
+      }.`}
+    >
+      <Badge label="dependency" variant="neutral" />
+    </HoverCard>
+  );
+}
+
 export function NameCell({
   row,
   isExpanded,
@@ -246,6 +265,7 @@ export function NameCell({
   incomplete = false,
   invalid = false,
   lemonadeNames,
+  dependents,
 }: {
   row: DisplayRow;
   isExpanded: boolean;
@@ -257,6 +277,9 @@ export function NameCell({
   // Lemonade catalog entries backed by this model's repo (depth-0 rows only) —
   // the catalog names its entries differently from the repo id shown here.
   lemonadeNames?: string[];
+  // Lemonade catalog entries this exact file is a checkpoint of (depth-1 rows
+  // only) — a warning that deleting or archiving it breaks another model.
+  dependents?: string[];
 }) {
   // Whole-repo file row: the filename with a present/missing/invalid marker.
   if (row.fileState) {
@@ -266,6 +289,7 @@ export function NameCell({
         <FileHover row={row}>
           <Text type="supporting">{row.label}</Text>
         </FileHover>
+        <DependencyBadge dependents={dependents} />
       </HStack>
     );
   }
@@ -290,6 +314,7 @@ export function NameCell({
         <FileHover row={row}>
           <Text type="supporting">{row.label}</Text>
         </FileHover>
+        <DependencyBadge dependents={dependents} />
       </HStack>
     );
   }
@@ -306,6 +331,7 @@ export function NameCell({
           {row.precisions && row.precisions.length > 0 && (
             <Badge label={row.precisions.join(', ')} variant="neutral" />
           )}
+          <DependencyBadge dependents={dependents} />
         </HStack>
       );
     }
@@ -329,6 +355,7 @@ export function NameCell({
                   label={`missing: ${row.missingIndices.join(', ')}`}
                 />
               )}
+              <DependencyBadge dependents={dependents} />
             </HStack>
           }
           onClick={() => onToggle(row.key)}
