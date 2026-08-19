@@ -153,6 +153,26 @@ test('remove is bulk, and prunes the skeleton it leaves behind', async () => {
   await expect(fsp.stat(models)).resolves.toBeDefined();
 });
 
+test('pruning treats hf CLI .cache bookkeeping as emptiness', async () => {
+  // The hf CLI leaves .cache/huggingface/... beside what it downloads. A dir
+  // holding only that is a husk — deleting a model's last file must not leave
+  // it behind for the audit and Lemonade sync to keep tripping over.
+  const {storage, models} = await tmpStorage();
+  await fsp.mkdir(nodePath.join(models, 'org/repo/.cache/huggingface'), {
+    recursive: true,
+  });
+  await fsp.writeFile(
+    nodePath.join(models, 'org/repo/.cache/huggingface/a.gguf.metadata'),
+    'x',
+  );
+  await fsp.writeFile(nodePath.join(models, 'org/repo/a.gguf'), 'x');
+
+  await storage.remove([{root: 'models', path: 'org/repo/a.gguf'}], {
+    pruneEmptyDirs: true,
+  });
+  expect(await storage.list('models')).toEqual([]);
+});
+
 test('pruning stops at a directory that still holds something', async () => {
   const {storage, models} = await tmpStorage();
   await fsp.mkdir(nodePath.join(models, 'org/repo'), {recursive: true});

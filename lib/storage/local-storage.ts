@@ -112,17 +112,34 @@ export function createLocalStorage(roots: Roots): Storage {
     }
   }
 
-  /** Remove directories left empty by a removal, walking up towards the root. */
+  /**
+   * Remove directories left empty by a removal, walking up towards the root.
+   * A directory holding only the hf CLI's `.cache` download bookkeeping
+   * counts as empty — that bookkeeping belongs to files already gone, and
+   * keeping it would leave a husk the scans keep tripping over.
+   */
   async function pruneUp(from: string, stopAt: string): Promise<void> {
     let dir = nodePath.dirname(from);
     const base = nodePath.resolve(stopAt);
     while (dir !== base && dir.startsWith(base + nodePath.sep)) {
+      let entries: string[];
+      try {
+        entries = await fsp.readdir(dir);
+      } catch {
+        return; // already gone or unreadable — nothing to prune
+      }
+      if (entries.length === 1 && entries[0] === '.cache') {
+        await fsp.rm(nodePath.join(dir, '.cache'), {
+          recursive: true,
+          force: true,
+        });
+        entries = [];
+      }
+      if (entries.length > 0) return;
       try {
         await fsp.rmdir(dir);
       } catch {
-        // Not empty, or gone already. Either way there is nothing above it
-        // worth trying.
-        return;
+        return; // e.g. a file appeared concurrently — leave it be
       }
       dir = nodePath.dirname(dir);
     }
