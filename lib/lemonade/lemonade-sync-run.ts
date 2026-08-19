@@ -24,6 +24,7 @@ import {
   type ExtraModelPlan,
 } from '@/lib/lemonade/lemonade-extra';
 import {scanModels} from '@/lib/models/models';
+import {storage} from '@/lib/storage/storage-instance';
 import {
   previewLemonadeSync,
   syncLemonadeToTurboJumbo,
@@ -96,7 +97,7 @@ function extraPlans(listed: Set<string>): ExtraModelPlan[] {
   const unlisted = scanModels(localModelsDir, lemonadeDir).filter(
     (m) => !listed.has(m.name),
   );
-  return planExtraModels(localModelsDir, unlisted);
+  return planExtraModels(unlisted);
 }
 
 function sides(): LemonadeSides | null {
@@ -128,7 +129,7 @@ export async function previewSync(): Promise<SyncPreview> {
   const [placement, preview, extra] = await Promise.all([
     planPlacement(lemonadeDir, listed),
     previewLemonadeSync(localModelsDir, s, catalog, listed),
-    previewExtraModels(s.extra, extraPlans(listed)),
+    previewExtraModels(storage, extraPlans(listed)),
   ]);
   return {
     preview,
@@ -153,7 +154,7 @@ export async function runSync(): Promise<{
   const results = await syncLemonadeToTurboJumbo(localModelsDir, s, catalog);
   // Last, because it reflects what local storage holds once the passes above
   // have finished moving things into it.
-  const extra = await syncExtraModels(s.extra, extraPlans(listed));
+  const extra = await syncExtraModels(storage, extraPlans(listed));
   return {
     results,
     placement: placement.filter((p) => p.status !== 'in-place'),

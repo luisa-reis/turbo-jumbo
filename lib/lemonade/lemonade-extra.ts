@@ -1,7 +1,7 @@
-import {promises as fsp} from 'fs';
 import nodePath from 'path';
 import {logger} from '@/lib/util/logger';
 import {filePaths, type Model} from '@/lib/models/model-types';
+import type {FileEntry, Ref, Storage} from '@/lib/storage/storage';
 
 /**
  * Offering Lemonade the models its lists omit, in the shape it actually reads.
@@ -24,10 +24,13 @@ import {filePaths, type Model} from '@/lib/models/model-types';
 
 const GGUF = /\.gguf$/i;
 
+/** Where the offered links live within the `lemonade` root. */
+const EXTRA = 'extra';
+
 export interface ExtraLink {
   /** The filename inside the model's directory. */
   name: string;
-  /** Absolute path to the Turbo Jumbo file it points at. */
+  /** The Turbo Jumbo file it points at, relative to the models root. */
   target: string;
 }
 
@@ -58,9 +61,9 @@ function folderFor(repoId: string, taken: Set<string>): string {
 /** A link name unique within its directory. Quantizations kept in their own
  *  folders can repeat a filename, so the folder qualifies the clash. */
 function linkNameFor(repoPath: string, taken: Set<string>): string {
-  const base = nodePath.basename(repoPath);
+  const base = nodePath.posix.basename(repoPath);
   if (!taken.has(base)) return base;
-  const parent = nodePath.basename(nodePath.dirname(repoPath));
+  const parent = nodePath.posix.basename(nodePath.posix.dirname(repoPath));
   const qualified = parent && parent !== '.' ? `${parent}-${base}` : base;
   if (!taken.has(qualified)) return qualified;
   for (let i = 2; ; i++)
@@ -72,11 +75,7 @@ function linkNameFor(repoPath: string, taken: Set<string>): string {
  * lists omit. Models with no GGUF weights yield no plan: Lemonade could not
  * load them from here whatever we linked.
  */
-export function planExtraModels(
-  tjBase: string,
-  models: Model[],
-): ExtraModelPlan[] {
-  const tj = nodePath.resolve(tjBase);
+export function planExtraModels(models: Model[]): ExtraModelPlan[] {
   const folders = new Set<string>();
   const plans: ExtraModelPlan[] = [];
   for (const model of [...models].sort((a, b) =>
@@ -90,7 +89,7 @@ export function planExtraModels(
     const links = paths.map((p) => {
       const name = linkNameFor(p, names);
       names.add(name);
-      return {name, target: nodePath.resolve(tj, p)};
+      return {name, target: p};
     });
     plans.push({repoId: model.name, folder, links});
   }
@@ -106,84 +105,85 @@ export interface ExtraChange {
   toRemove: number;
 }
 
-/** Whether `full` is a symlink, and where it points. */
-async function linkTarget(full: string): Promise<string | null> {
-  try {
-    const st = await fsp.lstat(full);
-    if (!st.isSymbolicLink()) return null;
-    return await fsp.readlink(full);
-  } catch {
-    return null;
-  }
+/** A plan's links as refs the `link` verb takes. */
+function linkRefs(plan: ExtraModelPlan): Array<{target: Ref; at: Ref}> {
+  return plan.links.map((l) => ({
+    target: {root: 'models' as const, path: l.target},
+    at: {
+      root: 'lemonade' as const,
+      path: `${EXTRA}/${plan.folder}/${l.name}`,
+    },
+  }));
 }
 
-/**
- * Compare one model's directory with its plan.
- *
- * Only symlinks are ever counted for removal. Lemonade calls this directory
- * user-managed, and a real file in it is somebody's own model rather than
- * something this put there.
- */
-async function diffFolder(
-  extraDir: string,
-  plan: ExtraModelPlan,
-): Promise<ExtraChange> {
-  const dir = nodePath.join(extraDir, plan.folder);
-  const wanted = new Map(plan.links.map((l) => [l.name, l.target]));
-  let toLink = 0;
-  for (const [name, target] of wanted) {
-    if ((await linkTarget(nodePath.join(dir, name))) !== target) toLink++;
-  }
-  let toRemove = 0;
-  for (const name of await entriesIn(dir)) {
-    if (wanted.has(name)) continue;
-    if ((await linkTarget(nodePath.join(dir, name))) !== null) toRemove++;
-  }
-  return {repoId: plan.repoId, folder: plan.folder, toLink, toRemove};
-}
-
-async function entriesIn(dir: string): Promise<string[]> {
-  try {
-    return await fsp.readdir(dir);
-  } catch {
-    return [];
-  }
-}
-
-/** The directories under `extraDir` that hold only symlinks — the ones this
- *  wrote. A directory with a real file in it belongs to whoever put it there. */
-async function ownedFolders(extraDir: string): Promise<string[]> {
-  const out: string[] = [];
-  for (const name of await entriesIn(extraDir)) {
-    const dir = nodePath.join(extraDir, name);
-    const names = await entriesIn(dir);
-    if (names.length === 0) continue;
-    const allLinks = await Promise.all(
-      names.map(
-        async (n) => (await linkTarget(nodePath.join(dir, n))) !== null,
-      ),
-    );
-    if (allLinks.every(Boolean)) out.push(name);
+/** One inventory of the extra directory, split into each folder's direct
+ *  children — the only level Lemonade's grouping (and ours) cares about. */
+async function extraFolders(
+  storage: Storage,
+): Promise<Map<string, FileEntry[]>> {
+  const out = new Map<string, FileEntry[]>();
+  for (const e of await storage.list('lemonade', {under: EXTRA})) {
+    const rel = e.path.slice(EXTRA.length + 1);
+    const parts = rel.split('/');
+    if (parts.length === 1 && e.kind === 'dir') {
+      if (!out.has(parts[0])) out.set(parts[0], []);
+    } else if (parts.length === 2) {
+      const children = out.get(parts[0]) ?? [];
+      children.push(e);
+      out.set(parts[0], children);
+    }
   }
   return out;
 }
 
-/** What syncing the extra directory would change, without changing it. */
+/** The folders that hold only symlinks — the ones this wrote. A directory
+ *  with a real file (or anything nested) in it belongs to whoever put it
+ *  there. */
+function ownedFolders(folders: Map<string, FileEntry[]>): string[] {
+  return [...folders]
+    .filter(
+      ([, children]) =>
+        children.length > 0 && children.every((c) => c.kind === 'symlink'),
+    )
+    .map(([name]) => name);
+}
+
+/** Links of ours in `folder` that the plan no longer wants. */
+function staleLinks(
+  children: FileEntry[],
+  wanted: Set<string>,
+): FileEntry[] {
+  return children.filter(
+    (c) =>
+      c.kind === 'symlink' && !wanted.has(c.path.split('/').pop() ?? ''),
+  );
+}
+
+/** What syncing the extra directory would change, without changing it. The
+ *  link half is a dry run of the sync itself, so the two cannot disagree —
+ *  e.g. about a real file occupying a link's path, which neither touches. */
 export async function previewExtraModels(
-  extraDir: string,
+  storage: Storage,
   plans: ExtraModelPlan[],
 ): Promise<ExtraChange[]> {
+  const folders = await extraFolders(storage);
   const changes: ExtraChange[] = [];
   for (const plan of plans) {
-    const change = await diffFolder(extraDir, plan);
-    if (change.toLink > 0 || change.toRemove > 0) changes.push(change);
+    const outcomes = await storage.link(linkRefs(plan), {dryRun: true});
+    const toLink = outcomes.filter(
+      (o) => o === 'created' || o === 'replaced',
+    ).length;
+    const wanted = new Set(plan.links.map((l) => l.name));
+    const toRemove = staleLinks(folders.get(plan.folder) ?? [], wanted).length;
+    if (toLink > 0 || toRemove > 0)
+      changes.push({repoId: plan.repoId, folder: plan.folder, toLink, toRemove});
   }
   // Directories for models that no longer qualify — dropped from local storage,
   // or picked up by Lemonade's catalog since.
   const planned = new Set(plans.map((p) => p.folder));
-  for (const folder of await ownedFolders(extraDir)) {
+  for (const folder of ownedFolders(folders)) {
     if (planned.has(folder)) continue;
-    const stale = (await entriesIn(nodePath.join(extraDir, folder))).length;
+    const stale = folders.get(folder)?.length ?? 0;
     changes.push({repoId: folder, folder, toLink: 0, toRemove: stale});
   }
   return changes;
@@ -191,33 +191,26 @@ export async function previewExtraModels(
 
 /** Make the extra directory match the plan. Returns what changed. */
 export async function syncExtraModels(
-  extraDir: string,
+  storage: Storage,
   plans: ExtraModelPlan[],
 ): Promise<ExtraChange[]> {
+  const folders = await extraFolders(storage);
   const done: ExtraChange[] = [];
   for (const plan of plans) {
-    const dir = nodePath.join(extraDir, plan.folder);
     let linked = 0;
     let removed = 0;
     try {
-      await fsp.mkdir(dir, {recursive: true});
-      const wanted = new Map(plan.links.map((l) => [l.name, l.target]));
-      for (const [name, target] of wanted) {
-        const full = nodePath.join(dir, name);
-        const current = await linkTarget(full);
-        if (current === target) continue;
-        // Replace a link pointing elsewhere; never overwrite a real file.
-        if (current !== null) await fsp.rm(full, {force: true});
-        else if (await exists(full)) continue;
-        await fsp.symlink(target, full);
-        linked++;
-      }
-      for (const name of await entriesIn(dir)) {
-        if (wanted.has(name)) continue;
-        const full = nodePath.join(dir, name);
-        if ((await linkTarget(full)) === null) continue;
-        await fsp.rm(full, {force: true});
-        removed++;
+      const outcomes = await storage.link(linkRefs(plan));
+      linked = outcomes.filter(
+        (o) => o === 'created' || o === 'replaced',
+      ).length;
+      const wanted = new Set(plan.links.map((l) => l.name));
+      const stale = staleLinks(folders.get(plan.folder) ?? [], wanted);
+      if (stale.length > 0) {
+        await storage.remove(
+          stale.map((c) => ({root: 'lemonade' as const, path: c.path})),
+        );
+        removed = stale.length;
       }
     } catch (e) {
       logger.warn(
@@ -234,14 +227,14 @@ export async function syncExtraModels(
   }
 
   const planned = new Set(plans.map((p) => p.folder));
-  for (const folder of await ownedFolders(extraDir)) {
+  for (const folder of ownedFolders(folders)) {
     if (planned.has(folder)) continue;
-    const dir = nodePath.join(extraDir, folder);
-    const names = await entriesIn(dir);
+    const count = folders.get(folder)?.length ?? 0;
     try {
-      for (const n of names) await fsp.rm(nodePath.join(dir, n), {force: true});
-      await fsp.rmdir(dir);
-      done.push({repoId: folder, folder, toLink: 0, toRemove: names.length});
+      await storage.remove([
+        {root: 'lemonade', path: `${EXTRA}/${folder}`},
+      ]);
+      done.push({repoId: folder, folder, toLink: 0, toRemove: count});
     } catch (e) {
       logger.warn(
         `[lemonade-extra] removing ${folder}: ${e instanceof Error ? e.message : String(e)}`,
@@ -249,13 +242,4 @@ export async function syncExtraModels(
     }
   }
   return done;
-}
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fsp.stat(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
