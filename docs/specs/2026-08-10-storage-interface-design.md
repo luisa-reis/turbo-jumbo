@@ -124,8 +124,16 @@ export interface Storage {
 
   copy(from: Ref, to: Ref): Promise<void>;
 
-  /** Bulk symlink creation, for Lemonade's extra-models directory. */
-  link(links: Array<{target: Ref; at: Ref}>): Promise<void>;
+  /**
+   * Bulk symlink creation, for Lemonade's extra-models directory. Replaces a
+   * link pointing elsewhere, keeps a correct one, never touches a real file,
+   * and reports what it did (or, with `dryRun`, would do) per path — so a
+   * sync preview is a dry run of the sync and the two can't disagree.
+   */
+  link(
+    links: Array<{target: Ref; at: Ref}>,
+    opts?: {dryRun?: boolean},
+  ): Promise<Array<'created' | 'replaced' | 'kept' | 'skipped'>>;
 
   usage(root: Root): Promise<Usage>;
 
@@ -255,17 +263,21 @@ Done:
   `expandSupportFiles` filters one `list` instead of walking; `recordedSha256`
   takes the file's and the sidecar's mtimes from a single `list` of the model
   directory, since the interface deliberately has no `stat` verb.
+- `lemonade-extra.ts` and `lemonade-place.ts`. This upgraded `link` to return
+  per-path outcomes, take `dryRun`, and never touch a real file — the sync
+  preview is now literally a dry run of the sync, which fixed an actual
+  preview/executor disagreement about a user's file occupying a link's path.
+  `ExtraLink.target` and `Placement.from`/`to` became root-relative.
 
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
-2. `models/models.ts` — the scan becomes one `list`; the cache lands here
-3. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
+1. `models/models.ts` — the scan becomes one `list`; the cache lands here
+2. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
    with them — fix-duplicates looked easy but its I/O is really audit.ts's
    full-path helpers (`resolveSource`, `localSha256`, `findHistoricalMatch`,
    `moveFileWithMeta`), so the two migrate together
-4. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+3. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided
