@@ -78,3 +78,18 @@ test('returns null for a path escaping the base directory', async () => {
   const base = await fixture();
   expect(await recordedSha256(base, '../outside.safetensors')).toBeNull();
 });
+
+test('recordedSha256 accepts a storage site in place of a base path', async () => {
+  const {createLocalStorage} = await import('@/lib/storage/local-storage');
+  const base = await fixture();
+  const site = {storage: createLocalStorage({cold: base}), root: 'cold'} as const;
+  expect(await recordedSha256(site, REL)).toBe(SHA);
+  // The same narrow trust: a size mismatch refuses to answer.
+  const stale = await fixture({recordedSize: 999});
+  const staleSite = {
+    storage: createLocalStorage({cold: stale}),
+    root: 'cold',
+  } as const;
+  expect(await recordedSha256(staleSite, REL)).toBeNull();
+  for (const b of [base, stale]) await fsp.rm(b, {recursive: true, force: true});
+});

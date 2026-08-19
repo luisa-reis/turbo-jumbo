@@ -1,7 +1,7 @@
 import nodePath from 'path';
-import {promises as fsp} from 'fs';
 import {readModelSidecar} from '@/lib/models/model-sidecar';
 import {MODEL_SIDECAR_NAME} from '@/lib/models/sidecar-types';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 /**
  * The SHA256 a model's sidecar already recorded for one of its files, when
@@ -16,50 +16,36 @@ import {MODEL_SIDECAR_NAME} from '@/lib/models/sidecar-types';
  * Lemonade-consolidated model records none), a missing file — returns null,
  * and the caller falls back to hashing the bytes.
  *
- * `relPath` is relative to `basePath` (the models or cold-storage root); the
- * sidecar is looked up in the model directory containing the file.
+ * `relPath` is relative to the site's root; the sidecar is looked up in the
+ * model directory containing the file, and one list of that directory
+ * supplies both the file's and the sidecar's size and mtime.
  */
 export async function recordedSha256(
-  basePath: string,
+  site: Site,
   relPath: string,
 ): Promise<string | null> {
-  const base = nodePath.resolve(basePath);
-  const full = nodePath.resolve(base, relPath);
-  if (!full.startsWith(base + nodePath.sep)) return null;
+  const {storage, root} = siteStorage(site);
+  if (!relPath || nodePath.posix.isAbsolute(relPath)) return null;
 
-  let fileStat;
-  try {
-    fileStat = await fsp.stat(full);
-  } catch {
-    return null;
-  }
-
-  // Walk up to the model directory holding the sidecar, mirroring
-  // readFileMetaByPath — but statting the sidecar too, since trusting its
-  // record depends on when it was written relative to the file.
-  let dir = nodePath.dirname(nodePath.relative(base, full));
-  while (dir && dir !== '.') {
-    const model = await readModelSidecar(base, dir);
+  let dir = nodePath.posix.dirname(relPath);
+  while (dir && dir !== '.' && dir !== '/') {
+    const model = await readModelSidecar(site, dir);
     if (model) {
-      const key = nodePath.relative(
-        nodePath.resolve(base, dir),
-        nodePath.resolve(base, relPath),
-      );
+      const key = nodePath.posix.relative(dir, relPath);
       const entry = model.files.find((f) => f.path === key);
       if (!entry?.computedSha256) return null;
-      if (entry.computedSize !== fileStat.size) return null;
-      let sidecarStat;
-      try {
-        sidecarStat = await fsp.stat(
-          nodePath.join(base, dir, MODEL_SIDECAR_NAME),
-        );
-      } catch {
-        return null;
-      }
-      if (fileStat.mtimeMs > sidecarStat.mtimeMs) return null;
+      const entries = await storage.list(root, {under: dir});
+      const file = entries.find((e) => e.path === relPath && e.kind === 'file');
+      if (!file) return null;
+      if (entry.computedSize !== file.size) return null;
+      const sidecar = entries.find(
+        (e) => e.path === `${dir}/${MODEL_SIDECAR_NAME}`,
+      );
+      if (!sidecar) return null;
+      if (file.mtimeMs > sidecar.mtimeMs) return null;
       return entry.computedSha256;
     }
-    dir = nodePath.dirname(dir);
+    dir = nodePath.posix.dirname(dir);
   }
   return null;
 }

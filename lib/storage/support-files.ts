@@ -1,7 +1,7 @@
-import {promises as fsp} from 'fs';
 import nodePath from 'path';
 import {isWeightFile} from '@/lib/models/weight-files';
 import {MODEL_SIDECAR_NAME, TJMETA_SUFFIX} from '@/lib/models/sidecar-types';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 /**
  * The support files that must travel with the given weight files: everything
@@ -13,50 +13,41 @@ import {MODEL_SIDECAR_NAME, TJMETA_SUFFIX} from '@/lib/models/sidecar-types';
  * Excluded: other weight files (a selection of one quant must not drag its
  * siblings along), sidecars (`tjmodel.json`, `*.tjmeta.json` — the copy's
  * meta-propagation channel owns those), and dot-entries (`.cache/…`).
- * Paths that escape `baseDir` or whose directory is gone yield nothing.
+ * Paths that escape the root or whose directory is gone yield nothing.
  */
 export async function expandSupportFiles(
-  baseDir: string,
+  site: Site,
   paths: string[],
 ): Promise<Array<{path: string; size: number}>> {
-  const base = nodePath.resolve(baseDir);
+  const {storage, root} = siteStorage(site);
   const known = new Set(paths);
   const dirs = new Set<string>();
   for (const p of paths) {
-    const dir = nodePath.dirname(nodePath.resolve(base, p));
-    if (dir.startsWith(base + nodePath.sep)) dirs.add(dir);
+    const dir = nodePath.posix.dirname(nodePath.posix.normalize(p));
+    if (dir === '.' || dir === '' || nodePath.posix.isAbsolute(dir)) continue;
+    if (dir.split('/').some((seg) => seg === '..')) continue;
+    dirs.add(dir);
   }
 
   const out: Array<{path: string; size: number}> = [];
-  const walk = async (dir: string) => {
-    let entries;
-    try {
-      entries = await fsp.readdir(dir, {withFileTypes: true});
-    } catch {
-      return; // gone or unreadable: nothing to expand
-    }
+  for (const dir of dirs) {
+    // Tolerant list: a directory that is gone or unreadable expands to
+    // nothing, same as the walk it replaces.
+    const entries = await storage.list(root, {under: dir});
     for (const e of entries) {
-      if (e.name.startsWith('.')) continue;
-      const full = nodePath.join(dir, e.name);
-      if (e.isDirectory()) {
-        await walk(full);
+      if (e.kind !== 'file') continue;
+      // Dot-entries at any depth below the model dir stay out (.cache/…).
+      const below = e.path.slice(dir.length + 1);
+      if (below.split('/').some((seg) => seg.startsWith('.'))) continue;
+      const name = e.path.split('/').pop() ?? '';
+      if (isWeightFile(name)) continue;
+      if (name === MODEL_SIDECAR_NAME || name.endsWith(TJMETA_SUFFIX))
         continue;
-      }
-      if (!e.isFile()) continue;
-      if (isWeightFile(e.name)) continue;
-      if (e.name === MODEL_SIDECAR_NAME || e.name.endsWith(TJMETA_SUFFIX))
-        continue;
-      const rel = nodePath.relative(base, full);
-      if (known.has(rel)) continue;
-      known.add(rel);
-      try {
-        out.push({path: rel, size: (await fsp.stat(full)).size});
-      } catch {
-        /* raced away between readdir and stat: skip */
-      }
+      if (known.has(e.path)) continue;
+      known.add(e.path);
+      out.push({path: e.path, size: e.size});
     }
-  };
-  for (const dir of dirs) await walk(dir);
+  }
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 

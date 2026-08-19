@@ -251,15 +251,19 @@ Done:
   for the two remaining absolute-path callers, `audit.ts` and
   `copy-meta.ts`, which own them in their own steps.)
 
+- `support-files.ts` and `recorded-digest.ts`, on the same `Site` union.
+  `expandSupportFiles` filters one `list` instead of walking; `recordedSha256`
+  takes the file's and the sidecar's mtimes from a single `list` of the model
+  directory, since the interface deliberately has no `stat` verb.
+
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `storage/support-files.ts`, `storage/recorded-digest.ts`
-2. `audit/fix-duplicates.ts`
-3. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
-4. `models/models.ts` — the scan becomes one `list`; the cache lands here
-5. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
-6. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+1. `audit/fix-duplicates.ts`
+2. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
+3. `models/models.ts` — the scan becomes one `list`; the cache lands here
+4. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
+5. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided
