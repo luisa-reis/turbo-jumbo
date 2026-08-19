@@ -13,6 +13,7 @@ import {
   modelInLemonadeCache,
   lemonadeGgufModels,
   lemonadeStatusTooltip,
+  matchCheckpointFiles,
   matchVariantFiles,
   missingVariantFiles,
   parseCheckpoint,
@@ -1184,6 +1185,21 @@ test('componentCheckpointBreakdown marks unscannable files untracked, not missin
     [],
   );
   expect(rows[0].local).toBe('untracked');
+});
+
+test('matchCheckpointFiles returns the scanned groups a checkpoint stands for', () => {
+  // The copy-from-cold action needs the actual files, not just a presence
+  // verdict — and it must use the same matching as the presence check.
+  const models = [encoderFiles, imageFiles];
+  expect(
+    matchCheckpointFiles(
+      {repoId: 'o/encoder-GGUF', variant: 'encoder-q8.gguf'},
+      models,
+    ),
+  ).toEqual([single('encoder-q8.gguf', 'Q8_0')]);
+  expect(
+    matchCheckpointFiles({repoId: 'o/encoder-GGUF', variant: 'Q4_0'}, models),
+  ).toEqual([]);
 });
 
 test('componentCachePresence distinguishes partial from complete cache coverage', () => {

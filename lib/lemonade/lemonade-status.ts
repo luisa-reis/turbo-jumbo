@@ -111,6 +111,32 @@ export function lemonadeStatusTooltip(info: LemonadeDownloadInfo): string {
 // neither confirmable nor counted as missing.
 export type Presence = 'untracked' | 'none' | 'partial' | 'complete';
 
+/**
+ * The scanned weight groups a checkpoint stands for — the same selection
+ * checkpointPresence judges, exposed for acting on the files themselves
+ * (copying a missing checkpoint out of cold storage). Empty for whole-repo
+ * and untrackable variants, which have no per-file match.
+ */
+export function matchCheckpointFiles(
+  cp: Checkpoint,
+  models: Model[],
+): ModelFile[] {
+  const {variant} = cp;
+  if (variant == null) return [];
+  const isFilename = FILENAME_VARIANT_RE.test(variant);
+  if (isFilename && !isWeightFile(variant)) return [];
+  const files = models
+    .filter((m) => m.name === cp.repoId)
+    .flatMap((m) => m.files);
+  return isFilename
+    ? files.filter(
+        (f) =>
+          baseName(groupFilename(f)).toLowerCase() ===
+          baseName(variant).toLowerCase(),
+      )
+    : files.filter((f) => fileMatchesVariant(f, variant));
+}
+
 // One checkpoint's presence within a single location's scan.
 function checkpointPresence(cp: Checkpoint, models: Model[]): Presence {
   const {variant} = cp;
@@ -121,18 +147,9 @@ function checkpointPresence(cp: Checkpoint, models: Model[]): Presence {
     // (checkpointInCache). Coarse: it can't confirm every file is there.
     return models.some((m) => m.name === cp.repoId) ? 'complete' : 'none';
   }
-  const isFilename = FILENAME_VARIANT_RE.test(variant);
-  if (isFilename && !isWeightFile(variant)) return 'untracked';
-  const files = models
-    .filter((m) => m.name === cp.repoId)
-    .flatMap((m) => m.files);
-  const matched = isFilename
-    ? files.filter(
-        (f) =>
-          baseName(groupFilename(f)).toLowerCase() ===
-          baseName(variant).toLowerCase(),
-      )
-    : files.filter((f) => fileMatchesVariant(f, variant));
+  if (FILENAME_VARIANT_RE.test(variant) && !isWeightFile(variant))
+    return 'untracked';
+  const matched = matchCheckpointFiles(cp, models);
   if (matched.length === 0) return 'none';
   return matched.every(groupComplete) ? 'complete' : 'partial';
 }

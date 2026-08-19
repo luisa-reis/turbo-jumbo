@@ -43,7 +43,7 @@ export function useInventoryLocations({
         isLocal: p.isLocal ?? false,
       };
     });
-    locs.push({name: 'cold storage', models: coldModels});
+    locs.push({name: 'cold storage', models: coldModels, isCold: true});
     return locs;
   }, [peerConfigs, seededPeerModels, coldModels]);
 
