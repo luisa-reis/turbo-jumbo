@@ -109,6 +109,7 @@ export interface InventoryLocation {
   name: string; // "local", "cold storage", a peer name like "my-server"
   models: Model[];
   isLocal?: boolean; // the location downloads land in
+  isCold?: boolean; // the archival tier, not servable by Lemonade
 }
 
 /** Where a catalog entry is present, and how complete each copy is. */

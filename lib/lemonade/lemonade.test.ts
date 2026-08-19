@@ -5,6 +5,8 @@ import {
   collectionDownloadStatus,
   collectionFromManifest,
   collectionInLemonadeCache,
+  componentCachePresence,
+  componentCheckpointBreakdown,
   componentDownloadStatus,
   componentInLemonadeCache,
   lemonadeDownloadStatus,
@@ -1099,4 +1101,97 @@ test('componentDownloadStatus tracks a non-llamacpp member (whisper) by its file
   expect(componentDownloadStatus(kokoroComp, [loc('local', [])]).status).toBe(
     'none',
   );
+});
+
+// --- per-checkpoint breakdown --------------------------------------------
+
+// The image-model shape that motivated the breakdown: weights, a text encoder
+// from a second repo, and a VAE from a third. Any one missing keeps Lemonade
+// from serving the model, and the roll-up alone can't say which one it is.
+const imageComp = comp('Image-9B', 'sd-cpp', [
+  {repoId: 'o/image-GGUF', variant: 'image-q8.gguf'},
+  {repoId: 'o/encoder-GGUF', variant: 'encoder-q8.gguf'},
+  {repoId: 'o/vae', variant: 'split_files/vae/vae.safetensors'},
+]);
+const imageFiles = repoModel('o/image-GGUF', [single('image-q8.gguf', 'Q8_0')]);
+const encoderFiles = repoModel('o/encoder-GGUF', [
+  single('encoder-q8.gguf', 'Q8_0'),
+]);
+const vaeFiles = repoModel('o/vae', [single('vae.safetensors', 'unknown')]);
+
+test('componentCheckpointBreakdown reports each checkpoint per tier', () => {
+  const rows = componentCheckpointBreakdown(
+    imageComp,
+    [
+      {name: 'local', models: [imageFiles, vaeFiles], isLocal: true},
+      {name: 'peer-2', models: [encoderFiles]},
+      {name: 'cold storage', models: [encoderFiles], isCold: true},
+    ],
+    [imageFiles, vaeFiles],
+  );
+  expect(
+    rows.map((r) => ({
+      label: r.label,
+      local: r.local,
+      cold: r.cold,
+      peers: r.peers,
+      inCache: r.inCache,
+    })),
+  ).toEqual([
+    {
+      label: 'image-q8.gguf',
+      local: 'complete',
+      cold: 'none',
+      peers: [],
+      inCache: true,
+    },
+    {
+      label: 'encoder-q8.gguf',
+      local: 'none',
+      cold: 'complete',
+      peers: ['peer-2'],
+      inCache: false,
+    },
+    {
+      label: 'vae.safetensors',
+      local: 'complete',
+      cold: 'none',
+      peers: [],
+      inCache: true,
+    },
+  ]);
+});
+
+test('componentCheckpointBreakdown labels checkpoints readably', () => {
+  const c = comp('X', 'sd-cpp', [
+    {repoId: 'o/a', variant: 'dir/file.safetensors'},
+    {repoId: 'o/b', variant: 'Q4_0'},
+    {repoId: 'o/c', variant: null},
+  ]);
+  const rows = componentCheckpointBreakdown(c, [], []);
+  expect(rows.map((r) => r.label)).toEqual([
+    'file.safetensors',
+    'o/b:Q4_0',
+    'o/c',
+  ]);
+});
+
+test('componentCheckpointBreakdown marks unscannable files untracked, not missing', () => {
+  const c = comp('K', 'kokoro', [{repoId: 'o/k', variant: 'model.onnx'}]);
+  const rows = componentCheckpointBreakdown(
+    c,
+    [{name: 'local', models: [], isLocal: true}],
+    [],
+  );
+  expect(rows[0].local).toBe('untracked');
+});
+
+test('componentCachePresence distinguishes partial from complete cache coverage', () => {
+  expect(
+    componentCachePresence(imageComp, [imageFiles, encoderFiles, vaeFiles]),
+  ).toBe('complete');
+  expect(componentCachePresence(imageComp, [imageFiles, vaeFiles])).toBe(
+    'partial',
+  );
+  expect(componentCachePresence(imageComp, [])).toBe('none');
 });

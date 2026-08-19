@@ -109,7 +109,7 @@ export function lemonadeStatusTooltip(info: LemonadeDownloadInfo): string {
 // `untracked` means the weight scan can't see this thing at all — a whole-repo
 // (null) checkpoint or a non-weight file like a kokoro `.onnx` — so it's
 // neither confirmable nor counted as missing.
-type Presence = 'untracked' | 'none' | 'partial' | 'complete';
+export type Presence = 'untracked' | 'none' | 'partial' | 'complete';
 
 // One checkpoint's presence within a single location's scan.
 function checkpointPresence(cp: Checkpoint, models: Model[]): Presence {
@@ -273,6 +273,77 @@ export function modelCacheSide(
       return side;
   }
   return null;
+}
+
+/** One checkpoint of a component, judged across every storage tier. */
+export interface CheckpointStatusRow {
+  checkpoint: Checkpoint;
+  /** Display label: the variant's basename, `repo:token`, or the repo id. */
+  label: string;
+  /** Presence on the local peer's fast storage. */
+  local: Presence;
+  /** Presence in cold storage. */
+  cold: Presence;
+  /** Remote peers holding it (partial or complete), in location order. */
+  peers: string[];
+  /** Whether Lemonade's own cache holds it. */
+  inCache: boolean;
+}
+
+// How a checkpoint reads in a row of its own: an exact file by its basename,
+// a quant token in Lemonade's own `repo:variant` notation, a whole repo by id.
+function checkpointLabel(cp: Checkpoint): string {
+  if (cp.variant == null) return cp.repoId;
+  if (FILENAME_VARIANT_RE.test(cp.variant)) return baseName(cp.variant);
+  return `${cp.repoId}:${cp.variant}`;
+}
+
+/**
+ * Each checkpoint of a component judged separately across the tiers, for
+ * explaining a partial roll-up: which file is the gap, and where a copy
+ * already exists. Same per-checkpoint judgement as the roll-up
+ * (checkpointPresence / checkpointInCache), so the two views can't disagree.
+ */
+export function componentCheckpointBreakdown(
+  component: LemonadeComponent,
+  locations: InventoryLocation[],
+  cacheModels: Model[],
+): CheckpointStatusRow[] {
+  const tiers = (kind: 'isLocal' | 'isCold') =>
+    locations.filter((l) => l[kind]);
+  const peerLocs = locations.filter((l) => !l.isLocal && !l.isCold);
+  const tierPresence = (cp: Checkpoint, locs: InventoryLocation[]): Presence =>
+    rollUpPresence(locs.map((l) => checkpointPresence(cp, l.models)));
+  return component.checkpoints.map((cp) => ({
+    checkpoint: cp,
+    label: checkpointLabel(cp),
+    local: tierPresence(cp, tiers('isLocal')),
+    cold: tierPresence(cp, tiers('isCold')),
+    peers: peerLocs
+      .filter((l) => {
+        const p = checkpointPresence(cp, l.models);
+        return p === 'partial' || p === 'complete';
+      })
+      .map((l) => l.name),
+    inCache: checkpointInCache(cp, cacheModels),
+  }));
+}
+
+/**
+ * How much of a component Lemonade's own cache holds. The distinction the
+ * boolean check can't make: `partial` means Lemonade lists none of it — a
+ * multi-checkpoint model only works with every checkpoint cached — while the
+ * cache still holds real bytes worth showing.
+ */
+export function componentCachePresence(
+  component: LemonadeComponent,
+  cacheModels: Model[],
+): 'none' | 'partial' | 'complete' {
+  const cached = component.checkpoints.filter((cp) =>
+    checkpointInCache(cp, cacheModels),
+  ).length;
+  if (cached === 0) return 'none';
+  return cached === component.checkpoints.length ? 'complete' : 'partial';
 }
 
 /** Whether any of an omni component's checkpoints is in the Lemonade cache. */
