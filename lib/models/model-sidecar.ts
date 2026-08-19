@@ -1,6 +1,6 @@
-import {promises as fsp} from 'fs';
 import path from 'path';
 import {parseHubCachePath} from '@/lib/hf/hf-cache';
+import {siteStorage, type Site} from '@/lib/storage/site';
 import type {TjMeta} from '@/lib/models/tjmeta';
 
 import {
@@ -55,11 +55,8 @@ const REVISION_RE = /^[A-Za-z0-9_./-]+$/;
  * to `main` when the sidecar is absent, records none, or records something
  * that can't safely go into a URL.
  */
-export async function modelRevision(
-  basePath: string,
-  dir: string,
-): Promise<string> {
-  const sidecar = await readModelSidecar(basePath, dir);
+export async function modelRevision(site: Site, dir: string): Promise<string> {
+  const sidecar = await readModelSidecar(site, dir);
   const rev = sidecar?.revision;
   return rev && REVISION_RE.test(rev) ? rev : 'main';
 }
@@ -70,10 +67,10 @@ export async function modelRevision(
  * download, judged against the full tree).
  */
 export async function modelFileScope(
-  basePath: string,
+  site: Site,
   dir: string,
 ): Promise<Set<string> | null> {
-  const sidecar = await readModelSidecar(basePath, dir);
+  const sidecar = await readModelSidecar(site, dir);
   const scope = sidecar?.fileScope?.filter((f) => typeof f === 'string');
   return scope && scope.length > 0 ? new Set(scope) : null;
 }
@@ -90,13 +87,13 @@ export async function modelFileScope(
  * companions) must still remember its pin.
  */
 export async function setModelRevision(
-  basePath: string,
+  site: Site,
   dir: string,
   repoId: string,
   revision: string,
   fileScope?: string[],
 ): Promise<void> {
-  const existing = await readModelSidecar(basePath, dir);
+  const existing = await readModelSidecar(site, dir);
   const model: TjModel = existing ?? {
     modelUrl: `https://huggingface.co/${repoId}`,
     repoId,
@@ -106,7 +103,7 @@ export async function setModelRevision(
   else model.revision = revision;
   if (fileScope && fileScope.length > 0) model.fileScope = fileScope;
   else if (revision === 'main') delete model.fileScope;
-  await writeModelSidecar(basePath, dir, model);
+  await writeModelSidecar(site, dir, model);
 }
 
 /**
@@ -169,65 +166,75 @@ export function mergeFileMeta(
   };
 }
 
-function sidecarPath(basePath: string, dir: string): string {
-  return path.join(basePath, dir, MODEL_SIDECAR_NAME);
+/** The sidecar's root-relative path within its site. */
+function sidecarRelPath(dir: string): string {
+  return dir ? `${dir}/${MODEL_SIDECAR_NAME}` : MODEL_SIDECAR_NAME;
 }
 
 export async function readModelSidecar(
-  basePath: string,
+  site: Site,
   dir: string,
 ): Promise<TjModel | null> {
+  const {storage, root} = siteStorage(site);
   try {
-    const raw = await fsp.readFile(sidecarPath(basePath, dir), 'utf8');
-    return JSON.parse(raw) as TjModel;
+    const raw = await storage.read({root, path: sidecarRelPath(dir)});
+    return JSON.parse(new TextDecoder().decode(raw)) as TjModel;
   } catch {
     return null;
   }
 }
 
 export async function writeModelSidecar(
-  basePath: string,
+  site: Site,
   dir: string,
   model: TjModel,
 ): Promise<void> {
-  const full = sidecarPath(basePath, dir);
-  await fsp.mkdir(path.dirname(full), {recursive: true});
-  await fsp.writeFile(full, JSON.stringify(model, null, 2));
+  const {storage, root} = siteStorage(site);
+  await storage.write(
+    {root, path: sidecarRelPath(dir)},
+    new TextEncoder().encode(JSON.stringify(model, null, 2)),
+  );
 }
 
 /**
- * Every model directory under `basePath` that holds a `tjmodel.json`, as paths
- * relative to `basePath`. Used to enumerate sidecar-only state (e.g. files
+ * Every model directory under the site that holds a `tjmodel.json`, as
+ * root-relative paths. Used to enumerate sidecar-only state (e.g. files
  * recorded `missing`) that an on-disk scan can't see. A directory with a
- * sidecar isn't descended into — a model dir doesn't nest another.
+ * sidecar doesn't count another below it — a model dir doesn't nest another.
  */
-export async function findModelSidecarDirs(
-  basePath: string,
-): Promise<string[]> {
-  const out: string[] = [];
-  async function walk(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await fsp.readdir(path.join(basePath, dir), {
-        withFileTypes: true,
-      });
-    } catch {
-      return;
+export async function findModelSidecarDirs(site: Site): Promise<string[]> {
+  const {storage, root} = siteStorage(site);
+  const entries = await storage.list(root);
+  const dirs = entries
+    .filter(
+      (e) =>
+        e.kind === 'file' &&
+        (e.path === MODEL_SIDECAR_NAME ||
+          e.path.endsWith(`/${MODEL_SIDECAR_NAME}`)),
+    )
+    .map((e) =>
+      e.path === MODEL_SIDECAR_NAME
+        ? ''
+        : e.path.slice(0, -(MODEL_SIDECAR_NAME.length + 1)),
+    );
+  const all = new Set(dirs);
+  // A sidecar at the root owns everything below it, like the walk that
+  // stopped descending used to.
+  if (all.has('')) return [''];
+  return dirs.filter((d) => {
+    for (let p = path.posix.dirname(d); p && p !== '.'; p = path.posix.dirname(p)) {
+      if (all.has(p)) return false;
     }
-    if (entries.some((e) => e.isFile() && e.name === MODEL_SIDECAR_NAME)) {
-      out.push(dir);
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) await walk(dir ? path.join(dir, e.name) : e.name);
-    }
-  }
-  await walk('');
-  return out;
+    return true;
+  });
 }
 
-// Per-sidecar-path promise chain: serialize read-modify-write so concurrent
+// Per-sidecar promise chain: serialize read-modify-write so concurrent
 // audits of files in one model don't clobber each other's tjmodel.json.
+// Keyed by the root-relative dir alone — the same tjmodel.json must share a
+// chain whether the caller passed a base path or a {storage, root} site, and
+// the dir string is the one name both arms agree on. Two roots holding a
+// same-named dir merely share a chain (over-serialization, never a clobber).
 const writeChains = new Map<string, Promise<unknown>>();
 
 function withSidecarLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -276,33 +283,33 @@ export function metaToEntry(key: string, meta: TjMeta): TjModelFile {
  * holds a `tjmodel.json`. Returns null when no model sidecar owns the file.
  */
 export async function readFileMetaByPath(
-  basePath: string,
+  site: Site,
   relPath: string,
 ): Promise<TjMeta | null> {
   const cache = parseHubCachePath(relPath);
   if (cache) {
-    return readFileMeta(basePath, relPath.split('/')[0], cache.repoPath);
+    return readFileMeta(site, relPath.split('/')[0], cache.repoPath);
   }
-  let dir = path.dirname(relPath);
+  let dir = path.posix.dirname(relPath);
   while (dir && dir !== '.') {
-    const model = await readModelSidecar(basePath, dir);
+    const model = await readModelSidecar(site, dir);
     if (model) {
-      const key = path.relative(dir, relPath);
+      const key = path.posix.relative(dir, relPath);
       const e = model.files.find((f) => f.path === key);
       return e ? entryToMeta(model.modelUrl, e) : null;
     }
-    dir = path.dirname(dir);
+    dir = path.posix.dirname(dir);
   }
   return null;
 }
 
 /** A file's `TjMeta` view (modelUrl re-attached) from its model sidecar, or null. */
 export async function readFileMeta(
-  basePath: string,
+  site: Site,
   dir: string,
   key: string,
 ): Promise<TjMeta | null> {
-  const model = await readModelSidecar(basePath, dir);
+  const model = await readModelSidecar(site, dir);
   const e = model?.files.find((f) => f.path === key);
   return e ? entryToMeta(model!.modelUrl, e) : null;
 }
@@ -314,14 +321,14 @@ export async function readFileMeta(
  * without a fresh HF resolution — moves, legacy migration — never clobber it).
  */
 export async function upsertFileMeta(
-  basePath: string,
+  site: Site,
   dir: string,
   repoId: string,
   next: TjModelFile,
   repoHead?: {id: string; date?: string} | null,
 ): Promise<void> {
-  await withSidecarLock(sidecarPath(basePath, dir), async () => {
-    const model = (await readModelSidecar(basePath, dir)) ?? {
+  await withSidecarLock(dir, async () => {
+    const model = (await readModelSidecar(site, dir)) ?? {
       modelUrl: `https://huggingface.co/${repoId}`,
       repoId,
       files: [],
@@ -335,7 +342,7 @@ export async function upsertFileMeta(
       if (repoHead.date) model.repoCommitDate = repoHead.date;
       else delete model.repoCommitDate;
     }
-    await writeModelSidecar(basePath, dir, withDerivedCommit(model));
+    await writeModelSidecar(site, dir, withDerivedCommit(model));
   });
 }
 
@@ -347,19 +354,19 @@ export async function upsertFileMeta(
  * can't record them, but a just-downloaded file must not stay flagged missing.
  */
 export async function clearMissingFlag(
-  basePath: string,
+  site: Site,
   dir: string,
   key: string,
   computedSize: number,
 ): Promise<boolean> {
-  return withSidecarLock(sidecarPath(basePath, dir), async () => {
-    const model = await readModelSidecar(basePath, dir);
+  return withSidecarLock(dir, async () => {
+    const model = await readModelSidecar(site, dir);
     const i = model?.files.findIndex((f) => f.path === key) ?? -1;
     if (!model || i < 0 || !model.files[i].missing) return false;
     const entry = {...model.files[i], computedSize};
     delete entry.missing;
     model.files[i] = entry;
-    await writeModelSidecar(basePath, dir, withDerivedCommit(model));
+    await writeModelSidecar(site, dir, withDerivedCommit(model));
     return true;
   });
 }
@@ -372,19 +379,20 @@ export async function clearMissingFlag(
  * must not silently retarget the survivors to main and the whole tree.
  */
 export async function removeFileMeta(
-  basePath: string,
+  site: Site,
   dir: string,
   key: string,
 ): Promise<void> {
-  await withSidecarLock(sidecarPath(basePath, dir), async () => {
-    const model = await readModelSidecar(basePath, dir);
+  await withSidecarLock(dir, async () => {
+    const {storage, root} = siteStorage(site);
+    const model = await readModelSidecar(site, dir);
     if (!model) return;
     model.files = model.files.filter((f) => f.path !== key);
     const pinned = model.revision != null || (model.fileScope?.length ?? 0) > 0;
     if (model.files.length === 0 && !pinned) {
-      await fsp.rm(sidecarPath(basePath, dir), {force: true});
+      await storage.remove([{root, path: sidecarRelPath(dir)}]);
     } else {
-      await writeModelSidecar(basePath, dir, withDerivedCommit(model));
+      await writeModelSidecar(site, dir, withDerivedCommit(model));
     }
   });
 }

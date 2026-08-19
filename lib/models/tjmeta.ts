@@ -1,7 +1,7 @@
 import {promises as fsp} from 'fs';
-import path from 'path';
 import {logger} from '@/lib/util/logger';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
+import {siteStorage, type Site} from '@/lib/storage/site';
 import {
   metaToEntry,
   modelDirForRepo,
@@ -91,30 +91,62 @@ export async function updateMeta(
   await writeMeta(fullPath, mergeMeta(await readMeta(fullPath), next));
 }
 
+// The legacy per-file sidecar, read/written through a site's storage. The
+// fullPath-based readMeta/writeMeta above serve the callers that still hold
+// absolute paths; these serve the migrated ones, with the same tolerance:
+// missing is the common case, corrupt or unreadable is worth a warning.
+async function readMetaAt(site: Site, relPath: string): Promise<TjMeta | null> {
+  const {storage, root} = siteStorage(site);
+  const file = metaPath(relPath);
+  let raw: string;
+  try {
+    raw = new TextDecoder().decode(await storage.read({root, path: file}));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.warn(`[meta] failed to read ${file}:`, e);
+    }
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as TjMeta;
+  } catch (e) {
+    logger.warn(`[meta] ignoring unparseable sidecar ${file}:`, e);
+    return null;
+  }
+}
+
+async function writeMetaAt(
+  site: Site,
+  relPath: string,
+  meta: TjMeta,
+): Promise<void> {
+  const {storage, root} = siteStorage(site);
+  await storage.write(
+    {root, path: metaPath(relPath)},
+    new TextEncoder().encode(JSON.stringify(meta, null, 2)),
+  );
+}
+
 /**
  * Provenance for a file, from its model sidecar (`tjmodel.json`), falling back
  * to a legacy per-file `.tjmeta.json` while the migration is in flight.
  */
 export async function readMetaResolved(
-  basePath: string,
+  site: Site,
   relPath: string,
 ): Promise<TjMeta | null> {
-  const fromModel = await readFileMetaByPath(basePath, relPath);
+  const fromModel = await readFileMetaByPath(site, relPath);
   if (fromModel) return fromModel;
-  const legacy = await readMeta(path.join(basePath, relPath));
+  const legacy = await readMetaAt(site, relPath);
   if (legacy) {
     // Lazily migrate a legacy per-file sidecar into the model sidecar (when the
     // file sits in a model dir), then drop the legacy file.
     const repoId = repoIdFromModelUrl(legacy.modelUrl);
     const loc = repoId ? modelDirForRepo(relPath, repoId) : null;
     if (repoId && loc) {
-      await upsertFileMeta(
-        basePath,
-        loc.dir,
-        repoId,
-        metaToEntry(loc.key, legacy),
-      );
-      await fsp.rm(metaPath(path.join(basePath, relPath)), {force: true});
+      await upsertFileMeta(site, loc.dir, repoId, metaToEntry(loc.key, legacy));
+      const {storage, root} = siteStorage(site);
+      await storage.remove([{root, path: metaPath(relPath)}]);
     }
   }
   return legacy;
@@ -127,7 +159,7 @@ export async function readMetaResolved(
  * design (see the model-sidecars spec).
  */
 export async function updateMetaResolved(
-  basePath: string,
+  site: Site,
   relPath: string,
   repoId: string,
   next: TjMeta,
@@ -136,7 +168,7 @@ export async function updateMetaResolved(
   const loc = modelDirForRepo(relPath, repoId);
   if (loc) {
     await upsertFileMeta(
-      basePath,
+      site,
       loc.dir,
       repoId,
       metaToEntry(loc.key, next),
@@ -146,5 +178,5 @@ export async function updateMetaResolved(
   }
   // A stray file with no model dir keeps a legacy per-file sidecar (harmless
   // backward-compat); the model-sidecars spec accepts no provenance for these.
-  await updateMeta(path.join(basePath, relPath), next);
+  await writeMetaAt(site, relPath, mergeMeta(await readMetaAt(site, relPath), next));
 }

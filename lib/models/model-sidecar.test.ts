@@ -1,7 +1,8 @@
 import {test, expect} from 'bun:test';
-import {promises as fsp} from 'fs';
+import {existsSync, promises as fsp} from 'fs';
 import os from 'os';
 import path from 'path';
+import {createLocalStorage} from '@/lib/storage/local-storage';
 import {
   MIXED_COMMIT,
   deriveModelCommit,
@@ -16,6 +17,7 @@ import {
   setModelRevision,
   removeFileMeta,
   fileProvenance,
+  findModelSidecarDirs,
   summarizeFiles,
   summarizeModel,
   upsertFileMeta,
@@ -475,5 +477,43 @@ test('a pinned partial re-download keeps the recorded file scope', async () => {
   expect(await modelFileScope(base, repoId)).toEqual(
     new Set(['a.q4nx', 'b.json']),
   );
+  await fsp.rm(base, {recursive: true, force: true});
+});
+
+// --- the storage-site arm -------------------------------------------------
+
+test('the sidecar helpers accept a storage site in place of a base path', async () => {
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
+  // A cold root on purpose: the site names the root, nothing infers it.
+  const site = {
+    storage: createLocalStorage({cold: base}),
+    root: 'cold',
+  } as const;
+
+  await upsertFileMeta(site, 'org/repo', 'org/repo', entry({path: 'a.gguf'}));
+  // Written through the site, readable through either arm.
+  expect((await readModelSidecar(site, 'org/repo'))?.files.length).toBe(1);
+  expect((await readModelSidecar(base, 'org/repo'))?.files.length).toBe(1);
+
+  await removeFileMeta(site, 'org/repo', 'a.gguf');
+  expect(await readModelSidecar(site, 'org/repo')).toBeNull();
+  // The emptied sidecar file is gone from disk, not just unreadable.
+  expect(existsSync(path.join(base, 'org/repo/tjmodel.json'))).toBe(false);
+  await fsp.rm(base, {recursive: true, force: true});
+});
+
+test('findModelSidecarDirs through a site keeps the no-nesting rule', async () => {
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
+  const site = {
+    storage: createLocalStorage({models: base}),
+    root: 'models',
+  } as const;
+  await writeModelSidecar(base, 'org/outer', model({}));
+  await writeModelSidecar(base, 'org/outer/inner', model({}));
+  await writeModelSidecar(base, 'other/solo', model({}));
+
+  const dirs = await findModelSidecarDirs(site);
+  // A model dir doesn't nest another: the inner sidecar is not reported.
+  expect(dirs.sort()).toEqual(['org/outer', 'other/solo']);
   await fsp.rm(base, {recursive: true, force: true});
 });
