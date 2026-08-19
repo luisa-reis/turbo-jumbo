@@ -68,6 +68,14 @@ export interface ListOptions {
    * the scan that labels weights needs it, and it costs a header read a file.
    */
   dtype?: boolean;
+  /**
+   * Fail instead of returning a truncated inventory when something can't be
+   * read. Off by default — an inventory is worth having even with a hole —
+   * but a decision like "this directory holds no weights, delete it" must
+   * not mistake "couldn't look" for "nothing there". A missing directory is
+   * still an empty result either way: gone is an answer.
+   */
+  strict?: boolean;
 }
 
 export interface RemoveOptions {

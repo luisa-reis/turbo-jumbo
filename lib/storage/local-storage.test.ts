@@ -125,6 +125,33 @@ test('list reads safetensors dtype only when asked', async () => {
   expect(on[0].dtype).toBe('BF16');
 });
 
+test('a strict list refuses to pass off a truncated inventory as complete', async () => {
+  // Deciding to delete a "weightless" directory requires having actually seen
+  // all of it. A tolerant list swallows an unreadable subdirectory, which
+  // would make it look empty; strict makes that a refusal instead.
+  const {storage, models} = await tmpStorage();
+  const locked = nodePath.join(models, 'org/repo/locked');
+  await fsp.mkdir(locked, {recursive: true});
+  await fsp.chmod(locked, 0o000);
+  try {
+    await expect(storage.list('models', {strict: true})).rejects.toThrow();
+    // The tolerant walk still returns what it could see.
+    const tolerant = await storage.list('models');
+    expect(tolerant.some((e) => e.path === 'org/repo/locked')).toBe(true);
+  } finally {
+    await fsp.chmod(locked, 0o755);
+  }
+});
+
+test('a strict list of a missing subdirectory is empty, not an error', async () => {
+  // Gone is an answer — a vanished directory holds nothing. Only "couldn't
+  // look" is worth failing over.
+  const {storage} = await tmpStorage();
+  expect(await storage.list('models', {under: 'no/such', strict: true})).toEqual(
+    [],
+  );
+});
+
 test('list can be limited to a subdirectory, with paths still root-relative', async () => {
   const {storage, models} = await tmpStorage();
   await fsp.mkdir(nodePath.join(models, 'org/repo'), {recursive: true});

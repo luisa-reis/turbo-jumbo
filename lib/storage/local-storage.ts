@@ -57,19 +57,26 @@ export function createLocalStorage(roots: Roots): Storage {
     return full;
   }
 
+  // Vanished-mid-walk is fine in any mode: a gone entry holds nothing. Every
+  // other failure only passes in tolerant mode.
+  const tolerable = (e: unknown, strict: boolean) =>
+    !strict || (e instanceof Error && 'code' in e && e.code === 'ENOENT');
+
   async function walk(
     dir: string,
     rel: string,
     out: FileEntry[],
-    wantDtype: boolean,
+    opts: {dtype: boolean; strict: boolean},
   ): Promise<void> {
     let entries;
     try {
       entries = await fsp.readdir(dir, {withFileTypes: true});
-    } catch {
+    } catch (e) {
       // A directory that vanished mid-walk, or one we may not read: the rest
-      // of the inventory is still worth having.
-      return;
+      // of the inventory is still worth having — unless the caller asked for
+      // the whole truth or nothing.
+      if (tolerable(e, opts.strict)) return;
+      throw e;
     }
     for (const entry of entries) {
       const full = nodePath.join(dir, entry.name);
@@ -77,8 +84,9 @@ export function createLocalStorage(roots: Roots): Storage {
       let st;
       try {
         st = await fsp.lstat(full);
-      } catch {
-        continue;
+      } catch (e) {
+        if (tolerable(e, opts.strict)) continue;
+        throw e;
       }
       if (entry.isSymbolicLink()) {
         out.push({
@@ -95,7 +103,7 @@ export function createLocalStorage(roots: Roots): Storage {
       }
       if (entry.isDirectory()) {
         out.push({path, kind: 'dir', size: st.size, mtimeMs: st.mtimeMs});
-        await walk(full, path, out, wantDtype);
+        await walk(full, path, out, opts);
         continue;
       }
       const file: FileEntry = {
@@ -104,7 +112,7 @@ export function createLocalStorage(roots: Roots): Storage {
         size: st.size,
         mtimeMs: st.mtimeMs,
       };
-      if (wantDtype && SAFETENSORS.test(entry.name)) {
+      if (opts.dtype && SAFETENSORS.test(entry.name)) {
         const dtype = readSafetensorsDtype(full);
         if (dtype) file.dtype = dtype;
       }
@@ -151,7 +159,10 @@ export function createLocalStorage(roots: Roots): Storage {
         ? resolve({root, path: opts.under})
         : rootDir(root);
       const out: FileEntry[] = [];
-      await walk(dir, opts.under ?? '', out, opts.dtype ?? false);
+      await walk(dir, opts.under ?? '', out, {
+        dtype: opts.dtype ?? false,
+        strict: opts.strict ?? false,
+      });
       return out;
     },
 
