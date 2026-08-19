@@ -240,20 +240,26 @@ Done:
 - `delete-file.ts` and its three routes. This taught the local prune the
   hf-CLI `.cache`-counts-as-empty rule, and added `strict` to `list` so the
   weightless-directory cleanup can tell "no weights" from "couldn't look".
-  `deleteFileWithMeta` still takes a transitional `basePath` for the sidecar
-  helpers, which the next step removes.
+- `models/tjmeta.ts` and `models/model-sidecar.ts`, via the transitional
+  `Site` union (`lib/storage/site.ts`): every `basePath` parameter now also
+  accepts `{storage, root}`, the string arm wrapping the path in a throwaway
+  local storage. The fifty-odd existing call sites compile untouched, and
+  each caller's own migration step is just swapping the argument — as
+  `delete-file.ts` already has, dropping its transitional `basePath`.
+  `site.ts` and the string arm are deleted when the last caller migrates.
+  (`readMeta`/`writeMeta`/`updateMeta`/`metaPath` keep their full-path forms
+  for the two remaining absolute-path callers, `audit.ts` and
+  `copy-meta.ts`, which own them in their own steps.)
 
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `models/tjmeta.ts`, `models/model-sidecar.ts` — `read`/`write`; also drops
-   the transitional `basePath` from `deleteFileWithMeta`
-2. `storage/support-files.ts`, `storage/recorded-digest.ts`
-3. `audit/fix-duplicates.ts`
-4. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
-5. `models/models.ts` — the scan becomes one `list`; the cache lands here
-6. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
-7. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+1. `storage/support-files.ts`, `storage/recorded-digest.ts`
+2. `audit/fix-duplicates.ts`
+3. `lemonade/lemonade-place.ts`, `lemonade/lemonade-extra.ts` — the `link` verb
+4. `models/models.ts` — the scan becomes one `list`; the cache lands here
+5. `audit/audit.ts`, `lemonade/lemonade-sync.ts`
+6. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided

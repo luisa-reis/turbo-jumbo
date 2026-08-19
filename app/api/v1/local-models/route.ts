@@ -38,7 +38,7 @@ export async function DELETE(req: Request) {
       logger.info(`[dry-run] would delete local: ${full}`);
     } else {
       const rel = nodePath.relative(base, full);
-      await deleteFileWithMeta(storage, 'models', base, rel);
+      await deleteFileWithMeta(storage, 'models', rel);
       deleted.push(rel);
     }
   }

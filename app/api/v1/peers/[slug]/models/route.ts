@@ -82,7 +82,6 @@ export async function DELETE(
         await deleteFileWithMeta(
           storage,
           'models',
-          base,
           nodePath.relative(base, full),
         );
       }

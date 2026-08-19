@@ -17,18 +17,15 @@ import type {Root, Storage} from '@/lib/storage/storage';
  * file removes the whole directory husk instead of leaving a ghost the audit
  * and Lemonade sync would keep tripping over.
  *
- * `basePath` is transitional: the sidecar helpers still speak absolute paths,
- * and it leaves this signature when `tjmeta.ts`/`model-sidecar.ts` migrate to
- * the `Storage` interface.
  */
 export async function deleteFileWithMeta(
   storage: Storage,
   root: Root,
-  basePath: string,
   relPath: string,
 ): Promise<void> {
+  const site = {storage, root};
   // Read provenance before deleting — it names the sidecar that owns the file.
-  const meta = await readMetaResolved(basePath, relPath);
+  const meta = await readMetaResolved(site, relPath);
 
   await storage.remove([{root, path: relPath}]);
 
@@ -40,7 +37,7 @@ export async function deleteFileWithMeta(
     pathImpliedRepo(relPath)?.repoId ||
     '';
   const loc = repoId ? modelDirForRepo(relPath, repoId) : null;
-  if (loc) await removeFileMeta(basePath, loc.dir, loc.key);
+  if (loc) await removeFileMeta(site, loc.dir, loc.key);
 
   // The legacy per-file sidecar goes last, carrying the prune: by now the
   // model sidecar may have deleted itself, so the prune sees the directory's

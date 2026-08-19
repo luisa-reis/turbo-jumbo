@@ -53,7 +53,7 @@ test('deletes the file and drops its sidecar entry, keeping the rest', async () 
   await tjModel(base, 'org/repo', {'a.gguf': 'AAA', 'b.gguf': 'BBB'});
   await write(base, 'org/repo/a.gguf.tjmeta.json', '{}'); // legacy sidecar
 
-  await deleteFileWithMeta(storage, 'models', base, 'org/repo/a.gguf');
+  await deleteFileWithMeta(storage, 'models', 'org/repo/a.gguf');
 
   expect(existsSync(path.join(base, 'org/repo/a.gguf'))).toBe(false);
   expect(existsSync(path.join(base, 'org/repo/a.gguf.tjmeta.json'))).toBe(
@@ -76,7 +76,7 @@ test('deleting the last file removes sidecars, .cache, and emptied dirs', async 
     'META',
   );
 
-  await deleteFileWithMeta(storage, 'models', base, 'org/solo/only.gguf');
+  await deleteFileWithMeta(storage, 'models', 'org/solo/only.gguf');
 
   // The whole husk is gone: model dir and the now-empty org dir.
   expect(existsSync(path.join(base, 'org/solo'))).toBe(false);
@@ -91,7 +91,7 @@ test('keeps the org dir when a sibling model remains', async () => {
   await tjModel(base, 'org/gone', {'x.gguf': 'X'});
   await tjModel(base, 'org/stays', {'y.gguf': 'Y'});
 
-  await deleteFileWithMeta(storage, 'models', base, 'org/gone/x.gguf');
+  await deleteFileWithMeta(storage, 'models', 'org/gone/x.gguf');
 
   expect(existsSync(path.join(base, 'org/gone'))).toBe(false);
   expect(existsSync(path.join(base, 'org/stays/y.gguf'))).toBe(true);
@@ -105,12 +105,7 @@ test('a nested file prunes emptied subdirectories but not shared ones', async ()
     'top.gguf': 'TOP',
   });
 
-  await deleteFileWithMeta(
-    storage,
-    'models',
-    base,
-    'org/nested/sub/dir/model.bin',
-  );
+  await deleteFileWithMeta(storage, 'models', 'org/nested/sub/dir/model.bin');
 
   // sub/dir and sub are emptied and pruned; the model dir keeps top.gguf.
   expect(existsSync(path.join(base, 'org/nested/sub'))).toBe(false);
@@ -124,7 +119,7 @@ test('a file without any sidecar still deletes and prunes', async () => {
   const {base, storage} = await mkbase();
   await write(base, 'org/bare/loose.gguf', 'DATA');
 
-  await deleteFileWithMeta(storage, 'models', base, 'org/bare/loose.gguf');
+  await deleteFileWithMeta(storage, 'models', 'org/bare/loose.gguf');
 
   expect(existsSync(path.join(base, 'org/bare'))).toBe(false);
   expect(existsSync(path.join(base, 'org'))).toBe(false);
@@ -136,7 +131,7 @@ test('a top-level file outside any model dir just gets deleted', async () => {
   const {base, storage} = await mkbase();
   await write(base, 'stray.gguf', 'DATA');
 
-  await deleteFileWithMeta(storage, 'models', base, 'stray.gguf');
+  await deleteFileWithMeta(storage, 'models', 'stray.gguf');
 
   expect(existsSync(path.join(base, 'stray.gguf'))).toBe(false);
   expect(existsSync(base)).toBe(true);
@@ -156,13 +151,11 @@ test('cleanup removes a model dir left with only support files', async () => {
   await deleteFileWithMeta(
     storage,
     'models',
-    base,
     'Qwen/wr/model-00001-of-00002.safetensors',
   );
   await deleteFileWithMeta(
     storage,
     'models',
-    base,
     'Qwen/wr/model-00002-of-00002.safetensors',
   );
   await cleanupWeightlessModelDirs(storage, 'models', [
@@ -185,7 +178,7 @@ test('cleanup leaves the dir alone while any weight file remains', async () => {
     'notes.txt': 'n',
   });
 
-  await deleteFileWithMeta(storage, 'models', base, 'org/multi/a-Q4.gguf');
+  await deleteFileWithMeta(storage, 'models', 'org/multi/a-Q4.gguf');
   await cleanupWeightlessModelDirs(storage, 'models', ['org/multi/a-Q4.gguf']);
 
   expect(existsSync(path.join(base, 'org/multi/b-Q8.gguf'))).toBe(true);

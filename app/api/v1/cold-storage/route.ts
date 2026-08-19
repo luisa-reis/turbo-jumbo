@@ -33,7 +33,7 @@ export async function DELETE(req: Request) {
       logger.info(`[dry-run] would delete cold-storage: ${full}`);
     } else {
       const rel = nodePath.relative(base, full);
-      await deleteFileWithMeta(storage, 'cold', base, rel);
+      await deleteFileWithMeta(storage, 'cold', rel);
       deleted.push(rel);
     }
   }
