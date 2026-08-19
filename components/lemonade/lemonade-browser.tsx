@@ -24,12 +24,14 @@ import type {Model} from '@/lib/models/models';
 import {
   catalogSection,
   collectionDownloadStatus,
+  componentCachePresence,
+  componentCheckpointBreakdown,
   componentDownloadStatus,
-  componentInLemonadeCache,
   lemonadeDownloadStatus,
   modelInLemonadeCache,
   repoDownloadStatus,
   type CatalogSection,
+  type CheckpointStatusRow,
   type InventoryLocation,
   type LemonadeComponent,
   type LemonadeDownloadInfo,
@@ -55,6 +57,7 @@ import {
   componentSecondary,
   modelEndContent,
 } from '@/components/lemonade/catalog-rows';
+import {CheckpointBreakdown} from '@/components/lemonade/checkpoint-breakdown';
 import {ModelLabelIcon} from '@/components/lemonade/model-label-icon';
 import {useLemonadeDownload} from '@/components/lemonade/use-lemonade-download';
 import {useFlmDownload} from '@/components/lemonade/use-flm-download';
@@ -113,6 +116,9 @@ export function LemonadeBrowser({
   incompleteRepos,
   canDownload,
   onDownloaded,
+  onCopyFromCold,
+  copyingLabel,
+  copyError,
 }: {
   hfTokenSet: boolean;
   // Where the download runs (endpoint + display path), and the peer name of the
@@ -131,6 +137,12 @@ export function LemonadeBrowser({
   // Called after a download session ends so the parent can refresh local
   // models; the status markers then recompute from the new inventory.
   onDownloaded?: () => void;
+  // Copy a missing checkpoint's files out of cold storage, offered in the
+  // per-checkpoint breakdown. Absent on tabs whose cold storage isn't this
+  // machine's, which hides the button.
+  onCopyFromCold?: (row: CheckpointStatusRow) => void;
+  copyingLabel?: string | null;
+  copyError?: string | null;
 }) {
   const [models, setModels] = useState<LemonadeModel[] | null>(null);
   const [extraModels, setExtraModels] = useState<LemonadeComponent[]>([]);
@@ -388,13 +400,29 @@ export function LemonadeBrowser({
     }
     return map;
   }, [extraModels, inventoryLocations]);
-  const extraInCacheByName = useMemo(() => {
-    const map = new Map<string, boolean>();
+  const extraCacheByName = useMemo(() => {
+    const map = new Map<string, 'none' | 'partial' | 'complete'>();
     for (const c of extraModels) {
-      map.set(c.name, componentInLemonadeCache(c, lemonadeCacheModels));
+      map.set(c.name, componentCachePresence(c, lemonadeCacheModels));
     }
     return map;
   }, [extraModels, lemonadeCacheModels]);
+
+  // Hovercard detail for a component row: each checkpoint judged across the
+  // tiers, with the copy-from-cold remedy when one sits only in the archive.
+  // Built per rendered row — only expanded sections pay for it.
+  const breakdownFor = (comp: LemonadeComponent) => (
+    <CheckpointBreakdown
+      rows={componentCheckpointBreakdown(
+        comp,
+        inventoryLocations,
+        lemonadeCacheModels,
+      )}
+      copyingLabel={copyingLabel}
+      copyError={copyError}
+      onCopyFromCold={onCopyFromCold}
+    />
+  );
 
   // The flat catalog, grouped into ordered modality sections (GGUF models and
   // standalone non-llamacpp models together).
@@ -528,18 +556,16 @@ export function LemonadeBrowser({
                 // Presence in the Lemonade cache per member, driving the cache
                 // marker next to the download-status marker. The header token
                 // dims when the collection is only partially cached.
-                const componentInCache = new Map(
+                const componentCache = new Map(
                   c.components.map((comp) => [
                     comp.name,
-                    componentInLemonadeCache(comp, lemonadeCacheModels),
+                    componentCachePresence(comp, lemonadeCacheModels),
                   ]),
                 );
-                const cachePresentCount = [...componentInCache.values()].filter(
-                  Boolean,
-                ).length;
-                const collInCache = cachePresentCount > 0;
+                const cacheStates = [...componentCache.values()];
+                const collInCache = cacheStates.some((s) => s !== 'none');
                 const cachePartial =
-                  collInCache && cachePresentCount < c.components.length;
+                  collInCache && cacheStates.some((s) => s !== 'complete');
                 // Members with a present-but-incomplete local copy; the header
                 // flags if any.
                 const componentIncomplete = new Map(
@@ -627,9 +653,10 @@ export function LemonadeBrowser({
                             endContent={componentEndContent(
                               comp,
                               componentDownloadStatus(comp, inventoryLocations),
-                              componentInCache.get(comp.name) ?? false,
+                              componentCache.get(comp.name) ?? 'none',
                               componentIncomplete.get(comp.name) ?? false,
                               !suggestedOnly,
+                              breakdownFor(comp),
                             )}
                           />
                         );
@@ -683,12 +710,13 @@ export function LemonadeBrowser({
                             status: 'none',
                             locations: [],
                           },
-                          extraInCacheByName.get(row.component.name) ?? false,
+                          extraCacheByName.get(row.component.name) ?? 'none',
                           checkpointsIncomplete(
                             row.component.checkpoints,
                             incompleteRepos,
                           ),
                           !suggestedOnly,
+                          breakdownFor(row.component),
                         )}
                       />
                     ),

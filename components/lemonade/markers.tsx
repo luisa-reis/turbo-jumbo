@@ -1,5 +1,6 @@
 'use client';
 
+import type {ReactNode} from 'react';
 import {ListItem} from '@astryxdesign/core/List';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
@@ -47,10 +48,21 @@ export function SectionHeader({
 }
 
 // The download-status marker shared by model rows and collection children.
-export function StatusMarker({info}: {info: LemonadeDownloadInfo | undefined}) {
+// `content` swaps the plain location tooltip for richer hovercard detail —
+// a multi-checkpoint entry's per-checkpoint breakdown.
+export function StatusMarker({
+  info,
+  content,
+}: {
+  info: LemonadeDownloadInfo | undefined;
+  content?: ReactNode;
+}) {
   if (!info || info.status === 'none') return null;
   return (
-    <HoverCard placement="above" content={lemonadeStatusTooltip(info)}>
+    <HoverCard
+      placement="above"
+      content={content ?? lemonadeStatusTooltip(info)}
+    >
       <Badge
         label={info.status === 'complete' ? 'downloaded' : 'partial'}
         variant={info.status === 'complete' ? 'blue' : 'orange'}

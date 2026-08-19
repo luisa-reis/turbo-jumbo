@@ -1,5 +1,6 @@
 'use client';
 
+import type {ReactNode} from 'react';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {Badge} from '@astryxdesign/core/Badge';
@@ -55,18 +56,25 @@ export function componentSecondary(component: LemonadeComponent): string {
 
 // A component's end-of-row content: a download-status marker (when the weight
 // scan can track it), suggested badge, its capability icons — or its modality,
-// for label-less collection members — and its size.
+// for label-less collection members — and its size. `statusDetail` is the
+// per-checkpoint breakdown shown in the status marker's hovercard, and the
+// cache marker dims when Lemonade's cache holds only part of the entry —
+// which, for a multi-checkpoint model, means Lemonade doesn't list it at all.
 export function componentEndContent(
   component: LemonadeComponent,
   info: LemonadeDownloadInfo,
-  inCache: boolean,
+  cachePresence: 'none' | 'partial' | 'complete',
   incomplete: boolean,
   showSuggestedToken: boolean,
+  statusDetail?: ReactNode,
 ) {
   return (
     <HStack gap={1} vAlign="center">
-      <StatusMarker info={info} />
-      <LemonadeCacheMarker present={inCache} />
+      <StatusMarker info={info} content={statusDetail} />
+      <LemonadeCacheMarker
+        present={cachePresence !== 'none'}
+        muted={cachePresence === 'partial'}
+      />
       <IncompleteMarker incomplete={incomplete} />
       {showSuggestedToken && component.suggested && (
         <Badge label="suggested" variant="green" />
