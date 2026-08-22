@@ -30,6 +30,21 @@ single `Selection` value there. Astryx's single-choice widget is `RadioList`
 (`bunx astryx component RadioList`); start from that, or its per-option input
 if the rows must stay `List`/`ListItem`.
 
+## An affordance to update `hf` by running `hf update`
+
+Hugging Face downloads shell out to the `hf` CLI, and its version is neither
+shown nor updatable from the app — today it means a shell on each machine.
+Add a control that runs `hf update` (the CLI picks the right method for how
+it was installed — the curl installer in the `Dockerfile`, pip, uv, …) and
+show the current version next to it (`hf version`, plain `version=1.28.0`
+output), so the header or a settings spot says what every peer is running
+and whether it moved. It has to run on the peer that does the downloading,
+so it wants a route under `app/api/v1/` proxied per peer like the rest of
+`peers/[name]/*`, streaming the command's output the way
+`lib/hf/hf-download-stream.ts` spawns `hf`. In Docker the update lands in the
+running container only — a rebuild restores the image's version — which the
+control should say rather than leave to be discovered.
+
 ## Lemonade catalog spec-hash warning
 
 The catalog parser assumes the shape of `server_models.json`, which upstream
