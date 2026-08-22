@@ -18,7 +18,11 @@ import type {
   TjModel,
   TjModelFile,
 } from '@/lib/models/model-sidecar';
-import {ggmlModelVariant, isWeightFile} from '@/lib/models/weight-files';
+import {
+  ggmlModelVariant,
+  isGenericWeightName,
+  isWeightFile,
+} from '@/lib/models/weight-files';
 import {SPLIT_RE, extractModelName, extractQuant} from '@/lib/models/quant';
 
 // Re-exported so existing `@/lib/models` importers keep working.
@@ -415,6 +419,11 @@ export function duplicateBasenames(models: Model[]): Map<string, string[]> {
     // across vision models; same-named copies in different repos aren't
     // duplicates of each other, so never flag them.
     if (isMmprojFilename(name)) return;
+    // Likewise the generic weight names — `model.safetensors`, and every
+    // FastFlowLM model's `model.q4nx`: the directory identifies the file, the
+    // name never does, so two models each holding one aren't duplicates even
+    // when a missing sidecar hash leaves the content question open.
+    if (isGenericWeightName(name)) return;
     const entries = byName.get(name);
     if (entries) entries.push({path: relPath, sha});
     else byName.set(name, [{path: relPath, sha}]);

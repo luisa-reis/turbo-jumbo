@@ -1,6 +1,7 @@
 import type {Model} from '@/lib/models/models';
 import type {ModelRow} from '@/lib/models/model-row';
 import {isMmprojFilename} from '@/lib/models/model-name';
+import {isGenericWeightName} from '@/lib/models/weight-files';
 
 // A file's basename is the identity hosts usually agree on: model names are
 // derived per host (the sidecar's org/repo when one exists, otherwise the
@@ -9,21 +10,16 @@ import {isMmprojFilename} from '@/lib/models/model-name';
 // sidecar and relocated it on one side only.
 export const fileBasename = (p: string) => p.split('/').pop() ?? p;
 
-// The standard generic weight filenames HuggingFace repos share. These don't
-// identify a model on their own, so two different repos both contain e.g.
-// `model.safetensors` — joining on the basename alone would conflate them.
-const GENERIC_WEIGHT_RE =
-  /^(model|pytorch_model|tf_model|flax_model|consolidated|diffusion_pytorch_model|adapter_model)(-\d{5}-of-\d{5})?\.(safetensors|bin)$/i;
-
 /**
  * The cross-host join key for a file. A specific basename (GGUF, dtype-tagged)
  * identifies its model, so it joins on its own — preserving matches when hosts
- * name the model differently. A generic weight basename collides between repos,
- * so it's qualified by the (now repo-derived) model name; a different repo's
+ * name the model differently. A generic weight basename (`model.safetensors`,
+ * FLM's `model.q4nx` — see `isGenericWeightName`) collides between repos, so
+ * it's qualified by the (now repo-derived) model name; a different repo's
  * same-named file then has a different key and won't be conflated.
  */
 export function fileJoinKey(modelName: string, basename: string): string {
-  return GENERIC_WEIGHT_RE.test(basename) || isMmprojFilename(basename)
+  return isGenericWeightName(basename) || isMmprojFilename(basename)
     ? `${modelName} ${basename}`
     : basename;
 }

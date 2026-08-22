@@ -468,3 +468,15 @@ test('allFilesPresent matches a specific gguf across differently-named hosts', (
   const selected = [{model: 'Jan-nano', filename: 'Jan-nano-Q6_K.gguf'}];
   expect(allFilesPresent(selected, dest)).toBe(true);
 });
+
+test('fileJoinKey qualifies the generic FLM weight names by model', () => {
+  // Every FastFlowLM NPU model's weights are `model.q4nx`; a vision tower's
+  // are `vision_weight.q4nx`. Like `model.safetensors`, the name alone would
+  // conflate different repos.
+  expect(fileJoinKey('FastFlowLM/A-NPU2', 'model.q4nx')).toBe(
+    'FastFlowLM/A-NPU2 model.q4nx',
+  );
+  expect(fileJoinKey('FastFlowLM/A-NPU2', 'vision_weight.q4nx')).toBe(
+    'FastFlowLM/A-NPU2 vision_weight.q4nx',
+  );
+});

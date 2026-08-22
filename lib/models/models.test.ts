@@ -864,3 +864,36 @@ test('a split model takes its representative and quant from the lowest shard', a
 
   await fsp.rm(root, {recursive: true, force: true});
 });
+
+test('duplicateBasenames does not flag the generic model.q4nx every FLM model carries', async () => {
+  // FastFlowLM names every NPU model's weights `model.q4nx` (and a vision
+  // tower's `vision_weight.q4nx`) — the FLM counterpart of `model.safetensors`.
+  // The name identifies nothing; only the directory does. One of the two
+  // here has no sidecar hash, which is what made the old rule pair them: an
+  // unknown hash "can't disprove" a match.
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-dup-'));
+  await writeFile(base, 'FastFlowLM/Embedding-Gemma-300M-NPU2/model.q4nx');
+  await writeFile(base, 'FastFlowLM/Qwen3.6-35B-A3B-NPU2/model.q4nx');
+  await writeFile(base, 'FastFlowLM/Qwen3.6-35B-A3B-NPU2/vision_weight.q4nx');
+  const sidecar: TjModel = {
+    modelUrl: 'https://huggingface.co/FastFlowLM/Qwen3.6-35B-A3B-NPU2',
+    repoId: 'FastFlowLM/Qwen3.6-35B-A3B-NPU2',
+    files: [
+      {
+        path: 'model.q4nx',
+        originUrl:
+          'https://huggingface.co/FastFlowLM/Qwen3.6-35B-A3B-NPU2/blob/main/model.q4nx',
+        sourceSize: 100,
+        computedSize: 100,
+        sourceSha256: 'sha-qwen',
+        computedSha256: 'sha-qwen',
+      },
+    ],
+  };
+  await fsp.writeFile(
+    path.join(base, 'FastFlowLM/Qwen3.6-35B-A3B-NPU2', MODEL_SIDECAR_NAME),
+    JSON.stringify(sidecar),
+  );
+  expect(duplicateBasenames(scanModels(base)).size).toBe(0);
+  await fsp.rm(base, {recursive: true, force: true});
+});

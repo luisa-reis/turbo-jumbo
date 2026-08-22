@@ -308,6 +308,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **An FLM model is no longer reported as a duplicate of another FLM model.**
+  FastFlowLM names every NPU model's weights `model.q4nx`, so with two FLM
+  models on one machine the audit called one a "duplicate of" the other —
+  by basename, which is how duplicate copies are found, and which a missing
+  sidecar hash couldn't rule out. `model.q4nx` and `vision_weight.q4nx` now
+  count as generic weight names like `model.safetensors`: identified by their
+  directory, never flagged against each other, and matched across peers by
+  model rather than by name.
 - **FLM (NPU) models work again on Lemonade servers that require an API
   key.** A Lemonade server started with `LEMONADE_API_KEY` set answers 401 to
   every request, so the FLM section of the Lemonade browser only reported
