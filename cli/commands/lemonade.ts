@@ -8,6 +8,7 @@ import type {CliInvocation} from '@/lib/cli/args';
 import {confirmDestructive, type ConfirmIo} from '@/lib/cli/confirm';
 import type {Placement} from '@/lib/lemonade/lemonade-place';
 import type {ExtraChange} from '@/lib/lemonade/lemonade-extra';
+import type {FlmStoreChange} from '@/lib/lemonade/lemonade-flm-store';
 import {renderTable, type Column} from '@/lib/cli/format';
 import {
   matchEntries,
@@ -527,10 +528,16 @@ async function lemonadeSync(
   const base = await syncPath(client, inv);
 
   if (inv.dryRun) {
-    const {preview, placement, extra} = await client.json<{
+    const {
+      preview,
+      placement,
+      extra,
+      flm = [],
+    } = await client.json<{
       preview: LemonadeSyncPreview[];
       placement: Placement[];
       extra: ExtraChange[];
+      flm?: FlmStoreChange[];
     }>(base);
     const columns: Column<LemonadeSyncPreview>[] = [
       {header: 'REPO', value: (p) => p.repoId},
@@ -556,9 +563,12 @@ async function lemonadeSync(
       {move: 0, dedup: 0, link: 0, stale: 0, empty: 0},
     );
     const nothing =
-      preview.length === 0 && placement.length === 0 && extra.length === 0;
+      preview.length === 0 &&
+      placement.length === 0 &&
+      extra.length === 0 &&
+      flm.length === 0;
     return {
-      json: {dryRun: true, preview, placement, extra, totals},
+      json: {dryRun: true, preview, placement, extra, flm, totals},
       table: nothing
         ? 'Nothing to sync.'
         : [
@@ -566,6 +576,7 @@ async function lemonadeSync(
               ? [renderPlacement(placement, color), '']
               : []),
             ...(extra.length > 0 ? [renderExtra(extra, color), ''] : []),
+            ...(flm.length > 0 ? [renderFlm(flm, color), ''] : []),
             ...(preview.length > 0
               ? [
                   renderTable(columns, preview, color),
@@ -617,20 +628,35 @@ async function lemonadeSync(
       `Sync failed: ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`,
     );
   }
-  const {results, placement, extra} = (await res.json()) as {
+  const {results, placement, extra, flm, flmRefresh} = (await res.json()) as {
     results: Array<{repoId: string; rev: string; files: unknown[]}>;
     placement: Placement[];
     extra: ExtraChange[];
+    flm?: FlmStoreChange[];
+    flmRefresh?: {ok: boolean; message?: string};
   };
   const fileCount = results.reduce((s, r) => s + r.files.length, 0);
   const sorted = (placement ?? []).filter((p) => p.status === 'moved').length;
   const offered = (extra ?? []).filter((e) => e.toLink > 0).length;
+  const offeredFlm = (flm ?? []).filter((f) => f.status === 'link').length;
   return {
-    json: {results, placement, extra},
+    json: {
+      results,
+      placement,
+      extra,
+      flm: flm ?? [],
+      ...(flmRefresh ? {flmRefresh} : {}),
+    },
     table:
       `synced ${results.length} model(s) · ${fileCount} file(s)` +
       (sorted > 0 ? ` · sorted ${sorted} into builtin/extra` : '') +
-      (offered > 0 ? ` · offered ${offered} model(s) in extra` : ''),
+      (offered > 0 ? ` · offered ${offered} model(s) in extra` : '') +
+      (offeredFlm > 0
+        ? ` · linked ${offeredFlm} model(s) into flm's store`
+        : '') +
+      (flmRefresh && !flmRefresh.ok
+        ? `\nLemonade was not told about the new links (${flmRefresh.message ?? 'unknown reason'}); it will list them after its next restart.`
+        : ''),
     lines: results.map((r) => r.repoId),
   };
 }
@@ -649,6 +675,30 @@ function renderExtra(extra: ExtraChange[], color: boolean): string {
     '',
     "Offered to Lemonade's extra-models directory as symlinks — GGUF only, " +
       'since that is all it loads from there.',
+  ].join('\n');
+}
+
+/** The FLM models being offered to flm's store, named as flm resolves them —
+ *  one directory link each. An incomplete one is shown for what it lacks. */
+function renderFlm(flm: FlmStoreChange[], color: boolean): string {
+  const columns: Column<FlmStoreChange>[] = [
+    {header: 'MODEL', value: (f) => f.folder},
+    {header: 'REPO', value: (f) => f.repoId},
+    {
+      header: 'ACTION',
+      value: (f) =>
+        f.status === 'link'
+          ? 'link'
+          : f.status === 'remove'
+            ? 'remove stale link'
+            : `incomplete: missing ${(f.missing ?? []).join(', ')}`,
+    },
+  ];
+  return [
+    renderTable(columns, flm, color),
+    '',
+    "Offered to flm's store (<lemonade>/flm/models) as one directory link per " +
+      'model, which is enough for Lemonade to count it as downloaded.',
   ].join('\n');
 }
 

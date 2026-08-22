@@ -11,6 +11,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Consolidate with Lemonade now offers FLM (NPU) models to flm.** An FLM
+  model downloaded into Turbo Jumbo storage was invisible to Lemonade's flm
+  backend, which only reads its own store — so the model never showed as
+  downloaded, and the Consolidate preview said nothing about it. Sync now
+  links each whole FLM model this machine holds locally into that store
+  (`<lemonade>/flm/models`, where `FLM_MODEL_PATH` points — see the docs) as
+  one directory link per model, shown as its own rows in the preview along
+  with stale links to clear and models held but missing a file the FastFlowLM
+  registry names. Lemonade is then told to re-read the store, so the models
+  flip to downloaded without a restart. `tj lemonade sync` prints the same.
+  Directories flm pulled itself are never touched.
+
 - **The Lemonade catalog now explains a partially-downloaded model file by
   file.** Multi-checkpoint entries — an image model needing its weights, a
   text encoder and a VAE from three different repos — used to show one

@@ -50,6 +50,14 @@ interface ExtraChange {
   toLink: number;
   toRemove: number;
 }
+/** An FLM model offered to flm's store as one directory link, or held but
+ *  not whole enough to offer. `folder` is the name flm resolves. */
+interface FlmStoreChange {
+  repoId: string;
+  folder: string;
+  status: 'link' | 'remove' | 'incomplete';
+  missing?: string[];
+}
 /** A cache entry moving between builtin/ and extra/. Not a file change — the
  *  directory is renamed — so it is counted and shown apart from the rest. */
 interface Placement {
@@ -110,6 +118,9 @@ export function LemonadeSyncModal({
   const [results, setResults] = useState<ModelResult[]>([]);
   const [placement, setPlacement] = useState<Placement[]>([]);
   const [extra, setExtra] = useState<ExtraChange[]>([]);
+  const [flm, setFlm] = useState<FlmStoreChange[]>([]);
+  // Why Lemonade may still show a just-linked FLM model as not downloaded.
+  const [flmNotice, setFlmNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -122,11 +133,13 @@ export function LemonadeSyncModal({
           preview?: Preview[];
           placement?: Placement[];
           extra?: ExtraChange[];
+          flm?: FlmStoreChange[];
         };
         if (!cancelled) {
           setPreview(data.preview ?? []);
           setPlacement(data.placement ?? []);
           setExtra(data.extra ?? []);
+          setFlm(data.flm ?? []);
           setPhase('preview');
         }
       } catch (e) {
@@ -150,10 +163,18 @@ export function LemonadeSyncModal({
         results?: ModelResult[];
         placement?: Placement[];
         extra?: ExtraChange[];
+        flm?: FlmStoreChange[];
+        flmRefresh?: {ok: boolean; message?: string};
       };
       setResults(data.results ?? []);
       setPlacement(data.placement ?? []);
       setExtra(data.extra ?? []);
+      setFlm(data.flm ?? []);
+      setFlmNotice(
+        data.flmRefresh && !data.flmRefresh.ok
+          ? `Lemonade was not told about the new links (${data.flmRefresh.message ?? 'unknown reason'}); it will list them after its next restart.`
+          : null,
+      );
       setPhase('done');
       onSynced();
     } catch (e) {
@@ -170,7 +191,10 @@ export function LemonadeSyncModal({
   );
   // Sorting the cache is work too: a run that only moves directories still has
   // something to do, and the button must not read as if it were a no-op.
-  const pending = actionable.length + placement.length + extra.length;
+  // An incomplete FLM model is shown so its gap is visible, but it is not work.
+  const flmActionable = flm.filter((f) => f.status !== 'incomplete');
+  const pending =
+    actionable.length + placement.length + extra.length + flmActionable.length;
   const fileCountLabel = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
   // Group the preview by action so each model is listed as its own row, the same
   // way across imports, deduplications, and links — never folded into a count.
@@ -225,6 +249,7 @@ export function LemonadeSyncModal({
     }, {});
   const sorted = placement.filter((p) => p.status === 'moved').length;
   const offered = extra.filter((e) => e.toLink > 0).length;
+  const offeredFlm = flm.filter((f) => f.status === 'link').length;
   const errors = results
     .flatMap((r) => r.files.map((f) => ({repoId: r.repoId, ...f})))
     .filter((f) => f.status === 'error');
@@ -262,6 +287,7 @@ export function LemonadeSyncModal({
       ],
       [sorted, (n: number) => `${n} sorted into builtin/extra`, 'success'],
       [offered, (n: number) => `${n} offered to Lemonade`, 'success'],
+      [offeredFlm, (n: number) => `${n} offered to flm`, 'success'],
       [counts.skipped ?? 0, (n: number) => `${n} skipped`, 'neutral'],
       [errors.length, (n: number) => `${n} failed`, 'error'],
     ] as const
@@ -364,6 +390,36 @@ export function LemonadeSyncModal({
                         </List>
                       </VStack>
                     )}
+                    {flm.length > 0 && (
+                      <VStack gap={1}>
+                        <Text type="supporting">
+                          Offering to flm (NPU models)
+                        </Text>
+                        <Text type="supporting">
+                          Linked into flm&apos;s store under the name shown, one
+                          link per model directory. A model missing files the
+                          FastFlowLM registry names is listed but not linked.
+                        </Text>
+                        {flmNotice && (
+                          <Text type="supporting">{flmNotice}</Text>
+                        )}
+                        <List hasDividers>
+                          {flm.map((f) => (
+                            <ListItem
+                              key={`${f.status}:${f.folder}`}
+                              label={f.folder}
+                              description={
+                                f.status === 'link'
+                                  ? `${f.repoId} · link`
+                                  : f.status === 'remove'
+                                    ? `${f.repoId} · removing stale link`
+                                    : `${f.repoId} · incomplete: missing ${(f.missing ?? []).join(', ')}`
+                              }
+                            />
+                          ))}
+                        </List>
+                      </VStack>
+                    )}
                     {sections.map((s) => (
                       <VStack key={s.title} gap={1}>
                         <Text type="supporting">{s.title}</Text>
@@ -443,6 +499,9 @@ export function LemonadeSyncModal({
                               ? `Sort ${placement.length}`
                               : null,
                             extra.length > 0 ? `Offer ${extra.length}` : null,
+                            flmActionable.length > 0
+                              ? `Offer ${flmActionable.length} to flm`
+                              : null,
                           ]
                             .filter(Boolean)
                             .join(' · ') || 'Sync'

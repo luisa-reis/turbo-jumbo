@@ -538,13 +538,22 @@ Sync sorts cache entries onto the right side on each run, so a model the
 catalog picks up later moves across by itself, and the dry-run shows those
 moves before any happen.
 
-`flm` is neither a cache nor scanned by Turbo Jumbo: it is where the Lemonade
-server's `flm` binary keeps the NPU models it pulls itself, which by default
-would be `~/.config/flm/models` on that server — off the shared disk and out of
-sight. Point it here by setting `FLM_MODEL_PATH=<lemonade>/flm` in the Lemonade
+`flm` is not a cache either: it is where the Lemonade server's `flm` binary
+keeps the NPU models it pulls itself, which by default would be
+`~/.config/flm/models` on that server — off the shared disk and out of sight.
+Point it here by setting `FLM_MODEL_PATH=<lemonade>/flm` in the Lemonade
 server's environment (both `flm` and Lemonade append `/models` to it, so the
-weights land in `<lemonade>/flm/models/<repo>/`). Sync leaves the directory
-alone.
+weights land in `<lemonade>/flm/models/<repo>/`). With that in place, sync
+offers flm the FLM models Turbo Jumbo holds locally — the ones downloaded from
+the Hugging Face repo FastFlowLM's registry pins for a tag — as one symlink
+per model directory under the name flm resolves, which is all it takes for
+Lemonade to count the model as downloaded. Lemonade only rebuilds its model
+list on its own actions, so after linking, sync asks it for a no-op pull of one
+linked model — flm finds the files in place and fetches nothing — which makes
+it re-read the store; without a `lemonade_url` for this peer, the links show
+up after Lemonade's next restart instead. A model missing a file the registry
+names is listed as incomplete rather than linked; links for models no longer
+held are cleared away; directories flm pulled itself are never touched.
 
 `extra` is not a cache. Lemonade scans it recursively for `.gguf` files and
 names each model after the directory holding them, so sync gives every model a
