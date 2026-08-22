@@ -25,11 +25,19 @@ export interface CopyDestinations {
 interface CopyModalProps {
   files: FileInfo[];
   from: string; // "cold-storage" | peer address
+  // Whether this host has a cold-storage archive to offer as a destination.
+  hasColdStorage: boolean;
   onCopy: (destinations: CopyDestinations) => void;
   onCancel: () => void;
 }
 
-export function CopyModal({files, from, onCopy, onCancel}: CopyModalProps) {
+export function CopyModal({
+  files,
+  from,
+  hasColdStorage,
+  onCopy,
+  onCancel,
+}: CopyModalProps) {
   const [peers, setPeers] = useState<Peer[] | null>(null);
   const [coldModels, setColdModels] = useState<Model[] | null>(null);
   const [peerModelsMap, setPeerModelsMap] = useState<Map<string, Model[]>>(
@@ -43,10 +51,11 @@ export function CopyModal({files, from, onCopy, onCancel}: CopyModalProps) {
     fetch('/api/v1/peers')
       .then((r) => r.json())
       .then((data: {peers: Peer[]; interval: number}) => setPeers(data.peers));
-    fetch('/api/v1/cold-storage')
-      .then((r) => r.json())
-      .then((data: Model[]) => setColdModels(data));
-  }, []);
+    if (hasColdStorage)
+      fetch('/api/v1/cold-storage')
+        .then((r) => r.json())
+        .then((data: Model[]) => setColdModels(data));
+  }, [hasColdStorage]);
 
   useEffect(() => {
     if (!peers) return;
@@ -62,8 +71,9 @@ export function CopyModal({files, from, onCopy, onCancel}: CopyModalProps) {
     });
   }, [peers]);
 
-  const showColdStorage = from !== 'cold-storage';
-  // The local peer is just another destination now; only exclude the source.
+  const showColdStorage = hasColdStorage && from !== 'cold-storage';
+  // The local peer is just another destination now (the server already leaves
+  // it out when this host holds no models); only exclude the source.
   const availablePeers = (peers ?? []).filter((p) => p.address !== from);
   const coldAlreadyPresent =
     coldModels !== null && allFilesPresent(files, coldModels);

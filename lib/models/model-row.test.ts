@@ -442,3 +442,28 @@ test('a peer-only file of a shared model joins the existing row, not a new one',
   const labels = augmented[0].quants.map((q) => q.label).sort();
   expect(labels).toEqual(['Q4_K_M', 'mmproj-model-f16.gguf']);
 });
+
+test('on All, a host with no model storage sizes a model by its known copies', () => {
+  // A viewer holds nothing locally, so "what's on local storage" would read
+  // 0 B for every model; it shows the largest known copy instead.
+  const peerOnly = model({
+    name: 'org/repo',
+    quants: [quant({label: 'Q8', size: 250, localSize: 0})],
+  });
+  const withPeer = {
+    ...noPeers,
+    peerQuantSizes: new Map([
+      ['org/repo::Q8.gguf', [{address: '192.0.2.2', size: 250}]],
+    ]),
+    peerNameByAddr: new Map([['192.0.2.2', 'box']]),
+  };
+  const viewer = buildDisplayRows({
+    ...withPeer,
+    models: [peerOnly],
+    hostHasModels: false,
+  });
+  expect(viewer.find((r) => r.depth === 0)!.size).toBe(250);
+  // A host with model storage keeps the local-bytes meaning.
+  const host = buildDisplayRows({...withPeer, models: [peerOnly]});
+  expect(host.find((r) => r.depth === 0)!.size).toBe(0);
+});

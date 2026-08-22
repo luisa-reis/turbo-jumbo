@@ -35,7 +35,11 @@ type CopyRequest = {
   skip?: Array<{file: string; destination: string}>;
 };
 
+// A tier this host doesn't have has an empty base, and nothing resolves
+// within it — without that rule `resolve('', file)` would land the file
+// wherever the server happens to be running.
 function resolveWithin(base: string, file: string): string | null {
+  if (!base) return null;
   const full = nodePath.resolve(base, file);
   return full.startsWith(base + nodePath.sep) ? full : null;
 }
@@ -89,6 +93,8 @@ export async function POST(req: Request) {
   if (files.some((f) => f.from !== 'cold-storage' && !knownPeers.has(f.from))) {
     return new Response('Unknown source', {status: 400});
   }
+  if (toPeers.includes(localPeerAddr) && !localModelsDir)
+    return new Response('No local storage configured', {status: 400});
 
   // A model's support files (config.json, tokenizer, safetensors index) ride
   // along with its weights, resolved here rather than by the caller: the weight

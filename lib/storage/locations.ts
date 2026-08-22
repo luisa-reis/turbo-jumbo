@@ -37,8 +37,9 @@ export type RouteView = 'table' | 'lemonade' | 'hf';
 // render. Returns null for unknown/invalid paths (caller should 404).
 // A trailing ['download','lemonade'] or ['download','hf'] selects that view;
 // the segments before it (0 or 1) name the location, resolved like a normal
-// location path. Cold Storage has neither view; every other location (All and
-// any peer) has both.
+// location path. Cold Storage has neither view; every peer has both; All has
+// them only when some peer is this machine, since that is where All's
+// downloads land (see canDownloadTo).
 export function parseRoute(
   segments: string[] | undefined,
   peers: Peer[],
@@ -51,7 +52,7 @@ export function parseRoute(
     const head = segs.slice(0, -2);
     if (head.length > 1) return null;
     const location = resolveLocation(head, peers);
-    if (location === null || location === COLD_STORAGE_LOCATION) return null;
+    if (location === null || !canDownloadTo(location, peers)) return null;
     return {location, view: 'lemonade'};
   }
 
@@ -59,12 +60,21 @@ export function parseRoute(
     const head = segs.slice(0, -2);
     if (head.length > 1) return null;
     const location = resolveLocation(head, peers);
-    if (location === null || location === COLD_STORAGE_LOCATION) return null;
+    if (location === null || !canDownloadTo(location, peers)) return null;
     return {location, view: 'hf'};
   }
 
   const location = resolveLocation(segs, peers);
   return location === null ? null : {location, view: 'table'};
+}
+
+// Whether a download can be started from a tab: any peer's tab (the download
+// runs on that peer), and All when this machine holds models (All downloads
+// onto this machine). Cold Storage never; nor All on a viewer, which has
+// nowhere to put the files — the peer tabs are where its downloads start.
+export function canDownloadTo(location: string, peers: Peer[]): boolean {
+  if (location === ALL_LOCATION) return peers.some((p) => p.isLocal);
+  return peers.some((p) => p.address === location);
 }
 
 // Internal tab id -> Lemonade route. The "all" tab's Lemonade lives at the

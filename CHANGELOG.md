@@ -11,6 +11,27 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Turbo Jumbo runs on a machine with no model storage.** Leave `base_path`
+  out of this machine's peer entry — or leave the machine out of the peer
+  list altogether — and it runs as a viewer: the All tab shows every peer's
+  models, and downloads, copies and deletes run on the peers (copies go peer
+  to peer without passing through the viewer). A viewer has no tab of its
+  own, is never offered as a copy destination, and has no _Add model_ on the
+  All tab, since that downloads onto this machine — use a peer's tab.
+  `cold_storage_path` is independent and optional too: without it the Cold
+  Storage tab, column and destination checkboxes disappear, and a machine
+  with only cold storage keeps just those. Previously the docs said both
+  paths were required; a host without them showed empty local tabs and
+  failed requests.
+
+### Fixed
+
+- **A copy aimed at this machine without `base_path` is refused** with
+  "No local storage configured" instead of writing the files into the
+  server's working directory. The same guard now covers Hugging Face
+  downloads started through a peer's proxy, which used to crash rather than
+  refuse.
+
 - **FLM (NPU) models get the lemon in the models table.** A repo backing a
   FastFlowLM model — `FastFlowLM/Qwen3.6-35B-A3B-NPU2` behind
   `qwen3.6-moe-35b-a3b-FLM` — now carries the 🍋 badge like a catalog-backed

@@ -1,11 +1,11 @@
 import type {Metadata} from 'next';
 import {notFound} from 'next/navigation';
-import {config, localPeer} from '@/lib/config';
-import {parseRoute} from '@/lib/storage/locations';
+import {hasColdStorage, modelPeers, localPeer} from '@/lib/config';
+import {COLD_STORAGE_LOCATION, parseRoute} from '@/lib/storage/locations';
 import {HomeView} from '@/components/home/home-view';
 
 export function generateMetadata(): Metadata {
-  return {title: `Turbo Jumbo - ${localPeer?.name ?? 'unknown'}`};
+  return {title: localPeer ? `Turbo Jumbo - ${localPeer.name}` : 'Turbo Jumbo'};
 }
 
 // Reads the live filesystem (local + cold storage), so render per-request
@@ -18,8 +18,10 @@ export default async function Home({
   params: Promise<{location?: string[]}>;
 }) {
   const {location} = await params;
-  const route = parseRoute(location, config.peers);
+  const route = parseRoute(location, modelPeers);
   if (route === null) notFound();
+  // No archive, no Cold Storage tab — nor its page.
+  if (route.location === COLD_STORAGE_LOCATION && !hasColdStorage) notFound();
   // Both download views live on explicit /download/* routes (with @modal
   // interceptors), so this page only ever renders the table. parseRoute
   // stays for validation and for AppChrome's active-location parsing.

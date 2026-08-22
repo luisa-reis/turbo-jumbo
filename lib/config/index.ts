@@ -12,7 +12,10 @@ export interface Peer {
   // URL-safe identity (see lib/peers/peer-slug.ts). Optional; derived from the
   // name when unset.
   slug?: string;
-  // Required for the local peer; remote peers manage their own paths.
+  // Where this peer keeps models. Both optional: a local peer with no
+  // base_path holds no models (see localModelsPeer), and a host can have cold
+  // storage without fast storage or vice versa. Remote peers manage their own
+  // paths; the values are meaningful only on the peer they describe.
   base_path?: string;
   cold_storage_path?: string;
   // Subdirectory names under base_path; default to turbo-jumbo / lemonade.
@@ -48,9 +51,7 @@ const validate = new Ajv2020({allErrors: true}).compile<RawConfig>(schema);
  * Validate a parsed config object against config.schema.json. Returns null if
  * valid, or a human-readable summary of every violation otherwise. The schema
  * covers structure and types; the cross-peer slug rules it can't express are
- * checked on top of it. The "local peer requires base_path and
- * cold_storage_path" rule depends on which peer matches this machine's IP and
- * is left to the caller.
+ * checked on top of it.
  */
 export function validateRawConfig(raw: unknown): string | null {
   if (validate(raw)) return peerSlugError(raw.peers);
@@ -115,7 +116,9 @@ function addressHost(address: string): string {
 }
 
 // The local peer is the one whose address host matches one of this machine's
-// own IP addresses. undefined when none match.
+// own IP addresses. undefined when none match — which is allowed: a machine
+// that is in nobody's peer list can still run the UI against the peers it
+// lists (see localModelsPeer).
 export const localPeer: Peer | undefined = (() => {
   const localIps = new Set(
     Object.values(os.networkInterfaces())
@@ -175,3 +178,44 @@ export const lemonadeBuiltinDir: string | undefined = lemonadeDir
 export const lemonadeExtraDir: string | undefined = lemonadeDir
   ? path.join(lemonadeDir, 'extra')
   : undefined;
+
+/** Whether this host has fast model storage / a cold-storage archive. */
+export const hasModelStorage = localModelsDir !== undefined;
+export const hasColdStorage = coldStorageDir !== undefined;
+
+/**
+ * This machine as a model location: the local peer, only when it has model
+ * storage. Undefined on a viewer — a local peer without base_path, or a
+ * machine that isn't in the peer list at all — which runs the UI and drives
+ * the other peers but holds no models, so nothing may offer it as a place to
+ * put them.
+ */
+export const localModelsPeer: Peer | undefined = hasModelStorage
+  ? localPeer
+  : undefined;
+
+/**
+ * The peers to present as model locations: every configured peer in config
+ * order, each flagged with whether it is this machine — minus this machine
+ * when it is a viewer. Pure, so the rule can be tested without a config file.
+ */
+export function selectModelPeers(
+  peers: Peer[],
+  local: Peer | undefined,
+  localHasModels: boolean,
+): Peer[] {
+  return peers
+    .filter((p) => p !== local || localHasModels)
+    .map((p) => ({...p, isLocal: p === local}));
+}
+
+/**
+ * What the UI and `/api/v1/peers` hand out as the peer list. The proxies under
+ * `/api/v1/peers/[slug]` and the peer monitor keep using `config.peers`: they
+ * identify the local peer by object identity, which these copies don't share.
+ */
+export const modelPeers: Peer[] = selectModelPeers(
+  config.peers,
+  localPeer,
+  hasModelStorage,
+);

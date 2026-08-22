@@ -50,12 +50,12 @@
         "base_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Directory containing the model subdirectories. Required for the local peer."
+          "description": "Directory containing the model subdirectories. Read on the local peer only. Optional: without it this machine is a viewer that shows and manages the peers' models but holds none."
         },
         "cold_storage_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Cold-storage (archival) model directory. Required for the local peer."
+          "description": "Cold-storage (archival) model directory. Read on the local peer only. Optional: without it this machine has no Cold Storage tab and is never offered as a cold-storage destination."
         },
         "turbo_jumbo_subdir": {
           "type": "string",

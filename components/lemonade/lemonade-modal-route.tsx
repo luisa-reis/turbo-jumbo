@@ -1,11 +1,12 @@
 import {
-  config,
   localModelsDir,
   coldStorageDir,
   lemonadeDir,
   lemonadeBuiltinDir,
   lemonadeExtraDir,
-  localPeer,
+  hasColdStorage,
+  localModelsPeer,
+  modelPeers,
 } from '@/lib/config';
 import {scanModels} from '@/lib/models/models';
 import {scanLemonadeCache} from '@/lib/lemonade/lemonade-cache-scan';
@@ -27,17 +28,14 @@ export function LemonadeModalRoute({location}: {location: string}) {
           extra: lemonadeExtraDir,
         })
       : [];
-  const peerConfigs = config.peers.map((p) => ({
-    ...p,
-    isLocal: p === localPeer,
-  }));
   return (
     <LemonadeModal
       activeLocation={location}
       coldModels={coldModels}
+      hasColdStorage={hasColdStorage}
       hfTokenSet={!!process.env.HF_TOKEN}
-      peerConfigs={peerConfigs}
-      localPeerAddress={localPeer?.address ?? null}
+      peerConfigs={modelPeers}
+      localPeerAddress={localModelsPeer?.address ?? null}
       localPeerModels={localModels}
       lemonadeCacheModels={lemonadeCacheModels}
     />

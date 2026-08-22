@@ -1,4 +1,4 @@
-import {config, localPeer, localModelsDir, coldStorageDir} from '@/lib/config';
+import {config, localPeer, hasColdStorage, hasModelStorage} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {downloadDiskUsage} from '@/lib/storage/disk-usage';
@@ -16,11 +16,16 @@ export async function GET(
   if (!peer) return new Response('Unknown peer', {status: 404});
 
   if (peer === localPeer) {
-    if (!localModelsDir || !coldStorageDir) {
-      return new Response('No local peer configured', {status: 400});
+    if (!hasModelStorage && !hasColdStorage) {
+      return new Response('No local storage configured', {status: 400});
     }
     try {
-      return Response.json(await downloadDiskUsage(storage));
+      return Response.json(
+        await downloadDiskUsage(storage, {
+          models: hasModelStorage,
+          cold: hasColdStorage,
+        }),
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(`[disk-usage] statfs on ${peer.name} failed: ${msg}`);

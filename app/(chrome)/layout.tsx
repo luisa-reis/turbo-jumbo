@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import {config} from '@/lib/config';
+import {config, hasColdStorage, modelPeers} from '@/lib/config';
 import {appVersion} from '@/lib/version/app-version';
 import {AppChrome} from '@/components/chrome/app-chrome';
 
@@ -17,7 +17,8 @@ export default function ChromeLayout({
 }) {
   return (
     <AppChrome
-      peers={config.peers}
+      peers={modelPeers}
+      hasColdStorage={hasColdStorage}
       logLevel={config.log_level ?? 'info'}
       version={appVersion()}
     >

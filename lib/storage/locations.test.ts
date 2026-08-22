@@ -145,3 +145,19 @@ test('round-trip hfHref → parseRoute (local peer)', () => {
     view: 'hf',
   });
 });
+
+// A viewer: no peer is this machine, so All has nowhere to download to.
+const viewerPeers: Peer[] = [
+  {name: 'Remote Two', address: '192.0.2.2'} as Peer,
+];
+
+test('parseRoute: All has no download views without a local peer', () => {
+  expect(parseRoute(['download', 'hf'], viewerPeers)).toBeNull();
+  expect(parseRoute(['download', 'lemonade'], viewerPeers)).toBeNull();
+  // The table and the peers' own download views are unaffected.
+  expect(parseRoute([], viewerPeers)).toEqual({location: 'all', view: 'table'});
+  expect(parseRoute(['remote-two', 'download', 'hf'], viewerPeers)).toEqual({
+    location: '192.0.2.2',
+    view: 'hf',
+  });
+});

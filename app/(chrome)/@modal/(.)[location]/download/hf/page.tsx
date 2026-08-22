@@ -1,4 +1,4 @@
-import {config} from '@/lib/config';
+import {modelPeers} from '@/lib/config';
 import {resolveLocation, COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
 import {HfDownloadModalRoute} from '@/components/hf-download/hf-download-modal-route';
 
@@ -12,7 +12,7 @@ export default async function InterceptedPeerHfPage({
   params: Promise<{location: string}>;
 }) {
   const {location: slug} = await params;
-  const location = resolveLocation([slug], config.peers);
+  const location = resolveLocation([slug], modelPeers);
   if (location === null || location === COLD_STORAGE_LOCATION) return null;
   return <HfDownloadModalRoute location={location} />;
 }

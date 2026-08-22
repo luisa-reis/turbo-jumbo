@@ -11,8 +11,8 @@ import {scanModels} from '@/lib/models/models';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 
 export function GET() {
-  const models = scanModels(coldStorageDir);
-  return NextResponse.json(models);
+  if (!coldStorageDir) return new Response('No cold storage', {status: 400});
+  return NextResponse.json(scanModels(coldStorageDir));
 }
 
 export async function DELETE(req: Request) {

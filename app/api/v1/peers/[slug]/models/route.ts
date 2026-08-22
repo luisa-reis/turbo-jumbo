@@ -67,7 +67,7 @@ export async function DELETE(
   const {files} = body;
 
   if (peer === localPeer) {
-    if (!localModelsDir) return new Response('No local peer', {status: 400});
+    if (!localModelsDir) return new Response('No local storage', {status: 400});
     logger.debug(
       `[peers] delete ${files.length} file(s) from ${peer.name} (local)`,
     );

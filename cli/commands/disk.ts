@@ -1,6 +1,6 @@
 import type {Client} from '@/cli/client';
 import type {CommandOutput} from '@/cli/output';
-import {fetchPeers} from '@/cli/fetch-peers';
+import {fetchPeersResponse} from '@/cli/fetch-peers';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {CliInvocation} from '@/lib/cli/args';
 import {renderTable, type Column} from '@/lib/cli/format';
@@ -21,7 +21,9 @@ interface DiskRow {
  *
  * Reports the models and cold-storage filesystems separately, except when they
  * are the same device: there their free space is one pool, and listing it twice
- * would suggest twice the headroom actually available.
+ * would suggest twice the headroom actually available. A tier the machine
+ * doesn't have is left out; a server that holds nothing at all gets no
+ * `local` rows, since there is no disk of its own to report.
  */
 export async function disk(
   client: Client,
@@ -35,14 +37,16 @@ export async function disk(
       rows.push({location, tier: '—', free: 0, total: 0, reachable: false});
       return;
     }
-    rows.push({
-      location,
-      tier: usage.sameDevice ? 'models+cold' : 'models',
-      free: usage.models.free,
-      total: usage.models.total,
-      reachable: true,
-    });
-    if (!usage.sameDevice) {
+    if (usage.models) {
+      rows.push({
+        location,
+        tier: usage.sameDevice ? 'models+cold' : 'models',
+        free: usage.models.free,
+        total: usage.models.total,
+        reachable: true,
+      });
+    }
+    if (usage.cold && !usage.sameDevice) {
       rows.push({
         location,
         tier: 'cold',
@@ -53,10 +57,12 @@ export async function disk(
     }
   };
 
-  add('local', await client.tryJson<DownloadDiskUsage>('/api/v1/disk-usage'));
+  const {peers, coldStorage} = await fetchPeersResponse(client);
+  if (peers.some((p) => p.isLocal) || coldStorage) {
+    add('local', await client.tryJson<DownloadDiskUsage>('/api/v1/disk-usage'));
+  }
 
   if (inv.all) {
-    const peers = await fetchPeers(client);
     const remote = peers.filter((p) => !p.isLocal);
     const usages = await Promise.all(
       remote.map(async (p) => ({

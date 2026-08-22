@@ -10,8 +10,8 @@ export interface DiskUsage {
 }
 
 export interface DownloadDiskUsage {
-  models: DiskUsage; // where the download lands
-  cold: DiskUsage; // the optional "copy to cold storage" target
+  models: DiskUsage | null; // where the download lands; null on a host without model storage
+  cold: DiskUsage | null; // the optional "copy to cold storage" target; null without one
   sameDevice: boolean; // models & cold share one filesystem (space is shared)
 }
 
@@ -21,7 +21,8 @@ export interface DownloadDiskUsage {
  * adds a copy on the cold filesystem (and "delete after transfer" removes the
  * local copy afterwards). When both live on one filesystem their free space is
  * shared, so a kept copy needs room for two and a moved copy for one — reported
- * as a single combined shortfall. Empty when everything fits.
+ * as a single combined shortfall. Empty when everything fits — and when the
+ * host has no model storage, since nothing can land there to begin with.
  */
 export function diskSpaceWarnings(
   disk: DownloadDiskUsage,
@@ -29,7 +30,7 @@ export function diskSpaceWarnings(
   sendToCold: boolean,
   deleteAfterTransfer: boolean,
 ): string[] {
-  if (neededBytes <= 0) return [];
+  if (neededBytes <= 0 || !disk.models) return [];
   if (disk.sameDevice) {
     const need =
       sendToCold && !deleteAfterTransfer ? neededBytes * 2 : neededBytes;
@@ -44,7 +45,7 @@ export function diskSpaceWarnings(
     out.push(
       `local storage needs ${formatSize(neededBytes)} but only ${formatSize(disk.models.free)} is free`,
     );
-  if (sendToCold && neededBytes > disk.cold.free)
+  if (sendToCold && disk.cold && neededBytes > disk.cold.free)
     out.push(
       `cold storage needs ${formatSize(neededBytes)} but only ${formatSize(disk.cold.free)} is free`,
     );

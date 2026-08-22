@@ -10,8 +10,9 @@ import {AsyncState} from '@/lib/util/async-state';
 
 // Wraps usePeerModels and derives the inventory the Lemonade browser checks
 // catalog entries against: every configured peer (local seeded from server
-// data so its tokens are live immediately) plus cold storage. Shared by the
-// table view and the Lemonade route so both build inventory identically.
+// data so its tokens are live immediately) plus cold storage, where this host
+// has one (`coldModels` is null where it doesn't). Shared by the table view
+// and the Lemonade route so both build inventory identically.
 export function useInventoryLocations({
   peerConfigs,
   localPeerAddress,
@@ -21,7 +22,7 @@ export function useInventoryLocations({
   peerConfigs: PeerConfig[];
   localPeerAddress: string | null;
   localPeerModels: Model[];
-  coldModels: Model[];
+  coldModels: Model[] | null;
 }) {
   const {peers, peerModels, handleModelsRefreshed} = usePeerModels();
 
@@ -43,7 +44,8 @@ export function useInventoryLocations({
         isLocal: p.isLocal ?? false,
       };
     });
-    locs.push({name: 'cold storage', models: coldModels, isCold: true});
+    if (coldModels)
+      locs.push({name: 'cold storage', models: coldModels, isCold: true});
     return locs;
   }, [peerConfigs, seededPeerModels, coldModels]);
 

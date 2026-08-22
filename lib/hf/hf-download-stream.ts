@@ -323,9 +323,13 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
   )
     return new Response('Invalid fileScope', {status: 400});
 
+  // A viewer has nowhere to put the files; its downloads run on the peers.
+  if (!localModelsDir)
+    return new Response('No local storage configured', {status: 400});
+
   // Download into <base>/<repoId> so files land at <repoId>/<filePath> — the
   // layout the audit expects — making them correctly placed and verifiable.
-  const localDir = path.join(localModelsDir!, repoId);
+  const localDir = path.join(localModelsDir, repoId);
   // Storage-root-relative paths of the downloaded files, used for the sidecar
   // pass and the cold-storage transfer.
   const relPaths = (filePaths as string[]).map((fp) => path.join(repoId, fp));

@@ -6,13 +6,26 @@ import type {Client} from '@/cli/client';
 
 export type PeerConfig = Peer & {isLocal?: boolean};
 
+export interface PeersResponse {
+  peers: PeerConfig[];
+  /** Whether the server's own host has a cold-storage archive. */
+  coldStorage: boolean;
+}
+
 /**
  * The configured peers. `/api/v1/peers` answers from config, so this says who
  * exists, not who is reachable — liveness needs a probe (see `tj peers`).
+ * The server's own host is among them only when it holds models; a viewer
+ * that merely drives the others is nobody's location.
  */
 export async function fetchPeers(client: Client): Promise<PeerConfig[]> {
-  const {peers} = await client.json<{peers: PeerConfig[]}>('/api/v1/peers');
-  return peers;
+  return (await fetchPeersResponse(client)).peers;
+}
+
+export async function fetchPeersResponse(
+  client: Client,
+): Promise<PeersResponse> {
+  return client.json<PeersResponse>('/api/v1/peers');
 }
 
 /**

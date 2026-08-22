@@ -6,7 +6,7 @@ import {Readable} from 'stream';
 import {pipeline} from 'stream/promises';
 
 export async function POST(req: Request) {
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   const filePath = req.headers.get('x-file-path');
   if (!filePath)
     return new Response('Missing x-file-path header', {status: 400});

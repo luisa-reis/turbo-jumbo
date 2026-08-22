@@ -1,12 +1,9 @@
-import {localModelsDir} from '@/lib/config';
 import {isObject, readJsonBody} from '@/lib/util/request';
 import {streamHfDownload} from '@/lib/hf/hf-download-stream';
 
+// Download onto this machine. The streamer itself refuses on a host without
+// model storage, so the peer proxy that also calls it needs no guard of its own.
 export async function POST(req: Request) {
-  if (!localModelsDir) {
-    return new Response('No local peer configured', {status: 400});
-  }
-
   const body = await readJsonBody<{
     repoId?: unknown;
     branch?: unknown;

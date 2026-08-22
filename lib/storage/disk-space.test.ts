@@ -61,3 +61,24 @@ test('shared disk: a moved copy needs room for one', () => {
   // delete-after-transfer is a rename on one filesystem — only 1× is needed.
   expect(diskSpaceWarnings(shared(8 * GB), 5 * GB, true, true)).toEqual([]);
 });
+
+test('no cold storage: only the models filesystem is checked', () => {
+  const noCold: DownloadDiskUsage = {
+    models: {free: 2 * GB, total: 4 * GB},
+    cold: null,
+    sameDevice: false,
+  };
+  expect(diskSpaceWarnings(noCold, GB, true, false)).toEqual([]);
+  const out = diskSpaceWarnings(noCold, 5 * GB, true, false);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toContain('local storage needs');
+});
+
+test('no model storage: nothing to warn about', () => {
+  const viewer: DownloadDiskUsage = {
+    models: null,
+    cold: {free: GB, total: 2 * GB},
+    sameDevice: false,
+  };
+  expect(diskSpaceWarnings(viewer, 5 * GB, true, false)).toEqual([]);
+});

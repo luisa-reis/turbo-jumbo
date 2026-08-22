@@ -146,6 +146,8 @@ export function useDisplayRows({
         activeLocation,
         peerQuantSizes,
         peerNameByAddr,
+        // The peer list leaves this host out when it holds no models.
+        hostHasModels: peers.some((p) => p.isLocal),
       }),
     [
       effectiveModels,
@@ -153,6 +155,7 @@ export function useDisplayRows({
       repoFiles,
       activeLocation,
       peerQuantSizes,
+      peers,
       peerNameByAddr,
     ],
   );

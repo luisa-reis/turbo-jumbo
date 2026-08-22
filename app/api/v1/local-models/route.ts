@@ -21,7 +21,7 @@ export function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   const body = await readJsonBody<{files: string[]; dryRun?: boolean}>(
     req,
     hasStringFiles,

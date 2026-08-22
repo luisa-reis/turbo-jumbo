@@ -115,6 +115,7 @@ function selectedFileInfo(
 export function HomeClient({
   activeLocation,
   coldModels,
+  hasColdStorage,
   hfTokenSet,
   modelsTableData,
   peerConfigs,
@@ -123,6 +124,9 @@ export function HomeClient({
 }: {
   activeLocation: string;
   coldModels: Model[];
+  // Whether this machine has a cold-storage archive at all; without one the
+  // table has no Cold Storage column and nothing offers it as a destination.
+  hasColdStorage: boolean;
   hfTokenSet: boolean;
   modelsTableData: ModelRow[];
   peerConfigs: PeerConfig[];
@@ -134,7 +138,7 @@ export function HomeClient({
       peerConfigs,
       localPeerAddress,
       localPeerModels,
-      coldModels,
+      coldModels: hasColdStorage ? coldModels : null,
     });
 
   // Re-fetch a peer's models and push the result into the polled map, so a
@@ -406,6 +410,7 @@ export function HomeClient({
       selected,
       setSelected,
       activeLocation,
+      hasColdStorage,
       peerConfigs,
       refreshModels,
       refreshPeerModels,
@@ -528,6 +533,7 @@ export function HomeClient({
           >
             <ModelsTableClient
               models={tableModels}
+              hasColdStorage={hasColdStorage}
               peers={peerConfigs}
               peerModels={seededPeerModels}
               incompleteRepos={activeIncomplete}
@@ -613,7 +619,7 @@ export function HomeClient({
             activeLocation === 'cold-storage' ||
             anyMissingFromColdStorage(fileInfo, coldModels)
           }
-          showKeepCold={activeLocation === 'all'}
+          showKeepCold={activeLocation === 'all' && hasColdStorage}
           onConfirm={onDelete}
           onCancel={() => setConfirming(false)}
         />
@@ -622,6 +628,7 @@ export function HomeClient({
         <CopyModal
           files={fileInfo}
           from={activeLocation}
+          hasColdStorage={hasColdStorage}
           onCopy={onCopy}
           onCancel={() => setConfirmingCopy(false)}
         />

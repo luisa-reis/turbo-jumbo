@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {usePathname, useRouter} from 'next/navigation';
 import {peerSlug} from '@/lib/peers/peer-slug';
-import {locationHref} from '@/lib/storage/locations';
+import {canDownloadTo, locationHref} from '@/lib/storage/locations';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {Model} from '@/lib/models/models';
 import {LEMONADE_CATALOG_URL} from '@/lib/lemonade/lemonade';
@@ -25,6 +25,7 @@ import {useInventoryLocations} from '@/components/models/use-inventory-locations
 export function LemonadeModal({
   activeLocation,
   coldModels,
+  hasColdStorage,
   hfTokenSet,
   peerConfigs,
   localPeerAddress,
@@ -33,6 +34,7 @@ export function LemonadeModal({
 }: {
   activeLocation: string;
   coldModels: Model[];
+  hasColdStorage: boolean;
   hfTokenSet: boolean;
   peerConfigs: PeerConfig[];
   localPeerAddress: string | null;
@@ -45,7 +47,7 @@ export function LemonadeModal({
     peerConfigs,
     localPeerAddress,
     localPeerModels,
-    coldModels,
+    coldModels: hasColdStorage ? coldModels : null,
   });
 
   // Re-scan the local peer after a download so its status markers update.
@@ -140,14 +142,15 @@ export function LemonadeModal({
     peerConfigs.find((p) => p.address === targetPeerAddress) ?? null;
   const targetName = targetPeer?.name ?? null;
   const targetSlug = targetPeer ? peerSlug(targetPeer) : null;
-  // Any peer tab (and All) can download now; only Cold Storage has no Lemonade
-  // view, and it never reaches here.
-  const canDownload =
-    activeLocation === 'all' ||
-    peerConfigs.some((p) => p.address === activeLocation);
+  // Any peer tab can download, and All when this machine holds models; Cold
+  // Storage has no Lemonade view and never reaches here.
+  const canDownload = canDownloadTo(activeLocation, peerConfigs);
   // Copy-from-cold reads this machine's archive and lands locally, so it only
-  // makes sense when the tab's target is the local peer.
-  const canColdCopy = targetPeerAddress === localPeerAddress;
+  // makes sense when the tab's target is the local peer and there is one.
+  const canColdCopy =
+    hasColdStorage &&
+    targetPeerAddress !== null &&
+    targetPeerAddress === localPeerAddress;
 
   // On soft navigation away (e.g. browser Back while open) Next keeps the
   // unmatched @modal slot's previous state mounted, so gate on the URL: only

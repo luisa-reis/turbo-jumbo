@@ -18,7 +18,7 @@ function resolveWithin(base: string, file: string): string | null {
 // without routing the data through the orchestrating host.
 export async function POST(req: Request) {
   if (!coldStorageDir || !localModelsDir)
-    return new Response('No local peer configured', {status: 400});
+    return new Response('No local storage configured', {status: 400});
 
   const body = await readJsonBody<{files: string[]}>(req, hasStringFiles);
   if (body instanceof Response) return body;

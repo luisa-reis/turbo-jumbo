@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import {
   resolveBaseSubdirs,
+  selectModelPeers,
   withoutSecrets,
   validateRawConfig,
   type Peer,
@@ -179,4 +180,39 @@ test('withoutSecrets keeps the Lemonade API key off the Peer object', () => {
   expect(peers.map((p) => 'lemonade_api_key' in p)).toEqual([false, false]);
   expect(lemonadeKeys.get(peers[0])).toBe('secret');
   expect(lemonadeKeys.get(peers[1])).toBeUndefined();
+});
+
+test('accepts a local peer with neither base_path nor cold_storage_path', () => {
+  // A viewer: it runs the UI against the peers it lists and holds nothing.
+  expect(
+    validateRawConfig({
+      peers: [
+        {name: 'viewer', address: '192.0.2.9:3000'},
+        {name: 'box', address: '192.0.2.10:3000'},
+      ],
+    }),
+  ).toBeNull();
+});
+
+const viewer: Peer = {name: 'viewer', address: '192.0.2.9:3000'};
+const box: Peer = {name: 'box', address: '192.0.2.10:3000'};
+
+test('selectModelPeers flags this machine and keeps config order', () => {
+  const out = selectModelPeers([box, viewer], viewer, true);
+  expect(out.map((p) => [p.name, p.isLocal])).toEqual([
+    ['box', false],
+    ['viewer', true],
+  ]);
+});
+
+test('selectModelPeers drops this machine when it has no model storage', () => {
+  expect(selectModelPeers([viewer, box], viewer, false)).toEqual([
+    {...box, isLocal: false},
+  ]);
+});
+
+test('selectModelPeers with no local peer lists everyone as remote', () => {
+  expect(selectModelPeers([box], undefined, false)).toEqual([
+    {...box, isLocal: false},
+  ]);
 });

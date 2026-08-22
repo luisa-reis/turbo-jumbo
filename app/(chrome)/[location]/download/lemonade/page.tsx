@@ -1,12 +1,12 @@
 import type {Metadata} from 'next';
 import {notFound} from 'next/navigation';
-import {config, localPeer} from '@/lib/config';
+import {modelPeers, localPeer} from '@/lib/config';
 import {resolveLocation, COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
 import {HomeView} from '@/components/home/home-view';
 import {LemonadeModalRoute} from '@/components/lemonade/lemonade-modal-route';
 
 export function generateMetadata(): Metadata {
-  return {title: `Turbo Jumbo - ${localPeer?.name ?? 'unknown'}`};
+  return {title: localPeer ? `Turbo Jumbo - ${localPeer.name}` : 'Turbo Jumbo'};
 }
 
 // Hard navigation (refresh/deep link) to /<peer>/download/lemonade: render
@@ -19,7 +19,7 @@ export default async function PeerLemonadeDownloadPage({
   params: Promise<{location: string}>;
 }) {
   const {location: slug} = await params;
-  const location = resolveLocation([slug], config.peers);
+  const location = resolveLocation([slug], modelPeers);
   // Cold Storage has no Lemonade view; unknown slugs 404 (parity with the
   // old parseRoute behavior).
   if (location === null || location === COLD_STORAGE_LOCATION) notFound();

@@ -44,7 +44,7 @@ Next.js 16 **App Router** + React 19, served by plain `next dev`/`next start` (n
 
 ### Configuration (`lib/config/index.ts`, `config.schema.json`)
 
-Loaded from `./config.yaml` (override with `CONFIG_PATH`), validated against `config.schema.json` with Ajv. The **local peer is identified by matching a peer's address host against this machine's own IP addresses** — startup fails if none match. The local peer must define `base_path` (local models at `<base_path>/turbo-jumbo`, Lemonade's cache at `<base_path>/lemonade`) and `cold_storage_path`. Remote peers need only `name` + `address`. See `config.yaml.sample`.
+Loaded from `./config.yaml` (override with `CONFIG_PATH`), validated against `config.schema.json` with Ajv. The **local peer is identified by matching a peer's address host against this machine's own IP addresses**. Its `base_path` (local models at `<base_path>/turbo-jumbo`, Lemonade's cache at `<base_path>/lemonade`) and `cold_storage_path` are each optional: a local peer without `base_path` — or a machine that matches no peer at all — is a **viewer**, which runs the UI and drives the other peers but holds no models. `lib/config` exports `modelPeers` (the peers to present as locations, minus a viewer) and `localModelsPeer` (this machine as a location, or undefined) for everything client-facing; the `peers/[slug]` proxies and the peer monitor keep using `config.peers`. Remote peers need only `name` + `address`. See `config.yaml.sample`.
 
 ### Peers and the API
 
@@ -73,19 +73,22 @@ HuggingFace downloads shell out to the `hf` CLI, which inherits the server's env
 - Import Astryx components by their bare names (`import {Button} from '@astryxdesign/core/Button'`) — never alias them (no `XDS*`-style prefixes).
 
 <!-- ASTRYX:START -->
+
 Astryx v0.3.0 · 155 components
 CLI: run every command as `bunx astryx <cmd>` (shown below as `astryx ...`).
 
 SETUP (once, in your app entry e.g. main.tsx) — without these, components render unstyled:
-  import "@astryxdesign/core/reset.css";
-  import "@astryxdesign/core/astryx.css";
+import "@astryxdesign/core/reset.css";
+import "@astryxdesign/core/astryx.css";
 
 WORKFLOW — discover, don't guess. Before writing UI:
+
 1. `astryx build "<idea>"` — START HERE: returns a kit (closest [page] + [block]s + [component]s). No args = full playbook.
 2. `astryx template <name> [--skeleton]` — scaffold the [page]/[block]s it named, or study their layout. Templates are reference code.
 3. `astryx component <Name>` — props + examples for every component you use.
 
 RULES:
+
 - No <div> — components do all layout/spacing. Full page → AppShell; sidebar nav → SideNav.
 - Frame first: pick the shell (AppShell / Layout+LayoutPanel) and budget regions in px BEFORE writing content (`astryx docs layout`).
 - Dense data = rows (Table, List/Item) edge-to-edge — never Card-wrapped list items. Card = dashboard widgets, galleries, settings groups only.
@@ -95,12 +98,12 @@ RULES:
 - SELF-CHECK before you finish: re-read the file and replace any className=, style={{…}}, raw <div>/<span> layout, imported .css/@apply, or hardcoded #hex/px with the component or the xstyle prop + a token. If unsure a component/prop exists, run `astryx component <Name>` / `astryx search "<thing>"`; don't hand-roll CSS.
 
 MORE CLI:
-  search "<query>"   find any component / hook / doc / template / block
-  component --list   155 components by category
-  template --list    page + block recipes
-  docs <topic>       color, elevation, icons, illustrations, internationalization, layout, migration, motion, principles, shape, spacing, styling, theme, tokens, typography
-  swizzle <Name>     eject component source for deep customization
-  upgrade --apply    run after any @astryxdesign/core bump
+search "<query>" find any component / hook / doc / template / block
+component --list 155 components by category
+template --list page + block recipes
+docs <topic> color, elevation, icons, illustrations, internationalization, layout, migration, motion, principles, shape, spacing, styling, theme, tokens, typography
+swizzle <Name> eject component source for deep customization
+upgrade --apply run after any @astryxdesign/core bump
 <!-- ASTRYX:END -->
 
 <!-- BEGIN:nextjs-agent-rules -->

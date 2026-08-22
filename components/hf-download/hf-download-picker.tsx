@@ -626,7 +626,9 @@ export function HfDownloadPicker({
             )}
           </List>
         )}
-        {hasFiles && (
+        {/* Offered once the target's cold storage has answered: a host
+            without one has nowhere to copy to. */}
+        {hasFiles && coldModels !== null && (
           <VStack gap={2}>
             <CheckboxInput
               label="Copy to cold storage when done"

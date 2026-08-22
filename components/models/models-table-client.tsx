@@ -70,6 +70,7 @@ export function ModelsTableClient({
   onToggleSelected,
   locations,
   activeLocation = 'all',
+  hasColdStorage = true,
   auditResults,
   auditedPaths,
   auditing = false,
@@ -101,6 +102,9 @@ export function ModelsTableClient({
   onToggleSelected?: (paths: string[]) => void;
   locations?: LocationTab[];
   activeLocation?: string;
+  // Whether this host has a cold-storage archive; without one the column
+  // would only ever say "absent".
+  hasColdStorage?: boolean;
   auditResults?: Map<string, AuditResult>;
   auditedPaths?: Set<string>;
   auditing?: boolean;
@@ -398,8 +402,9 @@ export function ModelsTableClient({
           } satisfies TableColumn<DisplayRow>,
         ]
       : []),
-    // Cold Storage column hidden on the cold-storage tab itself.
-    ...(activeLocation !== 'cold-storage'
+    // Cold Storage column hidden on the cold-storage tab itself, and on a host
+    // that has no cold storage.
+    ...(hasColdStorage && activeLocation !== 'cold-storage'
       ? [
           {
             key: 'coldStorage',

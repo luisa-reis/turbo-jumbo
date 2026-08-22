@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const repoId = new URL(req.url).searchParams.get('repoId') ?? '';
   if (!REPO_ID_RE.test(repoId))
     return new Response('Invalid repoId', {status: 400});
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   try {
     const files = await repoFileStatuses(localModelsDir, repoId);
     return NextResponse.json({files});

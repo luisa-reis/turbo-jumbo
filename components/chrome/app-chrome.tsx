@@ -11,7 +11,12 @@ import {Text} from '@astryxdesign/core/Text';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {Peer as PeerConfig} from '@/lib/config';
 import {versionLabel, type AppVersion} from '@/lib/version/resolve-version';
-import {locationHref, parseRoute, ALL_LOCATION} from '@/lib/storage/locations';
+import {
+  locationHref,
+  parseRoute,
+  canDownloadTo,
+  ALL_LOCATION,
+} from '@/lib/storage/locations';
 import {
   LocationTabs,
   type LocationTab,
@@ -29,11 +34,13 @@ import {ConsoleProvider} from '@/components/chrome/console-context';
 // (HF/Lemonade) views.
 export function AppChrome({
   peers,
+  hasColdStorage,
   logLevel,
   version,
   children,
 }: {
   peers: PeerConfig[];
+  hasColdStorage: boolean;
   logLevel: string;
   version: AppVersion;
   children: React.ReactNode;
@@ -50,10 +57,9 @@ export function AppChrome({
   // "Consolidate" runs on a single machine, so it shows on any peer tab (it
   // runs on that peer) but not on All.
   const consolidatePeer = peers.find((p) => p.address === activeLocation);
-  // "Add model" works on any peer tab (downloads run on that peer) and on All.
-  const canAddModel =
-    activeLocation === ALL_LOCATION ||
-    peers.some((p) => p.address === activeLocation);
+  // "Add model" works on any peer tab (downloads run on that peer) and on All
+  // when this machine holds models (All downloads onto it).
+  const canAddModel = canDownloadTo(activeLocation, peers);
 
   const [consoleOpen, setConsoleOpen] = useState(false);
   const toggleConsole = useCallback(() => setConsoleOpen((o) => !o), []);
@@ -128,6 +134,7 @@ export function AppChrome({
             centerContent={
               <LocationTabs
                 locations={locations}
+                hasColdStorage={hasColdStorage}
                 activeLocation={activeLocation}
                 onLocationChange={handleLocationChange}
               />

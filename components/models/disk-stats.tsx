@@ -108,16 +108,17 @@ export function DiskStats({
   const usage = fetched && fetched.url === url ? fetched.data : null;
   if (!usage) return null;
 
+  // A tier the host doesn't have is null; one it has but can't size is 0.
   const volumes: Array<{label: string; usage: DiskUsage}> = [];
   if (activeLocation === 'cold-storage') {
-    if (usage.cold.total > 0)
+    if (usage.cold && usage.cold.total > 0)
       volumes.push({label: 'Cold storage', usage: usage.cold});
-  } else if (usage.sameDevice) {
+  } else if (usage.sameDevice && usage.models) {
     // One filesystem behind both paths: a combined meter, not double-counted.
     volumes.push({label: 'Models + cold storage', usage: usage.models});
   } else {
-    volumes.push({label: 'Models', usage: usage.models});
-    if (usage.cold.total > 0)
+    if (usage.models) volumes.push({label: 'Models', usage: usage.models});
+    if (usage.cold && usage.cold.total > 0)
       volumes.push({label: 'Cold storage', usage: usage.cold});
   }
   if (volumes.length === 0) return null;

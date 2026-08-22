@@ -16,7 +16,7 @@ type PushRequest = {
 };
 
 export async function POST(req: Request) {
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   const body = await readJsonBody<PushRequest>(req, hasStringFiles);
   if (body instanceof Response) return body;
   const {files, toPeer} = body;

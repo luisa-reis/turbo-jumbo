@@ -23,7 +23,9 @@ CONFIG_PATH=/etc/turbo-jumbo/config.yaml bun start
 
 All options are documented in [`config.yaml.sample`](../config.yaml.sample) and described formally in [`config.schema.json`](../config.schema.json) (JSON Schema). The config is validated against that schema on startup, so typos and missing required fields fail fast with a readable error. The sample YAML carries a `# yaml-language-server: $schema=./config.schema.json` modeline, which gives autocomplete and inline validation in editors with the [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml).
 
-The config lists every `peer` (machine) that shares models, including this one. On startup the app identifies the **local** peer by matching a peer's address host against this machine's own IP addresses; the local peer must set `base_path` (local models live in `<base_path>/turbo-jumbo`, Lemonade's cache in `<base_path>/lemonade`) and `cold_storage_path`. Remote peers need only a `name` and `address`.
+The config lists every `peer` (machine) that shares models, including this one. On startup the app identifies the **local** peer by matching a peer's address host against this machine's own IP addresses. A peer that holds models sets `base_path` (local models live in `<base_path>/turbo-jumbo`, Lemonade's cache in `<base_path>/lemonade`), and one with an archive sets `cold_storage_path`; both matter only on the machine they describe, so remote peers need only a `name` and `address`.
+
+Neither path is required. A machine whose peer entry has no `base_path` — or that isn't in the peer list at all — runs as a **viewer**: it shows every peer's models on the All tab, and downloads, copies and deletes run on the peers themselves (copies go peer to peer without passing through the viewer). It has no tab of its own, is offered nowhere as a destination, and the All tab's _Add model_ is absent — start downloads from a peer's tab instead. A viewer needs no entry in the other machines' configs; there is nothing for them to fetch from it. Cold storage is independent of this: a machine with only `cold_storage_path` gets the Cold Storage tab and nothing else of its own.
 
 ## Building a container image
 
@@ -49,7 +51,7 @@ podman run -p 3000:3000 \
   turbo-jumbo
 ```
 
-The two model directory mounts should match the local peer's `base_path` and `cold_storage_path` values in your `config.yaml`. Using the same path inside and outside the container means the config file works unchanged.
+The two model directory mounts should match the local peer's `base_path` and `cold_storage_path` values in your `config.yaml`. Using the same path inside and outside the container means the config file works unchanged. A viewer needs neither mount.
 
 The container expects the config at `/config/config.yaml` by default. Override with `-e CONFIG_PATH=...` if you mount it elsewhere:
 

@@ -1,9 +1,10 @@
 import {
-  config,
   localModelsDir,
   coldStorageDir,
   lemonadeDir,
-  localPeer,
+  hasColdStorage,
+  localModelsPeer,
+  modelPeers,
 } from '@/lib/config';
 import {scanModels} from '@/lib/models/models';
 import {getModelsTableData} from '@/components/models/models-table';
@@ -15,19 +16,16 @@ import {HomeClient} from '@/components/home/home-client';
 export function HomeView({location}: {location: string}) {
   const coldModels = scanModels(coldStorageDir);
   const localModels = scanModels(localModelsDir, lemonadeDir);
-  const peerConfigs = config.peers.map((p) => ({
-    ...p,
-    isLocal: p === localPeer,
-  }));
   const modelsTableData = getModelsTableData(localModels, coldModels);
   return (
     <HomeClient
       activeLocation={location}
       coldModels={coldModels}
+      hasColdStorage={hasColdStorage}
       hfTokenSet={!!process.env.HF_TOKEN}
       modelsTableData={modelsTableData}
-      peerConfigs={peerConfigs}
-      localPeerAddress={localPeer?.address ?? null}
+      peerConfigs={modelPeers}
+      localPeerAddress={localModelsPeer?.address ?? null}
       localPeerModels={localModels}
     />
   );

@@ -13,6 +13,7 @@ export function useDeleteWorkflow({
   selected,
   setSelected,
   activeLocation,
+  hasColdStorage,
   peerConfigs,
   refreshModels,
   refreshPeerModels,
@@ -23,6 +24,7 @@ export function useDeleteWorkflow({
   selected: Set<string>;
   setSelected: Dispatch<SetStateAction<Set<string>>>;
   activeLocation: string;
+  hasColdStorage: boolean;
   peerConfigs: PeerConfig[];
   refreshModels: () => Promise<void>;
   refreshPeerModels: (peer: PeerConfig) => Promise<void>;
@@ -54,19 +56,22 @@ export function useDeleteWorkflow({
       });
 
       if (activeLocation === 'all') {
-        // Delete from every location in parallel — sparing cold storage when
-        // the user asked to keep the cold backup.
+        // Delete from every location this host has in parallel — sparing cold
+        // storage when the user asked to keep the cold backup. A viewer has
+        // no local tier and possibly no cold one; only the peers remain.
         const requests: Promise<Response>[] = [
-          fetch('/api/v1/local-models', {method: 'DELETE', headers, body}),
-          ...(keepCold
-            ? []
-            : [
+          ...(peerConfigs.some((p) => p.isLocal)
+            ? [fetch('/api/v1/local-models', {method: 'DELETE', headers, body})]
+            : []),
+          ...(hasColdStorage && !keepCold
+            ? [
                 fetch('/api/v1/cold-storage', {
                   method: 'DELETE',
                   headers,
                   body,
                 }),
-              ]),
+              ]
+            : []),
           ...peerConfigs
             .filter((p) => !p.isLocal)
             .map((p) =>

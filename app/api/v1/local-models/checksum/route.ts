@@ -14,7 +14,7 @@ import {promises as fsp} from 'fs';
 // Both answers are the same digest of the same bytes, so a caller holding one
 // can compare it against the other.
 export async function GET(req: Request) {
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   const url = new URL(req.url);
   const file = url.searchParams.get('file');
   if (!file) return new Response('Missing file parameter', {status: 400});

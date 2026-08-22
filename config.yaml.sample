@@ -12,8 +12,11 @@
 peer_check_interval: 5
 
 # The machines that share models, including this one. The local peer is the one
-# whose address host matches this machine's own IP; it must set base_path and
-# cold_storage_path. Remote peers only need a name and address.
+# whose address host matches this machine's own IP; base_path and
+# cold_storage_path are read from its entry. Remote peers only need a name and
+# address. Leave base_path out (or this machine out of the list entirely) to
+# run a viewer: a UI that shows and manages the peers' models but holds none
+# itself.
 peers:
   # This machine.
   - name: this-machine
@@ -29,12 +32,14 @@ peers:
     # not share a slug, and all, cold-storage, download and api are reserved.
     # slug: this-machine
 
-    # Directory containing the model subdirectories. Required for the local peer.
-    # Local models live in <base_path>/turbo-jumbo and Lemonade's own model cache
-    # in <base_path>/lemonade (override the names below).
+    # Directory containing the model subdirectories. Local models live in
+    # <base_path>/turbo-jumbo and Lemonade's own model cache in
+    # <base_path>/lemonade (override the names below). Optional: without it
+    # this machine is a viewer that holds no models.
     base_path: /mnt/models
 
-    # Cold-storage (slow, archival) model directory. Required for the local peer.
+    # Cold-storage (slow, archival) model directory. Optional: without it this
+    # machine has no Cold Storage tab and nothing offers it as a destination.
     cold_storage_path: /mnt/cold-storage
 
     # Subdirectory under base_path holding the local (turbo-jumbo) models.

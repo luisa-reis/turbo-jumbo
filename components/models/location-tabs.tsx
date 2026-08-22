@@ -11,12 +11,16 @@ export interface LocationTab {
 }
 
 // The All / per-peer / Cold Storage tab row that drives the active location.
+// Cold Storage is this machine's archive, so the tab exists only where one is
+// configured.
 export function LocationTabs({
   locations,
+  hasColdStorage,
   activeLocation,
   onLocationChange,
 }: {
   locations: LocationTab[];
+  hasColdStorage: boolean;
   activeLocation: string;
   onLocationChange: (id: string) => void;
 }) {
@@ -39,7 +43,7 @@ export function LocationTabs({
           }
         />
       ))}
-      <Tab value="cold-storage" label="Cold Storage" />
+      {hasColdStorage && <Tab value="cold-storage" label="Cold Storage" />}
     </TabList>
   );
 }

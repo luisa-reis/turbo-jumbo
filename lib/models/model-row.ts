@@ -373,11 +373,18 @@ export function buildDisplayRows(args: {
   activeLocation: string;
   peerQuantSizes: Map<string, Array<{address: string; size: number}>>;
   peerNameByAddr: Map<string, string>;
+  /**
+   * Whether the host serving the table has model storage of its own. On All
+   * a model's size is its local bytes; a viewer has none, so there it is the
+   * largest known copy instead of a column of zeros.
+   */
+  hostHasModels?: boolean;
 }): DisplayRow[] {
   const {
     models,
     expanded,
     repoFiles,
+    hostHasModels = true,
     activeLocation,
     peerQuantSizes,
     peerNameByAddr,
@@ -450,7 +457,9 @@ export function buildDisplayRows(args: {
     // the Cold Storage tab, the peer's copy on that peer's tab. When it holds
     // several quantizations, a min–max range of their sizes says nothing
     // meaningful, so sum into one figure. Projectors are companion files, not
-    // weights, and are excluded (matching the per-quant roll-up above).
+    // weights, and are excluded (matching the per-quant roll-up above). A
+    // viewer has no local storage for All to mean; its All sums the largest
+    // known copy of each quant, as the quant rows show.
     const totalSize = m.quants
       .filter((q) => !q.isProjector)
       .reduce((sum, q) => {
@@ -459,7 +468,12 @@ export function buildDisplayRows(args: {
         const peerCopy = peerQuantSizes
           .get(fileKey)
           ?.find((ps) => ps.address === activeLocation);
-        return sum + (peerCopy?.size ?? q.localSize);
+        if (peerCopy) return sum + peerCopy.size;
+        if (hostHasModels) return sum + q.localSize;
+        return (
+          sum +
+          (quantInfo.get(`${m.name}::${q.label}`)?.effectiveSize ?? q.size)
+        );
       }, 0);
 
     // One labelled breakdown per mismatched file, so the rolled-up model

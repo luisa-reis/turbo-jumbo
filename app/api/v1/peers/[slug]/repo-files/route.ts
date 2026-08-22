@@ -19,7 +19,7 @@ export async function GET(
     return new Response('Invalid repoId', {status: 400});
 
   if (peer === localPeer) {
-    if (!localModelsDir) return new Response('No local peer', {status: 400});
+    if (!localModelsDir) return new Response('No local storage', {status: 400});
     try {
       const files = await repoFileStatuses(localModelsDir, repoId);
       return Response.json({files});

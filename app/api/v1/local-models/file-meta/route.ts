@@ -38,7 +38,7 @@ function isRepoHead(v: unknown): v is RepoHead {
  * of `sendFileMeta`; the byte transfer itself goes through `upload`.
  */
 export async function POST(req: Request) {
-  if (!localModelsDir) return new Response('No local peer', {status: 400});
+  if (!localModelsDir) return new Response('No local storage', {status: 400});
   const body = await readJsonBody<FileMetaRequest>(req, isObject);
   if (body instanceof Response) return body;
   const {path, meta, repoHead} = body;
