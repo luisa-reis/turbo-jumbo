@@ -21,11 +21,15 @@ export interface Peer {
   // API base URL of the Lemonade server tied to this peer, for browsing and
   // downloading the models only that server can fetch (FLM/NPU).
   lemonade_url?: string;
-  // Its API key, when the server was started with LEMONADE_API_KEY. Never
-  // sent to browsers — see publicPeer.
-  lemonade_api_key?: string;
   // Set by the /api/v1/peers response for the peer that is this machine.
   isLocal?: boolean;
+}
+
+/** A peer as config.yaml spells it: the Peer above plus its secrets, which
+ *  never make it onto the Peer object — see withoutSecrets. */
+export interface RawPeer extends Peer {
+  // The Lemonade server's API key, when it was started with LEMONADE_API_KEY.
+  lemonade_api_key?: string;
 }
 
 export interface Config {
@@ -34,7 +38,11 @@ export interface Config {
   peer_check_interval?: number;
 }
 
-const validate = new Ajv2020({allErrors: true}).compile<Config>(schema);
+interface RawConfig extends Omit<Config, 'peers'> {
+  peers: RawPeer[];
+}
+
+const validate = new Ajv2020({allErrors: true}).compile<RawConfig>(schema);
 
 /**
  * Validate a parsed config object against config.schema.json. Returns null if
@@ -61,12 +69,41 @@ function configPath(): string {
   return process.env.CONFIG_PATH ?? `${process.cwd()}/config.yaml`;
 }
 
+/**
+ * Split the secrets out of freshly parsed peers. Peer objects travel far —
+ * into page shells, client component props, and API responses — so rather
+ * than stripping the key at every exit, it never gets onto the object: the
+ * only way to it is lemonadeApiKey(), which the routes talking to that
+ * server call.
+ */
+export function withoutSecrets(raw: RawPeer[]): {
+  peers: Peer[];
+  lemonadeKeys: WeakMap<Peer, string>;
+} {
+  const lemonadeKeys = new WeakMap<Peer, string>();
+  const peers = raw.map(({lemonade_api_key, ...peer}) => {
+    if (lemonade_api_key) lemonadeKeys.set(peer, lemonade_api_key);
+    return peer;
+  });
+  return {peers, lemonadeKeys};
+}
+
+let lemonadeKeys = new WeakMap<Peer, string>();
+
+/** The API key for a peer's Lemonade server, when config.yaml gives one. */
+export function lemonadeApiKey(peer: Peer): string | undefined {
+  return lemonadeKeys.get(peer);
+}
+
 function loadConfig(): Config {
   const file = configPath();
   const loaded = loadYaml(fs.readFileSync(file, 'utf8'));
   const error = validateRawConfig(loaded);
   if (error) throw new Error(`Invalid config at ${file}: ${error}`);
-  return loaded as Config;
+  const raw = loaded as RawConfig;
+  const split = withoutSecrets(raw.peers);
+  lemonadeKeys = split.lemonadeKeys;
+  return {...raw, peers: split.peers};
 }
 
 // Loaded once when this module is first imported (on server boot).
@@ -88,18 +125,6 @@ export const localPeer: Peer | undefined = (() => {
   );
   return config.peers.find((p) => localIps.has(addressHost(p.address)));
 })();
-
-/**
- * A peer as browsers may see it: everything but the secrets. The Lemonade API
- * key is only ever used server-side, by the routes that talk to that server.
- */
-export function publicPeer(peer: Peer): Omit<Peer, 'lemonade_api_key'> {
-  const rest: Omit<Peer, 'lemonade_api_key'> & {lemonade_api_key?: string} = {
-    ...peer,
-  };
-  delete rest.lemonade_api_key;
-  return rest;
-}
 
 /**
  * The turbo-jumbo (local models) and Lemonade directories for a peer, derived

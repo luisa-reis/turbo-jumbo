@@ -5,8 +5,6 @@
 // so both listing and downloading go through that server's API (the per-peer
 // `lemonade_url` config), never through the HF download path.
 
-import type {Peer} from '@/lib/config';
-
 /** Where an flm tag's weights actually live: an ordinary HF repo (FastFlowLM
  *  org), often pinned to a revision, with the exact files a model needs —
  *  resolved from FastFlowLM's public registry (lib/lemonade/flm-registry). */
@@ -75,11 +73,9 @@ export function lemonadeApiBase(url: string): string {
  * Bearer token — listing and pulling alike — so the key travels on each call.
  */
 export function lemonadeHeaders(
-  peer: Pick<Peer, 'lemonade_api_key'>,
+  apiKey: string | undefined,
 ): Record<string, string> {
-  return peer.lemonade_api_key
-    ? {Authorization: `Bearer ${peer.lemonade_api_key}`}
-    : {};
+  return apiKey ? {Authorization: `Bearer ${apiKey}`} : {};
 }
 
 /** What to tell a user when the Lemonade server answered with an error

@@ -64,13 +64,13 @@ test('tolerates junk payloads', () => {
 test('lemonadeHeaders carries the API key as a Bearer token', () => {
   // A Lemonade server started with LEMONADE_API_KEY answers 401 to anything
   // without this header — listing and pulling alike.
-  expect(lemonadeHeaders({lemonade_api_key: 'secret'})).toEqual({
+  expect(lemonadeHeaders('secret')).toEqual({
     Authorization: 'Bearer secret',
   });
 });
 
 test('lemonadeHeaders sends nothing for a server without a key', () => {
-  expect(lemonadeHeaders({})).toEqual({});
+  expect(lemonadeHeaders(undefined)).toEqual({});
 });
 
 test('a 401 from the Lemonade server is explained as a missing API key', () => {

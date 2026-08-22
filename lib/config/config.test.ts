@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {
-  publicPeer,
   resolveBaseSubdirs,
+  withoutSecrets,
   validateRawConfig,
   type Peer,
 } from '@/lib/config';
@@ -165,20 +165,18 @@ test('accepts a lemonade_api_key alongside lemonade_url', () => {
   ).toBeNull();
 });
 
-test('publicPeer strips the Lemonade API key and keeps everything else', () => {
-  // Peers are serialized into the page and served by /api/v1/peers; the key
-  // must stay on the server.
-  const p = peer({
-    lemonade_url: 'http://192.0.2.10:13305/api/v1',
-    lemonade_api_key: 'secret',
-  });
-  const pub = publicPeer(p);
-  expect('lemonade_api_key' in pub).toBe(false);
-  expect(pub).toEqual({
-    name: p.name,
-    address: p.address,
-    base_path: p.base_path,
-    cold_storage_path: p.cold_storage_path,
-    lemonade_url: p.lemonade_url,
-  });
+test('withoutSecrets keeps the Lemonade API key off the Peer object', () => {
+  // Peers are serialized into pages and API responses in several places;
+  // rather than stripping the key at each exit, it never gets onto the object.
+  const {peers, lemonadeKeys} = withoutSecrets([
+    {
+      ...validPeer,
+      lemonade_url: 'http://192.0.2.10:13305/api/v1',
+      lemonade_api_key: 'secret',
+    },
+    {name: 'B', address: '192.0.2.2:3000'},
+  ]);
+  expect(peers.map((p) => 'lemonade_api_key' in p)).toEqual([false, false]);
+  expect(lemonadeKeys.get(peers[0])).toBe('secret');
+  expect(lemonadeKeys.get(peers[1])).toBeUndefined();
 });

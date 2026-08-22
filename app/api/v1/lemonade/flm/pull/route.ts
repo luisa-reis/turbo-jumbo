@@ -1,4 +1,4 @@
-import {config} from '@/lib/config';
+import {config, lemonadeApiKey} from '@/lib/config';
 import {
   lemonadeApiBase,
   lemonadeHeaders,
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...lemonadeHeaders(peer),
+        ...lemonadeHeaders(lemonadeApiKey(peer)),
       },
       body: JSON.stringify({model: body.model, stream: true}),
       signal: abort.signal,

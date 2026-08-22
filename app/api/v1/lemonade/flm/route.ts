@@ -1,4 +1,4 @@
-import {config} from '@/lib/config';
+import {config, lemonadeApiKey} from '@/lib/config';
 import {
   lemonadeApiBase,
   lemonadeHeaders,
@@ -48,7 +48,7 @@ export async function GET(req: Request) {
   const base = lemonadeApiBase(peer.lemonade_url);
   try {
     const res = await fetch(`${base}/models?show_all=true`, {
-      headers: lemonadeHeaders(peer),
+      headers: lemonadeHeaders(lemonadeApiKey(peer)),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok)

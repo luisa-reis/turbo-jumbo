@@ -301,9 +301,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   every request, so the FLM section of the Lemonade browser only reported
   "HTTP 401". A peer can now carry a `lemonade_api_key` next to its
   `lemonade_url`; the app sends it as a Bearer token when listing that
-  server's FLM models and when asking it to pull one. The key stays on the
-  server — it is stripped from the peer list browsers receive. A server that
-  still answers 401 is now reported as needing the key, by name.
+  server's FLM models and when asking it to pull one. The key never gets
+  onto the peer objects the app hands to browsers, so no page or API response
+  can carry it. A server that still answers 401 is now reported as needing
+  the key, by name.
 
 - An interrupted download of a split model can now be finished from the audit
   hovercard. A quantization missing some of its shards reported which ones were
