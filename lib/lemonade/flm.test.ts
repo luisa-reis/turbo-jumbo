@@ -1,8 +1,13 @@
 import {test, expect} from 'bun:test';
 import {
+  flmCatalogEntries,
+  flmMatchesFilter,
+  lemonadeFlmId,
   lemonadeHeaders,
   lemonadeStatusMessage,
   parseFlmModels,
+  type FlmModel,
+  type FlmSource,
 } from '@/lib/lemonade/flm';
 
 const payload = {
@@ -82,4 +87,64 @@ test('a 401 from the Lemonade server is explained as a missing API key', () => {
 
 test('other Lemonade server failures keep the bare status', () => {
   expect(lemonadeStatusMessage(503)).toBe('Lemonade server: HTTP 503');
+});
+
+test('lemonadeFlmId names an flm tag the way Lemonade does', () => {
+  expect(lemonadeFlmId('qwen3.6-moe:35b-a3b')).toBe('qwen3.6-moe-35b-a3b-FLM');
+});
+
+test('flmCatalogEntries lists every registry tag as a Lemonade model backed by its repo', () => {
+  // What the models table needs to badge an FLM repo the way it badges a
+  // catalog-backed one: Lemonade's name for the model, keyed by repo.
+  const registry = new Map<string, FlmSource>([
+    [
+      'qwen3.6-moe:35b-a3b',
+      {
+        repoId: 'FastFlowLM/Qwen3.6-35B-A3B-NPU2',
+        revision: 'flm_quant',
+        files: [],
+      },
+    ],
+    [
+      'embed-gemma:300m',
+      {
+        repoId: 'FastFlowLM/Embedding-Gemma-300M-NPU2',
+        revision: 'main',
+        files: [],
+      },
+    ],
+  ]);
+  expect(flmCatalogEntries(registry)).toEqual([
+    {
+      name: 'embed-gemma-300m-FLM',
+      checkpoint: 'embed-gemma:300m',
+      repoId: 'FastFlowLM/Embedding-Gemma-300M-NPU2',
+    },
+    {
+      name: 'qwen3.6-moe-35b-a3b-FLM',
+      checkpoint: 'qwen3.6-moe:35b-a3b',
+      repoId: 'FastFlowLM/Qwen3.6-35B-A3B-NPU2',
+    },
+  ]);
+});
+
+test('flmMatchesFilter finds an FLM model by its source repo, not only its tag', () => {
+  // The models table names the model by repo, so that is what a person types.
+  const m: FlmModel = {
+    name: 'qwen3.6-moe-35b-a3b-FLM',
+    checkpoint: 'qwen3.6-moe:35b-a3b',
+    sizeGb: 24.3,
+    downloaded: true,
+    labels: ['chat'],
+    source: {
+      repoId: 'FastFlowLM/Qwen3.6-35B-A3B-NPU2',
+      revision: 'flm_quant',
+      files: [],
+    },
+  };
+  expect(flmMatchesFilter(m, 'qwen3.6-35b-a3b-npu2')).toBe(true);
+  expect(flmMatchesFilter(m, 'qwen3.6-moe')).toBe(true);
+  expect(flmMatchesFilter(m, 'chat')).toBe(true);
+  expect(flmMatchesFilter(m, 'gemma')).toBe(false);
+  expect(flmMatchesFilter({...m, source: undefined}, 'npu2')).toBe(false);
 });

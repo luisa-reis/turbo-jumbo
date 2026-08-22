@@ -7,6 +7,8 @@ import {
   type OmniCollection,
   type OmniManifestRef,
 } from '@/lib/lemonade/lemonade';
+import {cachedFlmRegistry} from '@/lib/lemonade/flm-registry';
+import {flmCatalogEntries} from '@/lib/lemonade/flm';
 
 const CATALOG_URL = LEMONADE_CATALOG_URL;
 
@@ -41,11 +43,16 @@ async function fetchManifestCollection(
 }
 
 export async function GET() {
+  // FLM models are in no catalog file, but FastFlowLM's registry names every
+  // one and the repo behind it — enough for the models table to badge an FLM
+  // repo as a Lemonade model without asking a live server (its own cache).
+  const flm = flmCatalogEntries(await cachedFlmRegistry());
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
     return Response.json({
       models: cache.models,
       extraModels: cache.extraModels,
       collections: cache.collections,
+      flm,
     });
   }
   let res: Response;
@@ -85,5 +92,5 @@ export async function GET() {
   );
   const collections = [...inlineCollections, ...manifestCollections];
   cache = {models, extraModels, collections, fetchedAt: Date.now()};
-  return Response.json({models, extraModels, collections});
+  return Response.json({models, extraModels, collections, flm});
 }

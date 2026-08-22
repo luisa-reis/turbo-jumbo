@@ -104,8 +104,3 @@ export async function refreshLemonadeFlm(
     clearTimeout(timer);
   }
 }
-
-/** Lemonade's id for an flm tag: `:` becomes `-`, suffixed `-FLM`. */
-export function lemonadeFlmId(tag: string): string {
-  return `${tag.replaceAll(':', '-')}-FLM`;
-}

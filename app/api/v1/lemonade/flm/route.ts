@@ -4,35 +4,10 @@ import {
   lemonadeHeaders,
   lemonadeStatusMessage,
   parseFlmModels,
-  type FlmSource,
 } from '@/lib/lemonade/flm';
-import {FLM_REGISTRY_URL, parseFlmRegistry} from '@/lib/lemonade/flm-registry';
+import {cachedFlmRegistry} from '@/lib/lemonade/flm-registry';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
-
-// The registry changes rarely; cache it like the HF repo trees. A failed
-// fetch caches an empty map for the TTL rather than hammering GitHub — the
-// models then simply carry no source and fall back to Lemonade-server pulls.
-const REGISTRY_TTL_MS = 30 * 60 * 1000;
-let registryCache: {map: Map<string, FlmSource>; fetchedAt: number} | null =
-  null;
-
-async function flmRegistry(): Promise<Map<string, FlmSource>> {
-  if (registryCache && Date.now() - registryCache.fetchedAt < REGISTRY_TTL_MS)
-    return registryCache.map;
-  let map = new Map<string, FlmSource>();
-  try {
-    const res = await fetch(FLM_REGISTRY_URL, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) map = parseFlmRegistry(await res.json());
-    else logger.warn(`[flm] registry fetch: HTTP ${res.status}`);
-  } catch (e) {
-    logger.warn(`[flm] registry fetch failed: ${String(e)}`);
-  }
-  registryCache = {map, fetchedAt: Date.now()};
-  return map;
-}
 
 // The FLM (NPU) models of the named peer's Lemonade server, live. FLM models
 // exist only inside a running Lemonade instance (discovered from its flm
@@ -53,7 +28,8 @@ export async function GET(req: Request) {
     });
     if (!res.ok)
       return new Response(lemonadeStatusMessage(res.status), {status: 502});
-    const registry = await flmRegistry();
+    // A model without a registry source falls back to a Lemonade-server pull.
+    const registry = await cachedFlmRegistry();
     const models = parseFlmModels(await res.json()).map((m) => {
       const source = registry.get(m.checkpoint);
       return source ? {...m, source} : m;

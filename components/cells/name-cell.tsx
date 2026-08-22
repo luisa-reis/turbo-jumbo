@@ -410,19 +410,16 @@ export function NameCell({
         <Badge label={row.precisions.join(', ')} variant="neutral" />
       )}
       {lemonadeNames && lemonadeNames.length > 0 && (
-        // Every catalog-backed model gets the lemon, so its absence always
-        // means "not in the Lemonade catalog"; the hovercard names the exact
-        // catalog entries the repo backs.
+        // Every model Lemonade knows gets the lemon — catalog entries and
+        // FastFlowLM's FLM models alike — so its absence always means "not a
+        // Lemonade model"; the hovercard names the exact entries the repo
+        // backs, as Lemonade names them.
         <HoverCard
-          content={`This repo backs the Lemonade catalog ${
-            lemonadeNames.length === 1 ? 'entry' : 'entries'
+          content={`This repo backs the Lemonade ${
+            lemonadeNames.length === 1 ? 'model' : 'models'
           }: ${lemonadeNames.join(', ')}`}
         >
-          <Text
-            type="supporting"
-            role="img"
-            aria-label="In the Lemonade catalog"
-          >
+          <Text type="supporting" role="img" aria-label="A Lemonade model">
             🍋
           </Text>
         </HoverCard>

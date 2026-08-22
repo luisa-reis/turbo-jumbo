@@ -11,6 +11,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **FLM (NPU) models get the lemon in the models table.** A repo backing a
+  FastFlowLM model — `FastFlowLM/Qwen3.6-35B-A3B-NPU2` behind
+  `qwen3.6-moe-35b-a3b-FLM` — now carries the 🍋 badge like a catalog-backed
+  repo, and the hovercard gives Lemonade's name for the model, which is how
+  it appears in the Lemonade browser and on the Lemonade server. Previously
+  only catalog entries counted, so an FLM model looked unknown to Lemonade
+  even once it was linked into flm's store.
+
+- **The Lemonade browser's filter finds FLM models by their repo.** Typing
+  the repo name the models table shows (`Qwen3.6-35B-A3B-NPU2`) now matches
+  the FLM row, which is listed under Lemonade's own name
+  (`qwen3.6-moe-35b-a3b-FLM`); before, only that name, the flm tag and the
+  labels were searched.
+
 - **Consolidate with Lemonade now offers FLM (NPU) models to flm.** An FLM
   model downloaded into Turbo Jumbo storage was invisible to Lemonade's flm
   backend, which only reads its own store — so the model never showed as

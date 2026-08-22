@@ -5,6 +5,7 @@
 // Jumbo can fetch the same files directly through its regular HF pipeline.
 
 import type {FlmSource} from '@/lib/lemonade/flm';
+import {logger} from '@/lib/util/logger';
 
 export const FLM_REGISTRY_URL =
   'https://raw.githubusercontent.com/FastFlowLM/FastFlowLM/main/src/model_list.json';
@@ -67,4 +68,29 @@ export function parseFlmRegistry(payload: unknown): Map<string, FlmSource> {
     }
   }
   return out;
+}
+
+// The registry changes rarely; cache it like the HF repo trees. A failed
+// fetch caches an empty map for the TTL rather than hammering GitHub — the
+// callers then simply know no FLM sources until it is retried.
+const REGISTRY_TTL_MS = 30 * 60 * 1000;
+let registryCache: {map: Map<string, FlmSource>; fetchedAt: number} | null =
+  null;
+
+/** The registry, fetched at most once per TTL. */
+export async function cachedFlmRegistry(): Promise<Map<string, FlmSource>> {
+  if (registryCache && Date.now() - registryCache.fetchedAt < REGISTRY_TTL_MS)
+    return registryCache.map;
+  let map = new Map<string, FlmSource>();
+  try {
+    const res = await fetch(FLM_REGISTRY_URL, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) map = parseFlmRegistry(await res.json());
+    else logger.warn(`[flm] registry fetch: HTTP ${res.status}`);
+  } catch (e) {
+    logger.warn(`[flm] registry fetch failed: ${String(e)}`);
+  }
+  registryCache = {map, fetchedAt: Date.now()};
+  return map;
 }

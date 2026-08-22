@@ -62,7 +62,7 @@ import {ModelLabelIcon} from '@/components/lemonade/model-label-icon';
 import {useLemonadeDownload} from '@/components/lemonade/use-lemonade-download';
 import {useFlmDownload} from '@/components/lemonade/use-flm-download';
 import {FlmDownloadView} from '@/components/lemonade/flm-download-view';
-import type {FlmModel} from '@/lib/lemonade/flm';
+import {flmMatchesFilter, type FlmModel} from '@/lib/lemonade/flm';
 
 // The catalog's modality sections, in display order. The niche ONNX (Ryzen AI)
 // and vLLM LLM backends sit below the media sections to keep the top focused.
@@ -334,11 +334,7 @@ export function LemonadeBrowser({
     if (!flmModels) return [];
     const needle = filter.trim().toLowerCase();
     if (!needle) return flmModels;
-    return flmModels.filter((m) =>
-      [m.name, m.checkpoint, ...m.labels].some((s) =>
-        s.toLowerCase().includes(needle),
-      ),
-    );
+    return flmModels.filter((m) => flmMatchesFilter(m, needle));
   }, [flmModels, filter]);
 
   const visibleCollections = useMemo(() => {

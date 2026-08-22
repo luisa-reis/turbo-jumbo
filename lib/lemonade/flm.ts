@@ -86,3 +86,39 @@ export function lemonadeStatusMessage(status: number): string {
     ? 'Lemonade server requires an API key — set lemonade_api_key for this peer in config.yaml'
     : `Lemonade server: HTTP ${status}`;
 }
+
+/** Lemonade's id for an flm tag: `:` becomes `-`, suffixed `-FLM`. */
+export function lemonadeFlmId(tag: string): string {
+  return `${tag.replaceAll(':', '-')}-FLM`;
+}
+
+/** An FLM model as Lemonade would list it, keyed by the repo that backs it —
+ *  what lets the models table badge an FLM repo the way it badges a
+ *  catalog-backed one, without asking a live server. */
+export interface FlmCatalogEntry {
+  name: string;
+  checkpoint: string;
+  repoId: string;
+}
+
+/** Every registry tag as a Lemonade-named model, sorted by name. */
+export function flmCatalogEntries(
+  registry: Map<string, FlmSource>,
+): FlmCatalogEntry[] {
+  return [...registry]
+    .map(([tag, source]) => ({
+      name: lemonadeFlmId(tag),
+      checkpoint: tag,
+      repoId: source.repoId,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Whether a lowercase filter needle finds an FLM model: by Lemonade's name,
+ *  the flm tag, a label, or the repo behind it — the models table names the
+ *  model by repo, so that is often what a person types. */
+export function flmMatchesFilter(m: FlmModel, needle: string): boolean {
+  return [m.name, m.checkpoint, ...m.labels, m.source?.repoId ?? ''].some((s) =>
+    s.toLowerCase().includes(needle),
+  );
+}

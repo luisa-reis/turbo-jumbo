@@ -24,6 +24,7 @@ import type {
   LemonadeModel,
   OmniCollection,
 } from '@/lib/lemonade/lemonade-types';
+import type {FlmCatalogEntry} from '@/lib/lemonade/flm';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {PeerModels} from '@/lib/peers/peer-models';
 import type {
@@ -151,6 +152,7 @@ export function ModelsTableClient({
           models?: LemonadeModel[];
           extraModels?: LemonadeComponent[];
           collections?: OmniCollection[];
+          flm?: FlmCatalogEntry[];
         };
         const map = new Map<string, string[]>();
         const add = (repoId: string, name: string) => {
@@ -164,6 +166,9 @@ export function ModelsTableClient({
         for (const col of data.collections ?? [])
           for (const comp of col.components ?? [])
             for (const cp of comp.checkpoints) add(cp.repoId, comp.name);
+        // FLM (NPU) models: not catalog entries, but Lemonade models all the
+        // same, named by FastFlowLM's registry.
+        for (const f of data.flm ?? []) add(f.repoId, f.name);
         if (!cancelled) {
           setLemonadeNames(map);
           setLemonadeDeps(checkpointDependents(data));
