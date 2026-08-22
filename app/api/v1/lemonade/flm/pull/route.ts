@@ -1,5 +1,9 @@
 import {config} from '@/lib/config';
-import {lemonadeApiBase} from '@/lib/lemonade/flm';
+import {
+  lemonadeApiBase,
+  lemonadeHeaders,
+  lemonadeStatusMessage,
+} from '@/lib/lemonade/flm';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
@@ -31,7 +35,10 @@ export async function POST(req: Request) {
   try {
     res = await fetch(`${base}/pull`, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        ...lemonadeHeaders(peer),
+      },
       body: JSON.stringify({model: body.model, stream: true}),
       signal: abort.signal,
     });
@@ -42,8 +49,9 @@ export async function POST(req: Request) {
     );
   }
   if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => '');
-    return new Response(text || `Lemonade server: HTTP ${res.status}`, {
+    // A 401 carries its own body, but the fix is on our side — say so.
+    const text = res.status === 401 ? '' : await res.text().catch(() => '');
+    return new Response(text || lemonadeStatusMessage(res.status), {
       status: 502,
     });
   }

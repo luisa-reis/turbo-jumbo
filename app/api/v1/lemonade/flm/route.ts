@@ -1,6 +1,8 @@
 import {config} from '@/lib/config';
 import {
   lemonadeApiBase,
+  lemonadeHeaders,
+  lemonadeStatusMessage,
   parseFlmModels,
   type FlmSource,
 } from '@/lib/lemonade/flm';
@@ -46,10 +48,11 @@ export async function GET(req: Request) {
   const base = lemonadeApiBase(peer.lemonade_url);
   try {
     const res = await fetch(`${base}/models?show_all=true`, {
+      headers: lemonadeHeaders(peer),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok)
-      return new Response(`Lemonade server: HTTP ${res.status}`, {status: 502});
+      return new Response(lemonadeStatusMessage(res.status), {status: 502});
     const registry = await flmRegistry();
     const models = parseFlmModels(await res.json()).map((m) => {
       const source = registry.get(m.checkpoint);

@@ -5,6 +5,8 @@
 // so both listing and downloading go through that server's API (the per-peer
 // `lemonade_url` config), never through the HF download path.
 
+import type {Peer} from '@/lib/config';
+
 /** Where an flm tag's weights actually live: an ordinary HF repo (FastFlowLM
  *  org), often pinned to a revision, with the exact files a model needs —
  *  resolved from FastFlowLM's public registry (lib/lemonade/flm-registry). */
@@ -65,4 +67,26 @@ export function parseFlmModels(payload: unknown): FlmModel[] {
 /** A peer's Lemonade API base with the trailing slash normalized away. */
 export function lemonadeApiBase(url: string): string {
   return url.replace(/\/+$/, '');
+}
+
+/**
+ * The headers every request to a peer's Lemonade server needs. A server
+ * started with `LEMONADE_API_KEY` rejects anything without the matching
+ * Bearer token — listing and pulling alike — so the key travels on each call.
+ */
+export function lemonadeHeaders(
+  peer: Pick<Peer, 'lemonade_api_key'>,
+): Record<string, string> {
+  return peer.lemonade_api_key
+    ? {Authorization: `Bearer ${peer.lemonade_api_key}`}
+    : {};
+}
+
+/** What to tell a user when the Lemonade server answered with an error
+ *  status. A 401 means the server wants the key above, which is a config
+ *  fix — worth saying outright rather than leaving as a bare status. */
+export function lemonadeStatusMessage(status: number): string {
+  return status === 401
+    ? 'Lemonade server requires an API key — set lemonade_api_key for this peer in config.yaml'
+    : `Lemonade server: HTTP ${status}`;
 }

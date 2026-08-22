@@ -1,5 +1,9 @@
 import {test, expect} from 'bun:test';
-import {parseFlmModels} from '@/lib/lemonade/flm';
+import {
+  lemonadeHeaders,
+  lemonadeStatusMessage,
+  parseFlmModels,
+} from '@/lib/lemonade/flm';
 
 const payload = {
   object: 'list',
@@ -55,4 +59,27 @@ test('tolerates junk payloads', () => {
   expect(parseFlmModels(null)).toEqual([]);
   expect(parseFlmModels('nope')).toEqual([]);
   expect(parseFlmModels({data: 'nope'})).toEqual([]);
+});
+
+test('lemonadeHeaders carries the API key as a Bearer token', () => {
+  // A Lemonade server started with LEMONADE_API_KEY answers 401 to anything
+  // without this header — listing and pulling alike.
+  expect(lemonadeHeaders({lemonade_api_key: 'secret'})).toEqual({
+    Authorization: 'Bearer secret',
+  });
+});
+
+test('lemonadeHeaders sends nothing for a server without a key', () => {
+  expect(lemonadeHeaders({})).toEqual({});
+});
+
+test('a 401 from the Lemonade server is explained as a missing API key', () => {
+  // Surfaced in the browser as-is; "HTTP 401" alone sent one user hunting.
+  expect(lemonadeStatusMessage(401)).toBe(
+    'Lemonade server requires an API key — set lemonade_api_key for this peer in config.yaml',
+  );
+});
+
+test('other Lemonade server failures keep the bare status', () => {
+  expect(lemonadeStatusMessage(503)).toBe('Lemonade server: HTTP 503');
 });

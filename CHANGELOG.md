@@ -296,6 +296,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **FLM (NPU) models work again on Lemonade servers that require an API
+  key.** A Lemonade server started with `LEMONADE_API_KEY` set answers 401 to
+  every request, so the FLM section of the Lemonade browser only reported
+  "HTTP 401". A peer can now carry a `lemonade_api_key` next to its
+  `lemonade_url`; the app sends it as a Bearer token when listing that
+  server's FLM models and when asking it to pull one. The key stays on the
+  server — it is stripped from the peer list browsers receive. A server that
+  still answers 401 is now reported as needing the key, by name.
+
 - An interrupted download of a split model can now be finished from the audit
   hovercard. A quantization missing some of its shards reported which ones were
   absent and stopped there, offering nothing to press — the same hovercard

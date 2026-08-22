@@ -21,6 +21,9 @@ export interface Peer {
   // API base URL of the Lemonade server tied to this peer, for browsing and
   // downloading the models only that server can fetch (FLM/NPU).
   lemonade_url?: string;
+  // Its API key, when the server was started with LEMONADE_API_KEY. Never
+  // sent to browsers — see publicPeer.
+  lemonade_api_key?: string;
   // Set by the /api/v1/peers response for the peer that is this machine.
   isLocal?: boolean;
 }
@@ -85,6 +88,18 @@ export const localPeer: Peer | undefined = (() => {
   );
   return config.peers.find((p) => localIps.has(addressHost(p.address)));
 })();
+
+/**
+ * A peer as browsers may see it: everything but the secrets. The Lemonade API
+ * key is only ever used server-side, by the routes that talk to that server.
+ */
+export function publicPeer(peer: Peer): Omit<Peer, 'lemonade_api_key'> {
+  const rest: Omit<Peer, 'lemonade_api_key'> & {lemonade_api_key?: string} = {
+    ...peer,
+  };
+  delete rest.lemonade_api_key;
+  return rest;
+}
 
 /**
  * The turbo-jumbo (local models) and Lemonade directories for a peer, derived

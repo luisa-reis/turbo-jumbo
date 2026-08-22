@@ -50,6 +50,11 @@ peers:
     # FLM/NPU models it discovers at runtime). Optional.
     # lemonade_url: http://192.0.2.10:13305/api/v1
 
+    # Its API key, when that server was started with LEMONADE_API_KEY set (it
+    # then answers 401 to everything else). Sent as a Bearer token and never
+    # shown to browsers. Optional.
+    # lemonade_api_key: change-me
+
   # A remote peer — only name and address are needed.
   - name: my-server
     address: 192.168.1.11:3000

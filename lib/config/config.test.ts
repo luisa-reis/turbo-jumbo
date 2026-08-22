@@ -1,5 +1,10 @@
 import {expect, test} from 'bun:test';
-import {resolveBaseSubdirs, validateRawConfig, type Peer} from '@/lib/config';
+import {
+  publicPeer,
+  resolveBaseSubdirs,
+  validateRawConfig,
+  type Peer,
+} from '@/lib/config';
 
 const validPeer = {
   name: 'this-machine',
@@ -61,6 +66,8 @@ test('accepts all documented options', () => {
           cold_storage_path: '/mnt/cold-storage',
           turbo_jumbo_subdir: 'tj',
           lemonade_subdir: 'lmnd',
+          lemonade_url: 'http://192.0.2.10:13305/api/v1',
+          lemonade_api_key: 'secret',
         },
       ],
     }),
@@ -139,5 +146,39 @@ test('resolveBaseSubdirs honors subdir name overrides', () => {
   ).toEqual({
     localModels: '/mnt/models/tj',
     lemonade: '/mnt/models/lmnd',
+  });
+});
+
+test('accepts a lemonade_api_key alongside lemonade_url', () => {
+  // A Lemonade server started with LEMONADE_API_KEY rejects every request
+  // without the matching Bearer token, so the key lives next to the URL.
+  expect(
+    validateRawConfig({
+      peers: [
+        {
+          ...validPeer,
+          lemonade_url: 'http://192.0.2.10:13305/api/v1',
+          lemonade_api_key: 'secret',
+        },
+      ],
+    }),
+  ).toBeNull();
+});
+
+test('publicPeer strips the Lemonade API key and keeps everything else', () => {
+  // Peers are serialized into the page and served by /api/v1/peers; the key
+  // must stay on the server.
+  const p = peer({
+    lemonade_url: 'http://192.0.2.10:13305/api/v1',
+    lemonade_api_key: 'secret',
+  });
+  const pub = publicPeer(p);
+  expect('lemonade_api_key' in pub).toBe(false);
+  expect(pub).toEqual({
+    name: p.name,
+    address: p.address,
+    base_path: p.base_path,
+    cold_storage_path: p.cold_storage_path,
+    lemonade_url: p.lemonade_url,
   });
 });
