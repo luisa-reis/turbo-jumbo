@@ -16,6 +16,20 @@ and Lemonade's bind mounts when the agent runs in LXC:
 "Where step 2 has got to". Done so far: the interface, `LocalStorage`,
 `storage-instance.ts`, and disk usage.
 
+## Lemonade browser: show the selected model with radio buttons
+
+Selecting a model in the download UI (Add model → From Lemonade) isn't very
+clear: rows are plain list items that pick up a highlight when clicked, with
+no control that says "one of these is chosen" the way the checkboxes in the
+models table do. Put a radio button on each row — catalog, collection and FLM
+rows alike — so the current selection is obvious and the single-choice
+semantics read from the widget itself. Rows live in
+`components/lemonade/catalog-rows.tsx` and the FLM section of
+`components/lemonade/lemonade-browser.tsx`; selection state is already a
+single `Selection` value there. Astryx's single-choice widget is `RadioList`
+(`bunx astryx component RadioList`); start from that, or its per-option input
+if the rows must stay `List`/`ListItem`.
+
 ## Lemonade catalog spec-hash warning
 
 The catalog parser assumes the shape of `server_models.json`, which upstream
