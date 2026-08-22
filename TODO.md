@@ -45,6 +45,30 @@ so it wants a route under `app/api/v1/` proxied per peer like the rest of
 running container only — a rebuild restores the image's version — which the
 control should say rather than leave to be discovered.
 
+## Consolidate: offer FLM models to the flm store
+
+An FLM row with a registry source downloads into Turbo Jumbo storage
+(`turbo-jumbo/FastFlowLM/<repo>/`, the four files the registry names), but
+Lemonade's flm backend reads only its own store — `$FLM_MODEL_PATH/models/`,
+now `<lemonade>/flm/models/` on both servers — and reports `downloaded` from
+`flm list --json`, so the model never shows as installed, and the Consolidate
+modal doesn't mention it either: its materialize pass only considers catalog
+repos (`lemonade-sync-run.ts` passes FLM repo ids into `listed` for side
+choice, not into the candidates), and materializing into `builtin` as a hub
+cache entry wouldn't help flm anyway. Seen 2026-08-22 with
+`embed-gemma-300m-FLM`.
+
+Add a third sync pass alongside placement and `extra`: for each Turbo Jumbo
+model whose repo a FastFlowLM tag names, put `flm/models/<repo name>/` in
+place holding the registry's files (Lemonade derives the directory from the
+last segment of the registry URL — `repo_dir_from_url` in
+`src/cpp/server/backends/fastflowlm/fastflowlm_models.cpp`), preview it as
+rows in the modal, and read `downloaded` back afterwards. First find out
+whether flm counts a symlinked directory as installed: drop a symlink to the
+embed-gemma download at `flm/models/Embedding-Gemma-300M-NPU2` and re-query
+`/models?show_all=true`. If it does, this is a `link` job like `extra`; if
+not, it is a copy (or a `pull` that flm dedups) and sizes matter.
+
 ## Lemonade catalog spec-hash warning
 
 The catalog parser assumes the shape of `server_models.json`, which upstream
