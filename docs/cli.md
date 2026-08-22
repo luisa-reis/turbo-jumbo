@@ -526,16 +526,25 @@ deduplicating and removing stale links deletes files from Lemonade's cache
 
 `--peer <slug>` syncs on that peer instead of this machine.
 
-Lemonade's storage is split in two, because Lemonade reads two kinds of thing:
+Lemonade's storage is split by what reads each part:
 
 |                      |                          |                                                                                |
 | -------------------- | ------------------------ | ------------------------------------------------------------------------------ |
 | `<lemonade>/builtin` | its Hugging Face cache   | models Lemonade lists itself — its catalog, plus the FastFlowLM tags it serves |
 | `<lemonade>/extra`   | its `--extra-models-dir` | everything else Turbo Jumbo holds locally                                      |
+| `<lemonade>/flm`     | FastFlowLM's own store   | what its `flm` binary pulls for the FLM (NPU) models — see below               |
 
 Sync sorts cache entries onto the right side on each run, so a model the
 catalog picks up later moves across by itself, and the dry-run shows those
 moves before any happen.
+
+`flm` is neither a cache nor scanned by Turbo Jumbo: it is where the Lemonade
+server's `flm` binary keeps the NPU models it pulls itself, which by default
+would be `~/.config/flm/models` on that server — off the shared disk and out of
+sight. Point it here by setting `FLM_MODEL_PATH=<lemonade>/flm` in the Lemonade
+server's environment (both `flm` and Lemonade append `/models` to it, so the
+weights land in `<lemonade>/flm/models/<repo>/`). Sync leaves the directory
+alone.
 
 `extra` is not a cache. Lemonade scans it recursively for `.gguf` files and
 names each model after the directory holding them, so sync gives every model a

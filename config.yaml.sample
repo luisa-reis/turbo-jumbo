@@ -49,6 +49,11 @@ peers:
     # browsing and downloading the models only that server can fetch (the
     # FLM/NPU models it discovers at runtime). Optional.
     # lemonade_url: http://192.0.2.10:13305/api/v1
+    #
+    # FLM (NPU) models that server pulls itself go to its `flm` binary's own
+    # store, ~/.config/flm/models there by default. Set
+    # FLM_MODEL_PATH=<base_path>/lemonade/flm in that server's environment to
+    # keep them on the shared disk (the weights land under flm/models/).
 
     # Its API key, when that server was started with LEMONADE_API_KEY set (it
     # then answers 401 to everything else). Sent as a Bearer token and never
