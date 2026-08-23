@@ -526,3 +526,34 @@ test('a download job refuses a request it cannot turn into a safe command', asyn
     expect(events.map((e) => e.kind)).toEqual(['error']);
   }
 });
+
+test('a move prunes the directories it empties, hf bookkeeping included', async () => {
+  // What a download-then-move-to-cold used to leave behind: the model's
+  // directory with nothing in it but hf's .cache, which the scans then kept
+  // tripping over.
+  const {storage, models, cold} = await tmpStorage();
+  await fsp.mkdir(nodePath.join(models, 'org/repo/.cache/huggingface'), {
+    recursive: true,
+  });
+  await fsp.writeFile(
+    nodePath.join(models, 'org/repo/.cache/huggingface/x.metadata'),
+    '',
+  );
+  await fsp.writeFile(nodePath.join(models, 'org/repo/w.gguf'), 'weights');
+  const events = await drain(
+    await storage.start({
+      kind: 'copy',
+      from: {root: 'models', path: 'org/repo/w.gguf'},
+      to: {root: 'cold', path: 'org/repo/w.gguf'},
+      move: true,
+    }),
+  );
+  expect(events.at(-1)?.kind).toBe('done');
+  expect(
+    await fsp.readFile(nodePath.join(cold, 'org/repo/w.gguf'), 'utf8'),
+  ).toBe('weights');
+  await expect(fsp.access(nodePath.join(models, 'org'))).rejects.toThrow();
+  // A directory that still holds something stays.
+  await fsp.writeFile(nodePath.join(models, 'keep.gguf'), 'k');
+  expect((await fsp.readdir(models)).sort()).toEqual(['keep.gguf']);
+});

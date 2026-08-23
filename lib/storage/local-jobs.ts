@@ -14,6 +14,7 @@ import {
   isValidRevision,
 } from '@/lib/hf/download-request';
 import {streamCopyResumable} from '@/lib/storage/file-transfer';
+import {pruneEmptyDirs} from '@/lib/storage/prune';
 import type {
   CopyResult,
   DownloadResult,
@@ -21,6 +22,7 @@ import type {
   JobHandle,
   JobSpec,
   Ref,
+  Root,
 } from '@/lib/storage/storage';
 
 /** Events pushed by the job, pulled by one consumer. Closes itself on a
@@ -140,11 +142,13 @@ const PROGRESS_INTERVAL_MS = 250;
 /**
  * Copy a file between refs, resuming a partial destination (see
  * `streamCopyResumable`); with `move`, remove the source after — by rename
- * when the two share a filesystem, which finishes at once.
+ * when the two share a filesystem, which finishes at once — and prune the
+ * directories the source leaves empty, so a moved-out model leaves no husk.
  */
 export function startCopyJob(
   spec: Extract<JobSpec, {kind: 'copy'}>,
   resolve: Resolve,
+  rootDir: (root: Root) => string,
 ): JobHandle {
   const channel = new JobChannel();
   const ctl = new AbortController();
@@ -156,6 +160,7 @@ export function startCopyJob(
       if (spec.move) {
         try {
           await fsp.rename(src, dst);
+          await pruneEmptyDirs(src, rootDir(spec.from.root));
           const size = (await fsp.stat(dst)).size;
           channel.push({kind: 'progress', done: size, total: size});
           const result: CopyResult = {resumedFrom: size, size};
@@ -186,7 +191,10 @@ export function startCopyJob(
         },
       });
       report(true);
-      if (spec.move) await fsp.rm(src, {force: true});
+      if (spec.move) {
+        await fsp.rm(src, {force: true});
+        await pruneEmptyDirs(src, rootDir(spec.from.root));
+      }
       const result: CopyResult = {resumedFrom, size};
       channel.push({kind: 'done', result});
     } catch (e) {

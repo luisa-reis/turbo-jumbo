@@ -125,7 +125,10 @@ export type JobSpec =
       /**
        * Remove the source once the destination is complete. A move between
        * roots on one filesystem is a rename and finishes at once; across
-       * filesystems it is the copy, then the delete.
+       * filesystems it is the copy, then the delete. Either way the
+       * directories it leaves empty go with it, as `remove`'s
+       * `pruneEmptyDirs` takes them — a moved-out model leaves no husk of
+       * hf's `.cache` bookkeeping behind.
        */
       move?: boolean;
     };

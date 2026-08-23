@@ -34,6 +34,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Moving a download on to cold storage leaves no husk behind.** A model
+  sent to cold storage with "delete after transfer" used to leave its local
+  directory standing with nothing in it but the `hf` CLI's `.cache`
+  bookkeeping — a directory the table and the audits then kept tripping
+  over. The move now clears what it empties, as a delete always did.
+
 - **Expanding a peer's non-GGUF model lists its files again.** On a peer's
   tab, a model held only on that peer — a FastFlowLM NPU model, say, or any
   safetensors repo this machine doesn't have a copy of — expanded to nothing:
