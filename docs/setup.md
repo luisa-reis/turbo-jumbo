@@ -39,10 +39,12 @@ On the target, as the account the app will run as:
 - Put the config at `~/tj/config.yaml`. `~/tj/tj.env` (one `KEY=value` per
   line) can override any of the unit's environment (`PORT`, `CONFIG_PATH`,
   …).
-- On a machine that holds models and downloads gated or private Hugging
-  Face repos, add `HF_TOKEN_FILE=/home/<account>/hf_token.txt` to `tj.env`
-  and put the token in that file (mode 600). A viewer never runs `hf` — its
-  downloads happen on the peers — so it needs no token in any form.
+- On a machine that holds models, `tj.env` is also where everything the
+  `hf` CLI needs goes — its `PATH` entry, `HF_XET_HIGH_PERFORMANCE`, and
+  the token for gated or private repos; copy
+  [`deploy/tj.env.sample`](../deploy/tj.env.sample) and uncomment. A viewer
+  never runs `hf` — its downloads happen on the peers — so none of that
+  applies to it.
 - Have root run `loginctl enable-linger <account>` once. A user unit only
   starts at boot, and only outlives the account's login sessions, for a
   lingering account.

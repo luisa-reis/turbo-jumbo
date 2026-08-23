@@ -83,13 +83,14 @@ distribution, and ran.
 `deploy/turbo-jumbo.service` is a systemd _user_ unit for the account the
 app runs as: `WorkingDirectory=%h/<dir>/current`, `bun server.js`,
 `Restart=always`, `WantedBy=default.target`. It sets `NODE_ENV`,
-`HOSTNAME=0.0.0.0`, `PORT`, `HF_XET_HIGH_PERFORMANCE=1`, `CONFIG_PATH` to
-`~/<dir>/config.yaml`, and puts `~/.local/bin` on `PATH` for the `hf` CLI.
-An optional `~/<dir>/tj.env` can override any of these per host, and is
-where a storage peer sets `HF_TOKEN_FILE` (or `HF_TOKEN`) for gated repos;
-`release.env` from the current release is read after it. The front door
-runs no downloads — `hf` is only ever spawned on the peer the download
-lands on — so it carries no token in any form.
+`HOSTNAME=0.0.0.0`, `PORT` and `CONFIG_PATH` to `~/<dir>/config.yaml`, and
+nothing for `hf`. An optional `~/<dir>/tj.env` can override any of these
+per host, and is where a storage peer puts everything the `hf` CLI needs —
+its `PATH` entry, `HF_XET_HIGH_PERFORMANCE`, the token for gated repos
+(`deploy/tj.env.sample` lists them); `release.env` from the current release
+is read after it. The front door runs no downloads — `hf` is only ever
+spawned on the peer the download lands on — so none of that is configured
+there.
 
 A user unit survives reboots only when the account lingers
 (`loginctl enable-linger <user>`, once, as root); without that the user

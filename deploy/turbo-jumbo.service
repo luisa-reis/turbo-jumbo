@@ -6,10 +6,9 @@
 # Layout on the target (DEPLOY_DIR, default "tj"):
 #   ~/tj/current      -> releases/<stamp>   the running release
 #   ~/tj/config.yaml                        the app config (uncommitted)
-#   ~/tj/tj.env                             optional per-host overrides —
-#                                           a storage peer's HF_TOKEN_FILE
-#                                           lives here; a viewer runs no
-#                                           downloads and needs no token
+#   ~/tj/tj.env                             optional per-host overrides; a
+#                                           storage peer's hf setup lives
+#                                           here (see deploy/tj.env.sample)
 
 [Unit]
 Description=Turbo Jumbo
@@ -22,11 +21,8 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
 Environment=CONFIG_PATH=%h/tj/config.yaml
-# `hf download` (spawned by the app on a storage peer) inherits these: the
-# CLI from its user-local install, Xet-accelerated transfers. The token it
-# needs for gated repos is per host: HF_TOKEN_FILE (or HF_TOKEN) in tj.env.
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=HF_XET_HIGH_PERFORMANCE=1
+# Nothing here is for `hf`: only a storage peer spawns it, and everything it
+# needs — its PATH entry, the token, Xet — is that host's business, in tj.env.
 # Per-host overrides, then the release identity the deploy stamped.
 EnvironmentFile=-%h/tj/tj.env
 EnvironmentFile=-%h/tj/current/release.env
