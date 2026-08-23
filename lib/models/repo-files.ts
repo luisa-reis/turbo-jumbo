@@ -8,8 +8,8 @@ import type {FileProvenance} from '@/lib/models/sidecar-types';
 import {isPickOneBinRepo, isPickOneSafetensorsRepo} from '@/lib/hf/hf-download';
 import {isDiffusersRepo} from '@/lib/models/diffusers';
 import {isClutterFile} from '@/lib/models/repo-clutter';
-import {existsSync, statSync} from 'fs';
-import nodePath from 'path';
+import {entriesUnder} from '@/lib/storage/entries';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 export type RepoFileState = 'present' | 'missing' | 'invalid';
 
@@ -56,8 +56,8 @@ async function repoTree(repoId: string, revision: string): Promise<TreeFile[]> {
 }
 
 /**
- * Every file in `repoId`'s HF tree, each judged against the local copy under
- * `storageBase/<repoId>`: `missing` (not on disk), `invalid`, else `present`.
+ * Every file in `repoId`'s HF tree, each judged against the site's copy under
+ * `<repoId>`: `missing` (not on disk), `invalid`, else `present`.
  * Files are validated by size against the HF tree; a file HF serves a checksum
  * for is additionally invalid when its sidecar's recorded hash/size disagree
  * with the source. A checksum-less file (no LFS oid, e.g. index.json) is judged
@@ -69,24 +69,26 @@ async function repoTree(repoId: string, revision: string): Promise<TreeFile[]> {
  * other un-downloaded variants as `missing`.
  */
 export async function repoFileStatuses(
-  storageBase: string,
+  site: Site,
   repoId: string,
 ): Promise<RepoFile[]> {
-  const base = nodePath.resolve(storageBase);
+  const {storage, root} = siteStorage(site);
   // Judge against the revision the model tracks (its sidecar pin), not
   // whatever main looks like today — a pinned repo's main may carry different
   // files entirely.
-  const revision = await modelRevision(base, repoId);
+  const revision = await modelRevision(site, repoId);
   // A file-scoped model (a FastFlowLM registry pin) is judged only against
   // the files that make a complete copy of it — the repo's extra files (NPU
   // kernels) aren't part of the model, so they're neither listed nor missing.
-  const scope = await modelFileScope(base, repoId);
+  const scope = await modelFileScope(site, repoId);
   // Drop repo clutter (`.gitattributes`, docs, images): never a required file,
   // so never reported as missing.
   const tree = (await repoTree(repoId, revision)).filter(
     (f) => !isClutterFile(f.path) && (scope == null || scope.has(f.path)),
   );
-  const dir = nodePath.join(base, repoId);
+  // One inventory of the model directory answers presence and size for every
+  // file in the tree.
+  const onDisk = await entriesUnder(storage, root, repoId);
   const paths = tree.map((f) => f.path);
   // A pick-one repo — ggml whisper.cpp-style `.bin` weights, a Comfy-Org
   // split_files safetensors bundle, or a diffusers pipeline (component folders
@@ -99,8 +101,8 @@ export async function repoFileStatuses(
     isDiffusersRepo(paths);
   const out: RepoFile[] = [];
   for (const f of tree) {
-    const full = nodePath.join(dir, f.path);
-    if (!existsSync(full)) {
+    const entry = onDisk.get(`${repoId}/${f.path}`);
+    if (!entry) {
       if (pickOne) continue;
       out.push({
         path: f.path,
@@ -110,16 +112,11 @@ export async function repoFileStatuses(
       });
       continue;
     }
-    let size = 0;
-    try {
-      size = statSync(full).size;
-    } catch {
-      /* unreadable: treated as size 0 below */
-    }
+    const size = entry.size;
     let state: RepoFileState = size === f.size ? 'present' : 'invalid';
     // For a file present on disk, the sidecar (when the download recorded one)
     // both validates the copy and supplies the row's provenance.
-    const meta = await readFileMetaByPath(base, `${repoId}/${f.path}`);
+    const meta = await readFileMetaByPath(site, `${repoId}/${f.path}`);
     if (state === 'present' && meta) {
       // The size matches HF. Validate by size alone unless the sidecar can prove
       // a problem from what the download recorded: a computed size that disagrees

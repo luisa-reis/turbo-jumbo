@@ -17,8 +17,8 @@ and Lemonade's bind mounts when the agent runs in LXC:
 its header memo and shared walks), `storage-instance.ts`, disk usage, delete,
 the sidecars, support files, the Lemonade link and place passes, the models
 scan, the audit helpers with duplicate fixing, the Lemonade sync, and the job
-API with the download and copy jobs behind `hf-download-stream.ts`. Next: the
-presence checks in `incomplete-models.ts`/`repo-files.ts`, then the
+API with the download and copy jobs behind `hf-download-stream.ts`, and the
+presence checks in `incomplete-models.ts`/`repo-files.ts`. Next: the
 byte-streaming routes onto the copy job — or straight to step 3, the agent.
 
 ## Keep the standalone build from tracing the repo root

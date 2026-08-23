@@ -30,6 +30,22 @@ export async function entryAt(
 }
 
 /**
+ * What sits under `dir`, by path — dangling links left out, as following
+ * them would find nothing. A directory that isn't there is an empty map.
+ */
+export async function entriesUnder(
+  storage: Storage,
+  root: Root,
+  dir: string,
+): Promise<Map<string, FileEntry>> {
+  const out = new Map<string, FileEntry>();
+  for (const e of await storage.list(root, dir ? {under: dir} : {})) {
+    if (!e.dangling) out.set(e.path, e);
+  }
+  return out;
+}
+
+/**
  * The size of the file at `relPath`, or null when there is no file there. A
  * symlink answers with its target's size; a dangling one has no file behind
  * it and is null.

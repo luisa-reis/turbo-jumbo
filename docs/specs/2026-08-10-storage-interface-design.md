@@ -356,16 +356,22 @@ Done:
   of the storage implementation, which is where the table at the top always
   put them.
 
+- `models/repo-files.ts` and `audit/incomplete-models.ts`, whose Hugging
+  Face reads stay on the host but whose presence checks were an `existsSync`
+  and a `statSync` per expected file: each is now one `list` of the model
+  directory (`entriesUnder` in `lib/storage/entries.ts`) answering presence
+  and size for the whole tree. A prune shared between `remove` and the copy
+  job's `move` (`lib/storage/prune.ts`) arrived alongside, after a
+  download moved to cold storage was found leaving its local directory
+  standing with nothing but hf's `.cache` in it.
+
 Remaining call sites:
 
 1. `send`, with the agent and `HttpStorage` — step 3.
-2. Still on `fs` beside their Hugging Face reads: `audit/incomplete-models.ts`
-   and `models/repo-files.ts` check local presence with
-   `existsSync`/`statSync` — a `list` of the model directory each. And the
-   routes that stream bytes (`copy`, `push`, `upload`, `download`, `checksum`,
-   the cold-storage transfers) open files directly; `copyFileWithMeta` in
-   `storage/copy-meta.ts` with them. These are the `copy` and `send` jobs'
-   callers. `lib/config` stays.
+2. The routes that stream bytes (`copy`, `push`, `upload`, `download`,
+   `checksum`, the cold-storage transfers) open files directly;
+   `copyFileWithMeta` in `storage/copy-meta.ts` with them. These are the
+   `copy` and `send` jobs' callers. `lib/config` stays.
 
 ## Decided
 

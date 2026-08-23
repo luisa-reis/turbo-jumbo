@@ -18,8 +18,8 @@ import {
   modelFileScope,
   modelRevision,
 } from '@/lib/models/model-sidecar';
-import {existsSync, statSync} from 'fs';
-import nodePath from 'path';
+import {entriesUnder} from '@/lib/storage/entries';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 // A repo's Hugging Face file list changes rarely, but it's a network round-trip,
 // so cache the expected-file list per repo and revision. The on-disk presence
@@ -63,25 +63,25 @@ const isSelfContainedGguf = (files: ModelFile[]) =>
   files.every((f) => groupName(f).toLowerCase().endsWith('.gguf'));
 
 /**
- * Repo ids present in `storagePath` whose local copy is missing files a full
+ * Repo ids present at the site whose copy is missing files a full
  * download would include (e.g. Kokoro with only voices-v1.0.bin, missing
  * kokoro-v1.0.onnx). GGUF models are skipped — their per-quant downloads aren't
  * judged against the whole repo. A network failure for a repo leaves it
  * unflagged rather than falsely reported incomplete.
  */
 export async function findIncompleteRepos(
-  storagePath: string,
+  site: Site,
   lemonadePath?: string,
 ): Promise<string[]> {
-  const base = nodePath.resolve(storagePath);
-  const local = await scanModels(storagePath, lemonadePath);
+  const {storage, root} = siteStorage(site);
+  const local = await scanModels(site, lemonadePath);
   const candidates = local.filter((m) => !isSelfContainedGguf(m.files));
   const results = await Promise.all(
     candidates.map(async (m) => {
       try {
-        const scope = await modelFileScope(base, m.name);
+        const scope = await modelFileScope(site, m.name);
         const expected = (
-          await expectedFiles(m.name, await modelRevision(base, m.name))
+          await expectedFiles(m.name, await modelRevision(site, m.name))
         ).filter((f) => scope == null || scope.has(f));
         if (expected.length === 0) return null;
         // A pick-one repo — ggml whisper.cpp-style `.bin` weights, a Comfy-Org
@@ -94,10 +94,8 @@ export async function findIncompleteRepos(
           isDiffusersRepo(expected)
         )
           return null;
-        const dir = nodePath.join(base, m.name);
-        const incomplete = expected.some(
-          (f) => !existsSync(nodePath.join(dir, f)),
-        );
+        const onDisk = await entriesUnder(storage, root, m.name);
+        const incomplete = expected.some((f) => !onDisk.has(`${m.name}/${f}`));
         return incomplete ? m.name : null;
       } catch (e) {
         logger.debug(
@@ -111,7 +109,7 @@ export async function findIncompleteRepos(
 }
 
 /**
- * Repo ids present in `storagePath` with at least one local file that audits
+ * Repo ids present at the site with at least one local file that audits
  * `invalid` — its size differs from Hugging Face, or its sidecar can't attest it
  * (unknown source size, or a recorded size/hash that disagrees with the source);
  * see `repoFileStatuses`. Like `findIncompleteRepos`, only non-GGUF (whole-repo)
@@ -120,15 +118,15 @@ export async function findIncompleteRepos(
  * leaves it unflagged rather than falsely reported invalid.
  */
 export async function findReposWithInvalidFiles(
-  storagePath: string,
+  site: Site,
   lemonadePath?: string,
 ): Promise<string[]> {
-  const local = await scanModels(storagePath, lemonadePath);
+  const local = await scanModels(site, lemonadePath);
   const candidates = local.filter((m) => !isSelfContainedGguf(m.files));
   const results = await Promise.all(
     candidates.map(async (m) => {
       try {
-        const files = await repoFileStatuses(storagePath, m.name);
+        const files = await repoFileStatuses(site, m.name);
         return files.some((f) => f.state === 'invalid') ? m.name : null;
       } catch (e) {
         logger.debug(
@@ -143,7 +141,7 @@ export async function findReposWithInvalidFiles(
 
 /**
  * Synthetic `incomplete` audit verdicts for the files a full download would
- * include but that aren't on disk under `storageBase` (e.g. a Kokoro repo's
+ * include but that aren't on disk at the site (e.g. a Kokoro repo's
  * kokoro-v1.0.onnx or its index.json). Uses the same expected set as the table
  * flag, so the two agree. A large (LFS) file carries the HF summary that powers
  * re-download; a small companion (no checksum) is still flagged, just without
@@ -152,15 +150,15 @@ export async function findReposWithInvalidFiles(
  */
 export async function detectMissingExpectedFiles(
   repoIds: string[],
-  storageBase: string,
+  site: Site,
   branch: string,
 ): Promise<AuditResult[]> {
-  const base = nodePath.resolve(storageBase);
+  const {storage, root} = siteStorage(site);
   const out: AuditResult[] = [];
   for (const repoId of repoIds) {
     // A model pinned to a revision (sidecar `revision`) is judged against that
     // revision; the caller's branch is the default for everything else.
-    const pinned = await modelRevision(base, repoId);
+    const pinned = await modelRevision(site, repoId);
     const repoBranch = pinned !== 'main' ? pinned : branch;
     const lfs = await listRepoFiles(repoId, repoBranch);
     if (!lfs) continue;
@@ -180,12 +178,12 @@ export async function detectMissingExpectedFiles(
       isPickOneSafetensorsRepo(repoPaths) ||
       isDiffusersRepo(repoPaths)
     ) {
-      await clearMissingFlags(base, repoId);
+      await clearMissingFlags(site, repoId);
       continue;
     }
     let expected: string[];
     try {
-      const scope = await modelFileScope(base, repoId);
+      const scope = await modelFileScope(site, repoId);
       expected = (await expectedFiles(repoId, repoBranch)).filter(
         (f) => scope == null || scope.has(f),
       );
@@ -194,27 +192,27 @@ export async function detectMissingExpectedFiles(
     }
     const expectedSet = new Set(expected);
     const lfsByPath = new Map(lfs.map((f) => [f.repoPath, f]));
-    const dir = nodePath.join(base, repoId);
+    const onDisk = await entriesUnder(storage, root, repoId);
     // Files this repo's sidecar currently records as missing: a stale flag on a
     // now-present file is cleared below so the cached audit agrees with disk.
     // A flag on a file no longer expected (it fell outside a newly-recorded
     // file scope) is dropped outright.
-    const sidecar = await readModelSidecar(base, repoId);
+    const sidecar = await readModelSidecar(site, repoId);
     const flaggedMissing = new Set(
       (sidecar?.files ?? []).filter((f) => f.missing).map((f) => f.path),
     );
     for (const stale of flaggedMissing) {
       if (expectedSet.has(stale)) continue;
       try {
-        await removeFileMeta(base, repoId, stale);
+        await removeFileMeta(site, repoId, stale);
       } catch {
         /* best-effort: a stale flag isn't worth failing the audit */
       }
     }
     for (const repoPath of expected) {
-      const full = nodePath.join(dir, repoPath);
+      const entry = onDisk.get(`${repoId}/${repoPath}`);
       const hf = lfsByPath.get(repoPath);
-      if (!existsSync(full)) {
+      if (!entry) {
         out.push({
           file: `${repoId}/${repoPath}`,
           status: 'incomplete',
@@ -222,7 +220,7 @@ export async function detectMissingExpectedFiles(
           ...(hf ? {hf: hfSummary(hf)} : {}),
         });
         await persistMissingState(
-          base,
+          site,
           repoId,
           repoPath,
           repoBranch,
@@ -231,19 +229,13 @@ export async function detectMissingExpectedFiles(
           true,
         );
       } else if (flaggedMissing.has(repoPath)) {
-        let size = 0;
-        try {
-          size = statSync(full).size;
-        } catch {
-          /* unreadable: recorded as 0, the per-file audit re-measures */
-        }
         await persistMissingState(
-          base,
+          site,
           repoId,
           repoPath,
           repoBranch,
           hf,
-          size,
+          entry.size,
           false,
         );
       }
@@ -258,13 +250,13 @@ export async function detectMissingExpectedFiles(
  * repo turns out not to be a whole-repo download (pick-one / diffusers), so the
  * cached audit stops reporting its other variants as missing. Best-effort.
  */
-async function clearMissingFlags(base: string, repoId: string): Promise<void> {
-  const sidecar = await readModelSidecar(base, repoId);
+async function clearMissingFlags(site: Site, repoId: string): Promise<void> {
+  const sidecar = await readModelSidecar(site, repoId);
   if (!sidecar) return;
   for (const f of sidecar.files) {
     if (!f.missing) continue;
     try {
-      await removeFileMeta(base, repoId, f.path);
+      await removeFileMeta(site, repoId, f.path);
     } catch {
       /* best-effort: a stale flag isn't worth failing the audit */
     }
@@ -277,7 +269,7 @@ async function clearMissingFlags(base: string, repoId: string): Promise<void> {
  * Best-effort: a sidecar write failure must not fail the audit.
  */
 async function persistMissingState(
-  base: string,
+  site: Site,
   repoId: string,
   repoPath: string,
   branch: string,
@@ -297,7 +289,7 @@ async function persistMissingState(
     ...(missing ? {missing: true} : {}),
   };
   try {
-    await upsertFileMeta(base, repoId, repoId, metaToEntry(repoPath, meta));
+    await upsertFileMeta(site, repoId, repoId, metaToEntry(repoPath, meta));
   } catch (e) {
     logger.warn(
       `[incomplete] failed to record missing state for ${repoId}/${repoPath}: ${
