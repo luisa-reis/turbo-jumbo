@@ -1,0 +1,36 @@
+# Turbo Jumbo as a systemd user unit, running Next's standalone bundle on bun.
+# bin/deploy.sh installs this at ~/.config/systemd/user/turbo-jumbo.service on
+# the target and restarts it after every release; `loginctl enable-linger`
+# (root, once) is what makes it start at boot without a login session.
+#
+# Layout on the target (DEPLOY_DIR, default "tj"):
+#   ~/tj/current      -> releases/<stamp>   the running release
+#   ~/tj/config.yaml                        the app config (uncommitted)
+#   ~/tj/tj.env                             optional per-host overrides
+#   ~/hf_token.txt                          Hugging Face token, mode 600
+
+[Unit]
+Description=Turbo Jumbo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/tj/current
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+Environment=CONFIG_PATH=%h/tj/config.yaml
+Environment=HF_TOKEN_FILE=%h/hf_token.txt
+# `hf download` (spawned by the app) inherits these: the CLI from its
+# user-local install, Xet-accelerated transfers.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HF_XET_HIGH_PERFORMANCE=1
+# Per-host overrides, then the release identity the deploy stamped.
+EnvironmentFile=-%h/tj/tj.env
+EnvironmentFile=-%h/tj/current/release.env
+ExecStart=/usr/bin/bun server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

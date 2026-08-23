@@ -72,7 +72,7 @@ bun install
 bun dev                             # http://localhost:3000
 ```
 
-Configuration, container deployment, and Lemonade sync setup are covered in
+Configuration, deployment, and Lemonade sync setup are covered in
 [docs/setup.md](docs/setup.md).
 
 There's also a companion CLI, for when a browser is the wrong shape — over ssh,

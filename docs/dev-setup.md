@@ -21,8 +21,6 @@ and deployment live in [setup.md](setup.md).
   export VIRTUAL_ENV="$HOME/venv"     # python venv (narration tooling)
   layout python
 
-  export DEST=/mnt/ai-models          # bin/deploy.sh target
-
   # `hf download` (spawned by the app) inherits this: Xet-accelerated
   # transfers. (Do NOT set the deprecated HF_HUB_ENABLE_HF_TRANSFER —
   # the modern CLI ignores it and prints a FutureWarning on every run.)

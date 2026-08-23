@@ -27,6 +27,40 @@ The config lists every `peer` (machine) that shares models, including this one. 
 
 Neither path is required. A machine whose peer entry has no `base_path` — or that isn't in the peer list at all — runs as a **viewer**: it shows every peer's models on the All tab, and downloads, copies and deletes run on the peers themselves (copies go peer to peer without passing through the viewer). It has no tab of its own, is offered nowhere as a destination, and the All tab's _Add model_ is absent — start downloads from a peer's tab instead. A viewer needs no entry in the other machines' configs; there is nothing for them to fetch from it. Cold storage is independent of this: a machine with only `cold_storage_path` gets the Cold Storage tab and nothing else of its own.
 
+## Deploying with bun and systemd
+
+The app runs straight on [bun](https://bun.sh) from Next's standalone
+bundle, under a systemd _user_ unit on the target machine, which needs only
+bun, the `hf` CLI (for downloads), rsync and ssh access for the deploying
+account. No container runtime is involved.
+
+On the target, as the account the app will run as:
+
+- Put the config at `~/tj/config.yaml` and, for gated or private Hugging Face
+  repos, the token in `~/hf_token.txt` (mode 600). The unit reads both from
+  those paths; `~/tj/tj.env` can override any of its environment (`PORT`,
+  `CONFIG_PATH`, …), one `KEY=value` per line.
+- Have root run `loginctl enable-linger <account>` once. A user unit only
+  starts at boot, and only outlives the account's login sessions, for a
+  lingering account.
+
+On the machine you build from, copy [`deploy/env.sample`](../deploy/env.sample)
+into `.env` at the repo root and set `DEPLOY_HOST=<account>@<host>`. Then:
+
+```bash
+bin/deploy.sh        # build, ship, install the unit, restart, health-check
+bin/deploy.sh -n     # build and report what would ship, touching nothing
+```
+
+Each deploy lands in `~/tj/releases/<stamp>/` and flips the `~/tj/current`
+symlink the unit runs from; the last three releases are kept, so rolling
+back is pointing `current` at an older one and
+`systemctl --user restart turbo-jumbo`. Logs are in
+`journalctl --user -u turbo-jumbo`.
+
+A machine without a model store of its own — the viewer described under
+"Configuration" above — deploys the same way; only its `config.yaml` differs.
+
 ## Building a container image
 
 Requires [Podman](https://podman.io).
@@ -37,7 +71,7 @@ bun docker:build
 
 This produces `turbo-jumbo.tar.gz` in the repo root — a self-contained image with no registry involved.
 
-## Deploying on another machine
+## Deploying the container on another machine
 
 Copy `turbo-jumbo.tar.gz` to the target machine, then:
 

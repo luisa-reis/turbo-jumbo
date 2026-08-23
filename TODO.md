@@ -16,6 +16,17 @@ and Lemonade's bind mounts when the agent runs in LXC:
 "Where step 2 has got to". Done so far: the interface, `LocalStorage`,
 `storage-instance.ts`, and disk usage.
 
+## Keep the standalone build from tracing the repo root
+
+`next build` warns that `lib/hf/hf-download-stream.ts` joins a path it can't
+scope statically, and in response traces the whole repo root into
+`.next/standalone` — `config.yaml` and `hf_token.txt` included. `bin/deploy.sh`
+ships an allow-list so nothing secret leaves the machine, but the output
+itself still holds copies, and anyone running `bun run build` for another
+purpose gets them too. Scope the join (`path.join(process.cwd(), 'data', …)`
+style) or mark it `/*turbopackIgnore: true*/` as the warning suggests, then
+check the standalone output no longer contains either file.
+
 ## Lemonade browser: show the selected model with radio buttons
 
 Selecting a model in the download UI (Add model → From Lemonade) isn't very

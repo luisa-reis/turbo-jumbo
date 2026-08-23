@@ -11,6 +11,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Deploy without a container.** `bin/deploy.sh` builds Next's standalone
+  bundle, ships it over rsync as a new release under `~/tj/releases/` on the
+  machine named in `.env`, installs the systemd user unit in
+  `deploy/turbo-jumbo.service`, restarts it and waits for the app to report
+  the shipped commit; the last three releases stay for rollback. The
+  podman-watching `bin/watch-deploy.sh` is gone with it. See "Deploying with
+  bun and systemd" in `docs/setup.md`.
+
 - **Turbo Jumbo runs on a machine with no model storage.** Leave `base_path`
   out of this machine's peer entry — or leave the machine out of the peer
   list altogether — and it runs as a viewer: the All tab shows every peer's
