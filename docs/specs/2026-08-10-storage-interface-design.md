@@ -365,13 +365,21 @@ Done:
   download moved to cold storage was found leaving its local directory
   standing with nothing but hf's `.cache` in it.
 
+- The cold-storage transfer routes (`cold-storage/to-local`, `from-local`),
+  on one `copy` job per file: same NDJSON fields, same 8 MiB emit cadence,
+  same 400s, and the resume a partial destination gets. `copy-meta.ts`'s
+  provenance helpers take a `Site` now (`updateMetaAt` in `tjmeta.ts` for
+  the no-repo branch), so every caller of `propagateFileMeta` can hand it a
+  root rather than a directory.
+
 Remaining call sites:
 
-1. `send`, with the agent and `HttpStorage` — step 3.
-2. The routes that stream bytes (`copy`, `push`, `upload`, `download`,
-   `checksum`, the cold-storage transfers) open files directly;
-   `copyFileWithMeta` in `storage/copy-meta.ts` with them. These are the
-   `copy` and `send` jobs' callers. `lib/config` stays.
+1. `send`, with the agent and `HttpStorage` — step 3. The `copy` route
+   (peer→peer, with `push`/`upload`/`download`/`file-meta` as its two ends),
+   `checksum` and `copy/check` are its callers: they open files directly
+   today and become `send` and `hash` once an agent stands at the far end.
+   `copyFileWithMeta` in `storage/copy-meta.ts` goes with them.
+   `lib/config` stays.
 
 ## Decided
 

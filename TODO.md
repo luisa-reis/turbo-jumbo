@@ -18,8 +18,9 @@ its header memo and shared walks), `storage-instance.ts`, disk usage, delete,
 the sidecars, support files, the Lemonade link and place passes, the models
 scan, the audit helpers with duplicate fixing, the Lemonade sync, and the job
 API with the download and copy jobs behind `hf-download-stream.ts`, and the
-presence checks in `incomplete-models.ts`/`repo-files.ts`. Next: the
-byte-streaming routes onto the copy job — or straight to step 3, the agent.
+presence checks in `incomplete-models.ts`/`repo-files.ts`, and the
+cold-storage transfer routes on the copy job. Next: step 3 — `HttpStorage`
+and the agent, which is where `send` and the peer-to-peer copy route land.
 
 ## Keep the standalone build from tracing the repo root
 

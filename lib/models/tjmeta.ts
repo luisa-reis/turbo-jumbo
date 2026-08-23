@@ -118,6 +118,20 @@ export async function readMetaAt(
   }
 }
 
+/** `updateMeta` for a site: merge `next` into the legacy per-file sidecar
+ *  at `relPath`, creating it when there is none. */
+export async function updateMetaAt(
+  site: Site,
+  relPath: string,
+  next: TjMeta,
+): Promise<void> {
+  await writeMetaAt(
+    site,
+    relPath,
+    mergeMeta(await readMetaAt(site, relPath), next),
+  );
+}
+
 async function writeMetaAt(
   site: Site,
   relPath: string,

@@ -1,17 +1,25 @@
-import {streamCopyResumable} from '@/lib/audit/audit';
 import {coldStorageDir, localModelsDir} from '@/lib/config';
 import {propagateFileMeta} from '@/lib/storage/copy-meta';
+import {fileSize} from '@/lib/storage/entries';
+import type {Site} from '@/lib/storage/site';
+import {storage} from '@/lib/storage/storage-instance';
 import {logger} from '@/lib/util/logger';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
-import nodePath from 'path';
-import {promises as fsp} from 'fs';
 
 const EMIT_INTERVAL = 8 * 1024 * 1024; // 8 MB
 
-function resolveWithin(base: string, file: string): string | null {
-  const resolved = nodePath.resolve(base, file);
-  return resolved.startsWith(base + nodePath.sep) ? resolved : null;
+/** A root-relative path that stays inside its root. The storage refuses the
+ *  rest as well; this answers 400 for it rather than 500. */
+function isWithinRoot(file: string): boolean {
+  return (
+    file !== '' &&
+    !file.startsWith('/') &&
+    !file.split('/').some((seg) => seg === '..')
+  );
 }
+
+const cold: Site = {storage, root: 'cold'};
+const local: Site = {storage, root: 'models'};
 
 /**
  * Copy this host's local-storage files into the cold-storage mount, streaming
@@ -31,24 +39,16 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
   const {files} = body;
 
-  const coldBase = nodePath.resolve(coldStorageDir);
-  const localBase = nodePath.resolve(localModelsDir);
-
   for (const file of files) {
-    if (!resolveWithin(localBase, file) || !resolveWithin(coldBase, file))
-      return new Response('Invalid path', {status: 400});
+    if (!isWithinRoot(file)) return new Response('Invalid path', {status: 400});
   }
 
-  // Sizes come from the local copy (the source of this transfer).
+  // Sizes come from the local copy (the source of this transfer). A file
+  // missing locally is reported as an error during the copy loop.
   const fileSizeMap: Record<string, number> = {};
   for (const file of files) {
-    try {
-      fileSizeMap[file] = (
-        await fsp.stat(resolveWithin(localBase, file)!)
-      ).size;
-    } catch {
-      // Missing locally — reported as an error during the copy loop.
-    }
+    const size = await fileSize(storage, 'models', file);
+    if (size !== null) fileSizeMap[file] = size;
   }
 
   let filesTotal = 0;
@@ -121,34 +121,37 @@ export async function POST(req: Request) {
           }
           signal.throwIfAborted();
 
-          const src = resolveWithin(localBase, file)!;
-          const dst = resolveWithin(coldBase, file)!;
-
           fileTotal = fileSizeMap[file];
           fileDone = 0;
           emit();
 
           try {
-            let nextEmitAt = EMIT_INTERVAL;
-            await streamCopyResumable(src, dst, {
-              signal,
-              onResume: (offset) => {
-                if (offset > 0) {
-                  fileDone = offset;
-                  bytesDone += offset;
-                  nextEmitAt = fileDone + EMIT_INTERVAL;
-                  emit();
-                }
-              },
-              onChunk: (n) => {
-                fileDone += n;
-                bytesDone += n;
-                if (fileDone >= nextEmitAt) {
-                  nextEmitAt = fileDone + EMIT_INTERVAL;
-                  emit();
-                }
-              },
+            // One copy job per file, resuming a partial cold copy from its
+            // verified prefix; the bytes kept count as done.
+            const job = await storage.start({
+              kind: 'copy',
+              from: {root: 'models', path: file},
+              to: {root: 'cold', path: file},
             });
+            const cancel = () => void job.cancel();
+            signal.addEventListener('abort', cancel, {once: true});
+            let nextEmitAt = EMIT_INTERVAL;
+            try {
+              for await (const event of job.events()) {
+                if (event.kind === 'progress') {
+                  bytesDone += event.done - fileDone;
+                  fileDone = event.done;
+                  if (fileDone >= nextEmitAt) {
+                    nextEmitAt = fileDone + EMIT_INTERVAL;
+                    emit();
+                  }
+                } else if (event.kind === 'error') {
+                  throw new Error(event.message);
+                }
+              }
+            } finally {
+              signal.removeEventListener('abort', cancel);
+            }
             filesDone++;
             fileDone = fileTotal;
             succeeded.push(file);
@@ -156,7 +159,7 @@ export async function POST(req: Request) {
             // names and audits without a re-hash. Best effort: a meta failure
             // is reported but the copy stands.
             try {
-              await propagateFileMeta(localBase, coldBase, file);
+              await propagateFileMeta(local, cold, file);
             } catch (err) {
               errors.push(
                 `${file}: meta: ${err instanceof Error ? err.message : String(err)}`,

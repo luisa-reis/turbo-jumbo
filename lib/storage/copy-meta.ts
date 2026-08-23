@@ -1,15 +1,15 @@
 import {promises as fsp} from 'fs';
-import path from 'path';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {modelDirForRepo, readModelSidecar} from '@/lib/models/model-sidecar';
 import {
   metaPath,
   readMetaResolved,
-  updateMeta,
+  updateMetaAt,
   updateMetaResolved,
   type TjMeta,
 } from '@/lib/models/tjmeta';
 import {streamCopyResumable} from '@/lib/storage/file-transfer';
+import type {Site} from '@/lib/storage/site';
 
 /**
  * Copy a file and its `.tjmeta.json` sidecar (if present) to `dstFull`. Wraps
@@ -58,7 +58,7 @@ export interface FileMetaPayload {
  * a copy never fabricates one.
  */
 export async function readFileMetaWithRepoHead(
-  srcBase: string,
+  srcBase: Site,
   relPath: string,
 ): Promise<FileMetaPayload | null> {
   const meta = await readMetaResolved(srcBase, relPath);
@@ -87,14 +87,14 @@ export async function readFileMetaWithRepoHead(
  * HF resolution and must not clobber a newer observation here.
  */
 export async function applyFileMeta(
-  dstBase: string,
+  dstBase: Site,
   relPath: string,
   meta: TjMeta,
   repoHead?: RepoHead,
 ): Promise<void> {
   const repoId = repoIdFromModelUrl(meta.modelUrl);
   if (!repoId) {
-    await updateMeta(path.join(dstBase, relPath), meta);
+    await updateMetaAt(dstBase, relPath, meta);
     return;
   }
   let head = repoHead;
@@ -106,10 +106,11 @@ export async function applyFileMeta(
   await updateMetaResolved(dstBase, relPath, repoId, meta, head);
 }
 
-/** Both sides at once, for legs where source and destination are local paths. */
+/** Both sides at once, for legs where source and destination are this
+ *  machine's own sites. */
 export async function propagateFileMeta(
-  srcBase: string,
-  dstBase: string,
+  srcBase: Site,
+  dstBase: Site,
   relPath: string,
 ): Promise<void> {
   const payload = await readFileMetaWithRepoHead(srcBase, relPath);
