@@ -410,3 +410,119 @@ test('move carries a file from one root to another', async () => {
   ).toBe('x');
   await expect(fsp.access(nodePath.join(models, 'w.gguf'))).rejects.toThrow();
 });
+
+async function drain(
+  handle: import('@/lib/storage/storage').JobHandle,
+): Promise<import('@/lib/storage/storage').JobEvent[]> {
+  const out = [];
+  for await (const e of handle.events()) out.push(e);
+  return out;
+}
+
+test('a copy job streams a file between roots and reports progress to its size', async () => {
+  const {storage, models, cold} = await tmpStorage();
+  const bytes = Buffer.alloc(2 * 1024 * 1024 + 123, 9);
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), bytes);
+  const events = await drain(
+    await storage.start({
+      kind: 'copy',
+      from: {root: 'models', path: 'w.gguf'},
+      to: {root: 'cold', path: 'org/repo/w.gguf'},
+    }),
+  );
+  const last = events.at(-1);
+  expect(last).toEqual({
+    kind: 'done',
+    result: {resumedFrom: 0, size: bytes.length},
+  });
+  const progress = events.filter((e) => e.kind === 'progress');
+  expect(progress.at(-1)).toEqual({
+    kind: 'progress',
+    done: bytes.length,
+    total: bytes.length,
+  });
+  expect(await fsp.readFile(nodePath.join(cold, 'org/repo/w.gguf'))).toEqual(
+    bytes,
+  );
+  // A copy leaves the source where it was.
+  expect((await fsp.stat(nodePath.join(models, 'w.gguf'))).size).toBe(
+    bytes.length,
+  );
+});
+
+test('a copy job resumes a destination that holds a prefix of the source', async () => {
+  const {storage, models, cold} = await tmpStorage();
+  const bytes = Buffer.from('0123456789abcdef'.repeat(4096));
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), bytes);
+  await fsp.mkdir(nodePath.join(cold, 'x'), {recursive: true});
+  await fsp.writeFile(
+    nodePath.join(cold, 'x/w.gguf'),
+    bytes.subarray(0, 10000),
+  );
+  const events = await drain(
+    await storage.start({
+      kind: 'copy',
+      from: {root: 'models', path: 'w.gguf'},
+      to: {root: 'cold', path: 'x/w.gguf'},
+    }),
+  );
+  expect(events.at(-1)).toEqual({
+    kind: 'done',
+    result: {resumedFrom: 10000, size: bytes.length},
+  });
+  expect(await fsp.readFile(nodePath.join(cold, 'x/w.gguf'))).toEqual(bytes);
+});
+
+test('a copy job with move removes the source once the destination is whole', async () => {
+  const {storage, models, cold} = await tmpStorage();
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), 'weights');
+  const events = await drain(
+    await storage.start({
+      kind: 'copy',
+      from: {root: 'models', path: 'w.gguf'},
+      to: {root: 'cold', path: 'w.gguf'},
+      move: true,
+    }),
+  );
+  expect(events.at(-1)?.kind).toBe('done');
+  expect(await fsp.readFile(nodePath.join(cold, 'w.gguf'), 'utf8')).toBe(
+    'weights',
+  );
+  await expect(fsp.access(nodePath.join(models, 'w.gguf'))).rejects.toThrow();
+});
+
+test('a copy job of a missing source ends in error, not done', async () => {
+  const {storage} = await tmpStorage();
+  const events = await drain(
+    await storage.start({
+      kind: 'copy',
+      from: {root: 'models', path: 'nope.gguf'},
+      to: {root: 'cold', path: 'nope.gguf'},
+    }),
+  );
+  expect(events.at(-1)?.kind).toBe('error');
+});
+
+test('a download job refuses a request it cannot turn into a safe command', async () => {
+  // The storage validates on its own account, whatever a caller checked:
+  // this is the one place a request becomes an argv, and the only thing that
+  // argv may ever be is `hf download` with vetted arguments.
+  const {storage} = await tmpStorage();
+  const bad = [
+    {repoId: '../etc', files: ['x']},
+    {repoId: 'org/repo', files: ['../x']},
+    {repoId: 'org/repo', revision: 'a;b', files: ['x']},
+  ] as const;
+  for (const b of bad) {
+    const events = await drain(
+      await storage.start({
+        kind: 'download',
+        repoId: b.repoId,
+        ...('revision' in b ? {revision: b.revision} : {}),
+        files: [...b.files],
+        into: {root: 'models', path: 'org/repo'},
+      }),
+    );
+    expect(events.map((e) => e.kind)).toEqual(['error']);
+  }
+});

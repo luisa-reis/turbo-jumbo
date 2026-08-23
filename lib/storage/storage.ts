@@ -98,6 +98,72 @@ export interface RemoveOptions {
   pruneEmptyDirs?: boolean;
 }
 
+/**
+ * Anything that runs long enough to need progress or cancelling. Two kinds so
+ * far, both of an agent's own machine: a download (the agent runs `hf`
+ * through this one named verb, validating every argument — never a shell) and
+ * a copy between roots, which resumes a partial destination and can be a move.
+ * A cross-agent `send` is the third kind the design names; it lands with the
+ * agent that receives it. Hashing is the `hash` verb — its callbacks already
+ * are the progress and cancellation a job gives.
+ */
+export type JobSpec =
+  | {
+      kind: 'download';
+      repoId: string;
+      /** A branch, tag or commit; `main` when absent. */
+      revision?: string;
+      /** In-repo paths. Empty means the whole repo. */
+      files: string[];
+      /** The directory the files land under, at their in-repo paths. */
+      into: Ref;
+    }
+  | {
+      kind: 'copy';
+      from: Ref;
+      to: Ref;
+      /**
+       * Remove the source once the destination is complete. A move between
+       * roots on one filesystem is a rename and finishes at once; across
+       * filesystems it is the copy, then the delete.
+       */
+      move?: boolean;
+    };
+
+export type JobEvent =
+  /** Bytes so far; `total` when the job knows it. Throttled, never per chunk. */
+  | {kind: 'progress'; done: number; total: number | null}
+  /** Output as it arrives — a tool's stderr, verbatim. */
+  | {kind: 'log'; line: string}
+  /** The job ran to its end; `result` is the kind's own record. */
+  | {kind: 'done'; result: unknown}
+  /** The job could not run or broke off. Terminal, like `done`. */
+  | {kind: 'error'; message: string};
+
+/** What a finished `download` job reports. A non-zero exit is still `done`:
+ *  the tool ran, and what its code means is the caller's to say. */
+export interface DownloadResult {
+  exitCode: number | null;
+  signal: string | null;
+  /** The tool's stdout — `hf --json`'s one-line record. */
+  output: string;
+}
+
+/** What a finished `copy` job reports. */
+export interface CopyResult {
+  /** The byte the stream started at: 0 for a fresh copy, the verified prefix
+   *  of a resumed one, the whole size when a move was a rename. */
+  resumedFrom: number;
+  size: number;
+}
+
+export interface JobHandle {
+  id: string;
+  /** The job's events, ending with `done` or `error`. Read once. */
+  events(): AsyncIterable<JobEvent>;
+  cancel(): Promise<void>;
+}
+
 export interface Storage {
   /**
    * Recursive inventory. The only traversal verb. Symlinks are reported, not
@@ -146,4 +212,7 @@ export interface Storage {
     ref: Ref,
     opts?: {signal?: AbortSignal; onBytes?: (n: number) => void},
   ): Promise<string>;
+
+  /** Start a job (see `JobSpec`). Resolves once it is running, not done. */
+  start(spec: JobSpec): Promise<JobHandle>;
 }

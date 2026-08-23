@@ -11,9 +11,12 @@ import {statfs} from 'fs/promises';
 import nodePath from 'path';
 import {readSafetensorsDtype} from '@/lib/models/safetensors';
 import {localSha256} from '@/lib/storage/file-transfer';
+import {startCopyJob, startDownloadJob} from '@/lib/storage/local-jobs';
 import {
   MAX_SMALL_FILE,
   type FileEntry,
+  type JobHandle,
+  type JobSpec,
   type LinkOutcome,
   type ListOptions,
   type Ref,
@@ -366,6 +369,18 @@ export function createLocalStorage(roots: Roots): Storage {
       opts: {signal?: AbortSignal; onBytes?: (n: number) => void} = {},
     ): Promise<string> {
       return localSha256(resolve(ref), opts.signal, opts.onBytes);
+    },
+
+    async start(spec: JobSpec): Promise<JobHandle> {
+      switch (spec.kind) {
+        case 'download':
+          forgetInFlight(spec.into.root);
+          return startDownloadJob(spec, resolve);
+        case 'copy':
+          forgetInFlight(spec.to.root);
+          if (spec.move) forgetInFlight(spec.from.root);
+          return startCopyJob(spec, resolve);
+      }
     },
 
     async usage(root: Root): Promise<Usage> {

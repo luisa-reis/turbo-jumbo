@@ -1,15 +1,17 @@
-import {spawn} from 'child_process';
-import {promises as fsp} from 'fs';
 import path from 'path';
 import {localModelsDir, coldStorageDir} from '@/lib/config';
 import {
   auditFile,
-  copyFileWithMeta,
   metaPath,
   readMetaResolved,
   updateMetaResolved,
 } from '@/lib/audit/audit';
 import {describeExitCode} from '@/lib/hf/download-output';
+import {
+  isValidFilePath,
+  isValidRepoId,
+  isValidRevision,
+} from '@/lib/hf/download-request';
 import {repoFileSizes, resolveHfFileByPath} from '@/lib/hf/hf-infer';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {
@@ -18,22 +20,14 @@ import {
   modelDirForRepo,
   removeFileMeta,
 } from '@/lib/models/model-sidecar';
+import {fileSize} from '@/lib/storage/entries';
+import {storage} from '@/lib/storage/storage-instance';
+import type {Site} from '@/lib/storage/site';
+import type {DownloadResult} from '@/lib/storage/storage';
 
-const ANSI_RE = /\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g;
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, '');
-}
-
-const REPO_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const BRANCH_RE = /^[A-Za-z0-9_./-]+$/;
-const FILE_PATH_RE = /^[A-Za-z0-9_. /-]+$/;
-
-// repoId/filePath become filesystem paths below (the download lands at
-// <base>/<repoId>/<filePath>), so a `..` segment — which the patterns above
-// otherwise permit — must be rejected to keep the write inside the storage root.
-function hasUnsafeSegment(p: string): boolean {
-  return p.split('/').some((seg) => seg === '..');
-}
+// The two places a download touches, as sites of this server's storage.
+const local: Site = {storage, root: 'models'};
+const cold: Site = {storage, root: 'cold'};
 
 /**
  * Record the HuggingFace source for each freshly-downloaded file: resolve its
@@ -49,7 +43,6 @@ async function recordSources(
   signal: AbortSignal,
   enqueue: (s: string) => void,
 ): Promise<{failures: string[]}> {
-  const localBase = localModelsDir!;
   // Files that did not end up safely on disk (missing, or present but failing
   // verification). The caller uses this to refuse the cold-storage transfer.
   const failures: string[] = [];
@@ -61,7 +54,7 @@ async function recordSources(
   // instead of main and the whole tree. Best-effort: a sidecar write failure
   // must not fail the download.
   try {
-    await setModelRevision(localBase, repoId, repoId, branch, fileScope);
+    await setModelRevision(local, repoId, repoId, branch, fileScope);
   } catch (e) {
     enqueue(
       `  could not record revision ${branch}: ${e instanceof Error ? e.message : String(e)}\n`,
@@ -69,31 +62,26 @@ async function recordSources(
   }
   for (const fp of filePaths) {
     if (signal.aborted) return {failures};
-    const relPath = path.join(repoId, fp);
+    const relPath = `${repoId}/${fp}`;
     const hf = await resolveHfFileByPath(repoId, branch, fp);
     if (!hf) {
       // No HF source (a small non-LFS file): can't verify it, but if it's on
       // disk clear any `missing` flag a prior audit left so the model isn't
       // still reported incomplete. If it isn't on disk, the download failed.
-      let size = -1;
-      try {
-        size = (await fsp.stat(path.join(localBase, relPath))).size;
-      } catch {
-        /* missing: handled below */
-      }
-      if (size < 0) {
+      const size = await fileSize(storage, 'models', relPath);
+      if (size === null) {
         failures.push(fp);
         enqueue(`  ${fp}: missing — not written to disk\n`);
         continue;
       }
-      const cleared = await clearMissingFlag(localBase, repoId, fp, size);
+      const cleared = await clearMissingFlag(local, repoId, fp, size);
       enqueue(
         `  ${fp}: ${cleared ? 'present — source unverifiable' : 'could not resolve source — left unverified'}\n`,
       );
       continue;
     }
     const result = await auditFile(
-      localBase,
+      local,
       relPath,
       '',
       path.basename(fp),
@@ -125,51 +113,40 @@ function fmtTime(sec: number): string {
   return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// Bytes-on-disk under `dir`, summed recursively, tolerant of files vanishing
-// mid-walk (hf moves completed blobs out of its `.cache` staging area). Missing
-// directory → 0. Used to gauge download progress, since hf prints none itself.
-async function dirBytes(dir: string): Promise<number> {
-  let entries: import('fs').Dirent[];
-  try {
-    entries = await fsp.readdir(dir, {withFileTypes: true});
-  } catch {
-    return 0;
-  }
-  let total = 0;
-  for (const ent of entries) {
-    const full = path.join(dir, ent.name);
-    try {
-      if (ent.isDirectory()) total += await dirBytes(full);
-      else if (ent.isFile()) total += (await fsp.stat(full)).size;
-    } catch {
-      /* file moved/removed between readdir and stat */
-    }
-  }
-  return total;
-}
-
-// How many of the expected files are already on disk at their full size — the
-// file-completion count for the progress bar. hf downloads to an incomplete temp
-// path and moves the file into place only when it finishes, so a file present at
-// its final path with its expected size is done. Needs the resolved sizes; files
-// whose size is unknown can't be judged complete and are skipped.
-async function completeFileCount(
-  localDir: string,
+/**
+ * How far a download has got, from the inventory of its directory: the bytes
+ * on disk under it (hf's `.cache` staging included, since those are bytes
+ * fetched), and how many of the expected files are already there at full
+ * size — hf downloads to a temp path and moves a file into place only when it
+ * finishes, so a file present at its final path at its expected size is done.
+ * Files whose size is unknown can't be judged complete and are skipped. A
+ * directory not there yet is zero of everything.
+ */
+async function downloadProgress(
+  repoId: string,
   filePaths: string[],
   sizes: Map<string, number>,
-): Promise<number> {
-  let done = 0;
+): Promise<{bytes: number; filesDone: number}> {
+  const entries = await storage.list('models', {under: repoId});
+  let bytes = 0;
+  const sizeAt = new Map<string, number>();
+  for (const e of entries) {
+    if (e.kind !== 'file') continue;
+    bytes += e.size;
+    sizeAt.set(e.path, e.size);
+  }
+  let filesDone = 0;
   for (const fp of filePaths) {
     const expected = sizes.get(fp);
     if (!expected || expected <= 0) continue;
-    try {
-      if ((await fsp.stat(path.join(localDir, fp))).size >= expected) done++;
-    } catch {
-      /* not on disk yet */
-    }
+    if ((sizeAt.get(`${repoId}/${fp}`) ?? 0) >= expected) filesDone++;
   }
-  return done;
+  return {bytes, filesDone};
 }
+
+/** Whether an error is the filesystem saying "nothing there". */
+const isMissing = (e: unknown) =>
+  (e as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 async function moveToColdstorage(
   relPaths: string[],
@@ -179,14 +156,12 @@ async function moveToColdstorage(
   const label = deleteAfterTransfer ? 'Moving' : 'Copying';
   enqueue(`\n${label} to cold storage...\n`);
 
-  const localBase = localModelsDir!;
-  const coldBase = coldStorageDir!;
-
   // Pre-compute sizes for the progress bar
   const sizes = new Map<string, number>();
   let total = 0;
   for (const rp of relPaths) {
-    const size = (await fsp.stat(path.join(localBase, rp))).size;
+    const size = await fileSize(storage, 'models', rp);
+    if (size === null) throw new Error(`no file at ${rp}`);
     sizes.set(rp, size);
     total += size;
   }
@@ -203,73 +178,61 @@ async function moveToColdstorage(
     enqueue(`\r[${bar}] ${pct}%  ${fmtBytes(done)} / ${fmtBytes(total)}`);
   };
 
-  // Rename a `.tjmeta.json` sidecar alongside its file; absence is fine.
-  const renameSidecar = async (src: string, dst: string) => {
-    try {
-      await fsp.rename(metaPath(src), metaPath(dst));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
-  };
-
-  const toDelete: string[] = [];
-
   // Carry the file's provenance entry into the cold-storage model sidecar, and
   // drop it from the local one when the local copy is being removed.
   const transferMeta = async (rp: string, removeLocal: boolean) => {
-    const meta = await readMetaResolved(localBase, rp);
+    const meta = await readMetaResolved(local, rp);
     if (!meta) return;
     const repoId = repoIdFromModelUrl(meta.modelUrl);
     if (!repoId) return;
-    await updateMetaResolved(coldBase, rp, repoId, meta);
+    await updateMetaResolved(cold, rp, repoId, meta);
     if (removeLocal) {
       const loc = modelDirForRepo(rp, repoId);
-      if (loc) await removeFileMeta(localBase, loc.dir, loc.key);
+      if (loc) await removeFileMeta(local, loc.dir, loc.key);
     }
   };
 
   for (const rp of relPaths) {
-    const src = path.join(localBase, rp);
-    const dst = path.join(coldBase, rp);
-
-    if (deleteAfterTransfer) {
-      try {
-        await fsp.mkdir(path.dirname(dst), {recursive: true});
-        await fsp.rename(src, dst);
-        await renameSidecar(src, dst);
-        await transferMeta(rp, true);
-        onBytes(sizes.get(rp) ?? 0); // account for this file in progress
-        continue;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
-        // Cross-filesystem: copy then schedule delete
+    const from = {root: 'models' as const, path: rp};
+    const to = {root: 'cold' as const, path: rp};
+    // One job per file: a rename when the roots share a filesystem, else a
+    // resumable stream with progress; with `move`, the source goes after.
+    const job = await storage.start({
+      kind: 'copy',
+      from,
+      to,
+      move: deleteAfterTransfer,
+    });
+    let reported = 0;
+    for await (const event of job.events()) {
+      if (event.kind === 'progress') {
+        onBytes(event.done - reported);
+        reported = event.done;
+      } else if (event.kind === 'error') {
+        throw new Error(event.message);
       }
     }
-
-    await copyFileWithMeta(src, dst, onBytes);
-    await transferMeta(rp, deleteAfterTransfer);
-    if (deleteAfterTransfer) {
-      toDelete.push(src, metaPath(src));
+    // The legacy `.tjmeta.json` sidecar travels alongside; absence is fine.
+    const metaFrom = {root: 'models' as const, path: metaPath(rp)};
+    const metaTo = {root: 'cold' as const, path: metaPath(rp)};
+    try {
+      if (deleteAfterTransfer) await storage.move(metaFrom, metaTo);
+      else await storage.copy(metaFrom, metaTo);
+    } catch (e) {
+      if (!isMissing(e)) throw e;
     }
+    await transferMeta(rp, deleteAfterTransfer);
   }
 
-  enqueue('\n');
-
-  if (toDelete.length > 0) {
-    enqueue('Cleaning up local copy...\n');
-    // force: a sidecar in the list may not exist for every file.
-    for (const src of toDelete) await fsp.rm(src, {force: true});
-  }
-
-  enqueue('Done.\n');
+  enqueue('\nDone.\n');
 }
 
 /**
  * Run an `hf download` on this machine and stream its terminal output. Shared by
  * the `/api/v1/hf-download` route and the peer download proxy's local branch.
  * Validates the request body (returning a 400 Response on bad input) before
- * spawning. `signal` aborts the underlying process (SIGTERM) when the client
- * disconnects.
+ * starting the job — the storage validates again, on its own account. `signal`
+ * cancels the job (SIGTERM to hf) when the client disconnects.
  */
 export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
   const {
@@ -288,24 +251,14 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
     deleteAfterTransfer?: unknown;
   };
 
-  if (
-    !repoId ||
-    typeof repoId !== 'string' ||
-    !REPO_ID_RE.test(repoId) ||
-    hasUnsafeSegment(repoId)
-  )
+  if (!isValidRepoId(repoId))
     return new Response('Invalid repoId', {status: 400});
-  if (!branch || typeof branch !== 'string' || !BRANCH_RE.test(branch))
+  if (!isValidRevision(branch))
     return new Response('Invalid branch', {status: 400});
   if (
     !Array.isArray(filePaths) ||
     filePaths.length === 0 ||
-    filePaths.some(
-      (fp: unknown) =>
-        typeof fp !== 'string' ||
-        !FILE_PATH_RE.test(fp) ||
-        hasUnsafeSegment(fp),
-    )
+    !filePaths.every(isValidFilePath)
   )
     return new Response('Invalid filePaths', {status: 400});
   // Optional: the file set that makes a complete copy of this model (may be a
@@ -313,13 +266,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
   // rules as filePaths.
   if (
     fileScope !== undefined &&
-    (!Array.isArray(fileScope) ||
-      fileScope.some(
-        (fp: unknown) =>
-          typeof fp !== 'string' ||
-          !FILE_PATH_RE.test(fp) ||
-          hasUnsafeSegment(fp),
-      ))
+    (!Array.isArray(fileScope) || !fileScope.every(isValidFilePath))
   )
     return new Response('Invalid fileScope', {status: 400});
 
@@ -327,21 +274,12 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
   if (!localModelsDir)
     return new Response('No local storage configured', {status: 400});
 
-  // Download into <base>/<repoId> so files land at <repoId>/<filePath> — the
+  // Download into <models>/<repoId> so files land at <repoId>/<filePath> — the
   // layout the audit expects — making them correctly placed and verifiable.
-  const localDir = path.join(localModelsDir, repoId);
   // Storage-root-relative paths of the downloaded files, used for the sidecar
   // pass and the cold-storage transfer.
-  const relPaths = (filePaths as string[]).map((fp) => path.join(repoId, fp));
-
-  // Spawn hf directly with an argv array (no shell, no quoting) and force
-  // `--json`: hf then prints a single `{"path": …}` on stdout on success, its
-  // error text on stderr on failure, and nothing else — no progress bars or
-  // chatter to scrape. Progress is synthesized below from bytes-on-disk.
-  const hfArgs = ['download', repoId];
-  for (const fp of filePaths as string[]) hfArgs.push('--include', fp);
-  hfArgs.push('--local-dir', localDir, '--revision', branch, '--json');
-  const numFiles = (filePaths as string[]).length;
+  const relPaths = filePaths.map((fp) => `${repoId}/${fp}`);
+  const numFiles = filePaths.length;
 
   const encode = (s: string) => new TextEncoder().encode(s);
 
@@ -349,14 +287,8 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
     start(controller) {
       const enqueue = (s: string) => controller.enqueue(encode(s));
 
-      // The spawn inherits the server's environment: transfer acceleration
-      // (HF_XET_HIGH_PERFORMANCE) and HF_TOKEN come from there (.envrc in
-      // dev, ENV in the Dockerfile) rather than app code — forcing the
-      // deprecated HF_HUB_ENABLE_HF_TRANSFER here made every download warn.
-      const proc = spawn('hf', hfArgs);
-
       // hf --json prints no progress while downloading, so synthesize it: size
-      // the bar from the repo's file sizes, then poll bytes-on-disk and emit a
+      // the bar from the repo's file sizes, then poll the inventory and emit a
       // `Downloading: NN% …` line (parsed by parseProgress) each tick — with a
       // `(done/total files)` suffix for a multi-file download, counting the files
       // already present at full size. Best-effort — if the repo can't be sized
@@ -374,7 +306,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
       void (async () => {
         const sizes = await repoFileSizes(repoId, branch);
         if (!sizes || signal.aborted) return;
-        totalBytes = (filePaths as string[]).reduce(
+        totalBytes = filePaths.reduce(
           (sum, fp) => sum + (sizes.get(fp) ?? 0),
           0,
         );
@@ -382,61 +314,65 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
         let lastDone = 0;
         let lastT = t0;
         pollTimer = setInterval(() => {
-          void Promise.all([
-            dirBytes(localDir),
-            completeFileCount(localDir, filePaths as string[], sizes),
-          ]).then(([raw, filesDone]) => {
-            // The walk is async; if the run ended (stopPoll cleared the timer)
-            // while it was in flight, the controller may be closed — don't
-            // enqueue onto it.
-            if (pollTimer === null) return;
-            const done = Math.min(raw, totalBytes);
-            const now = Date.now();
-            const dt = (now - lastT) / 1000;
-            const speed = dt > 0 ? (done - lastDone) / dt : 0;
-            lastDone = done;
-            lastT = now;
-            const pct = Math.min(99, Math.floor((done / totalBytes) * 100));
-            const eta = speed > 0 ? (totalBytes - done) / speed : 0;
-            enqueue(
-              `\rDownloading: ${pct}% ${fmtBytes(done)}/${fmtBytes(totalBytes)}` +
-                ` [${fmtTime((now - t0) / 1000)}<${fmtTime(eta)}, ${fmtBytes(speed)}/s]` +
-                filesSuffix(filesDone),
-            );
-          });
+          void downloadProgress(repoId, filePaths, sizes).then(
+            ({bytes, filesDone}) => {
+              // The walk is async; if the run ended (stopPoll cleared the
+              // timer) while it was in flight, the controller may be closed —
+              // don't enqueue onto it.
+              if (pollTimer === null) return;
+              const done = Math.min(bytes, totalBytes);
+              const now = Date.now();
+              const dt = (now - lastT) / 1000;
+              const speed = dt > 0 ? (done - lastDone) / dt : 0;
+              lastDone = done;
+              lastT = now;
+              const pct = Math.min(99, Math.floor((done / totalBytes) * 100));
+              const eta = speed > 0 ? (totalBytes - done) / speed : 0;
+              enqueue(
+                `\rDownloading: ${pct}% ${fmtBytes(done)}/${fmtBytes(totalBytes)}` +
+                  ` [${fmtTime((now - t0) / 1000)}<${fmtTime(eta)}, ${fmtBytes(speed)}/s]` +
+                  filesSuffix(filesDone),
+              );
+            },
+          );
         }, 1000);
       })();
 
-      signal.addEventListener('abort', () => {
+      void (async () => {
+        let result: DownloadResult | null = null;
+        try {
+          const job = await storage.start({
+            kind: 'download',
+            repoId,
+            revision: branch,
+            files: filePaths,
+            into: {root: 'models', path: repoId},
+          });
+          signal.addEventListener('abort', () => {
+            stopPoll();
+            void job.cancel();
+          });
+          // hf's stderr carries its errors/warnings, forwarded verbatim into
+          // the log where parseNotices lifts them into the dialog's notices
+          // panel; its stdout is the job's result, handled below.
+          for await (const event of job.events()) {
+            if (event.kind === 'log') enqueue(event.line);
+            else if (event.kind === 'done')
+              result = event.result as DownloadResult;
+            else if (event.kind === 'error') throw new Error(event.message);
+          }
+        } catch (err) {
+          stopPoll();
+          enqueue(`\nError: ${(err as Error).message}\n`);
+          controller.close();
+          return;
+        }
         stopPoll();
-        proc.kill('SIGTERM');
-      });
-
-      // stdout carries only hf's `--json` result — buffer it (handled on close);
-      // it is a machine record, not something to show in the run log. stderr
-      // carries hf's errors/warnings, forwarded verbatim into the log where
-      // parseNotices lifts them into the dialog's notices panel.
-      let stdoutBuf = '';
-      proc.stdout.on('data', (chunk: Buffer) => {
-        stdoutBuf += chunk.toString();
-      });
-      proc.stderr.on('data', (chunk: Buffer) => {
-        const text = stripAnsi(chunk.toString());
-        if (text) enqueue(text);
-      });
-
-      proc.on('error', (err) => {
-        stopPoll();
-        enqueue(`\nError: ${err.message}\n`);
-        controller.close();
-      });
-
-      proc.on('close', async (code, sig) => {
-        stopPoll();
+        const {exitCode: code, signal: sig, output} = result!;
         // hf's stdout should be exactly its `{"path": …}` result — the wrapper
         // already knows where files land, so it's consumed, not shown. Anything
         // else (unexpected non-JSON output) is surfaced so it isn't lost.
-        const out = stdoutBuf.trim();
+        const out = output.trim();
         if (out && !(out.startsWith('{') && out.endsWith('}')))
           enqueue(`\n${out}\n`);
         // Carry the bar to 100% — the poll caps at 99% and hf's silence means
@@ -463,7 +399,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
           const {failures} = await recordSources(
             repoId,
             branch,
-            filePaths as string[],
+            filePaths,
             fileScope as string[] | undefined,
             signal,
             enqueue,
@@ -483,7 +419,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
         } finally {
           controller.close();
         }
-      });
+      })();
     },
   });
 

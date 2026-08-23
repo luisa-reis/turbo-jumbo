@@ -166,9 +166,11 @@ export interface Storage {
 ### Jobs
 
 Three operations take long enough that a request/response call is the wrong
-shape: downloading, hashing a large file, and sending one to another agent.
+shape: downloading, copying a large file, and sending one to another agent.
 They share one job API rather than three bespoke endpoints, and their events
-are NDJSON — the format `lib/util/ndjson.ts` already speaks.
+are NDJSON — the format `lib/util/ndjson.ts` already speaks. (Hashing was
+going to be the fourth; it became the `hash` verb above, whose callbacks are
+already a job's progress and cancellation.)
 
 ```ts
 export type JobSpec =
@@ -180,7 +182,14 @@ export type JobSpec =
       files: string[];
       into: Ref;
     }
-  | {kind: 'hash'; ref: Ref; algo: 'sha256'}
+  | {
+      kind: 'copy';
+      from: Ref;
+      to: Ref;
+      /** Remove the source once the destination is whole — a rename when
+       *  the roots share a filesystem. */
+      move?: boolean;
+    }
   | {
       kind: 'send';
       from: Ref;
@@ -202,9 +211,17 @@ export interface JobHandle {
 }
 ```
 
-`send` is the whole peer-transfer story: the control host asks agent A to send
-to agent B, agent B exposes the receiving half, and the control host watches
-progress without touching a byte.
+`copy` is the same-agent transfer — every `streamCopyResumable` caller turned
+out to be a local↔cold move on one machine, with a progress bar the user
+watches — and resumes a partial destination. `send` is the whole
+peer-transfer story: the control host asks agent A to send to agent B, agent
+B exposes the receiving half, and the control host watches progress without
+touching a byte. It is the one kind not yet in code, since it needs the agent.
+
+A download job reports no progress of its own: `hf --json` prints none, and
+the bytes on disk are what `list` already answers, so the control host polls
+the inventory of the directory the download lands in and draws the bar
+itself — one call a second, the same for a local storage and a remote one.
 
 ## Where the current call sites land
 
@@ -324,17 +341,31 @@ Done:
   moved to `storage/copy-meta.ts` beside the transfer core it wraps, still on
   absolute paths, so `audit.ts` carries no `fs` import without touching the
   job API's territory; `audit.ts` keeps re-exporting it.
+- The job API, for `hf/hf-download-stream.ts`: `start(spec)` on the
+  interface, `download` and `copy` jobs in `lib/storage/local-jobs.ts`
+  (the `send` kind waits for the agent it needs; `hash` stayed a verb). The
+  download job owns the `hf` spawn and validates its arguments itself —
+  `lib/hf/download-request.ts` holds the predicates both it and the route's
+  400s use — and reports hf's stderr as `log` events and its exit as `done`;
+  the host draws the progress bar from a `list` of the landing directory a
+  second, as the Jobs section says. The copy job wraps `streamCopyResumable`
+  with throttled progress and a `move` that is a rename on one filesystem, so
+  the post-download cold transfer is one job per file; the legacy sidecar
+  follows through `move`/`copy`. `hf-download-stream.ts` has no `fs` or
+  `child_process` import left; `file-transfer.ts` keeps its streams as part
+  of the storage implementation, which is where the table at the top always
+  put them.
 
 Remaining call sites:
 
-1. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` (with
-   `copyFileWithMeta` in `storage/copy-meta.ts`) — these need the job API,
-   which is specified above but not yet written in code
-2. Outside the original list but still on `fs`: `audit/incomplete-models.ts`
-   and `models/repo-files.ts` check local presence with `existsSync`/`statSync`
-   beside their Hugging Face reads, and the routes that stream bytes (`copy`,
-   `push`, `upload`, `download`, `checksum`, the cold-storage transfers) open
-   files directly — the job API's callers, once it exists. `lib/config` stays.
+1. `send`, with the agent and `HttpStorage` — step 3.
+2. Still on `fs` beside their Hugging Face reads: `audit/incomplete-models.ts`
+   and `models/repo-files.ts` check local presence with
+   `existsSync`/`statSync` — a `list` of the model directory each. And the
+   routes that stream bytes (`copy`, `push`, `upload`, `download`, `checksum`,
+   the cold-storage transfers) open files directly; `copyFileWithMeta` in
+   `storage/copy-meta.ts` with them. These are the `copy` and `send` jobs'
+   callers. `lib/config` stays.
 
 ## Decided
 
