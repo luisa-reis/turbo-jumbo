@@ -439,7 +439,9 @@ export function HfDownloadPicker({
         progress={progress}
         running={running}
         command={runCommand ?? undefined}
-        hfTokenSet={hfTokenSet}
+        // A remote peer downloads with its own token, which this server
+        // can't see; the notice is about the machine running `hf`.
+        hfTokenSet={hfTokenSet || target.cliUrl !== undefined}
         onClose={closeTerminal}
       />
     );

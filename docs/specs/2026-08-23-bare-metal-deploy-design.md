@@ -84,10 +84,12 @@ distribution, and ran.
 app runs as: `WorkingDirectory=%h/<dir>/current`, `bun server.js`,
 `Restart=always`, `WantedBy=default.target`. It sets `NODE_ENV`,
 `HOSTNAME=0.0.0.0`, `PORT`, `HF_XET_HIGH_PERFORMANCE=1`, `CONFIG_PATH` to
-`~/<dir>/config.yaml`, `HF_TOKEN_FILE` to `~/hf_token.txt`, and puts
-`~/.local/bin` on `PATH` for the `hf` CLI. An optional `~/<dir>/tj.env` can
-override any of these per host; `release.env` from the current release is
-read after it.
+`~/<dir>/config.yaml`, and puts `~/.local/bin` on `PATH` for the `hf` CLI.
+An optional `~/<dir>/tj.env` can override any of these per host, and is
+where a storage peer sets `HF_TOKEN_FILE` (or `HF_TOKEN`) for gated repos;
+`release.env` from the current release is read after it. The front door
+runs no downloads — `hf` is only ever spawned on the peer the download
+lands on — so it carries no token in any form.
 
 A user unit survives reboots only when the account lingers
 (`loginctl enable-linger <user>`, once, as root); without that the user
@@ -96,9 +98,10 @@ session.
 
 ## What moves from the old host
 
-The account's home: the Hugging Face token file (which the unit reads) and
-the old config, kept beside the new one for reference. Not moved: the
-container image storage (the runtime it fed is gone), the two hf virtualenvs
+The account's home: the old config, kept beside the new one for reference.
+Not moved: the Hugging Face token (the front door never spawns `hf`, and
+nothing else reads it), the container image storage (the runtime it fed is
+gone), the two hf virtualenvs
 (their shebangs hardcode the old home path, and the new host has a newer
 `hf` installed), and the shell/ssh dotfiles the new host's provisioning
 owns — overwriting `authorized_keys` in particular could lock the deployer

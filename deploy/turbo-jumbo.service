@@ -6,8 +6,10 @@
 # Layout on the target (DEPLOY_DIR, default "tj"):
 #   ~/tj/current      -> releases/<stamp>   the running release
 #   ~/tj/config.yaml                        the app config (uncommitted)
-#   ~/tj/tj.env                             optional per-host overrides
-#   ~/hf_token.txt                          Hugging Face token, mode 600
+#   ~/tj/tj.env                             optional per-host overrides —
+#                                           a storage peer's HF_TOKEN_FILE
+#                                           lives here; a viewer runs no
+#                                           downloads and needs no token
 
 [Unit]
 Description=Turbo Jumbo
@@ -20,9 +22,9 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
 Environment=CONFIG_PATH=%h/tj/config.yaml
-Environment=HF_TOKEN_FILE=%h/hf_token.txt
-# `hf download` (spawned by the app) inherits these: the CLI from its
-# user-local install, Xet-accelerated transfers.
+# `hf download` (spawned by the app on a storage peer) inherits these: the
+# CLI from its user-local install, Xet-accelerated transfers. The token it
+# needs for gated repos is per host: HF_TOKEN_FILE (or HF_TOKEN) in tj.env.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HF_XET_HIGH_PERFORMANCE=1
 # Per-host overrides, then the release identity the deploy stamped.

@@ -36,10 +36,13 @@ account. No container runtime is involved.
 
 On the target, as the account the app will run as:
 
-- Put the config at `~/tj/config.yaml` and, for gated or private Hugging Face
-  repos, the token in `~/hf_token.txt` (mode 600). The unit reads both from
-  those paths; `~/tj/tj.env` can override any of its environment (`PORT`,
-  `CONFIG_PATH`, …), one `KEY=value` per line.
+- Put the config at `~/tj/config.yaml`. `~/tj/tj.env` (one `KEY=value` per
+  line) can override any of the unit's environment (`PORT`, `CONFIG_PATH`,
+  …).
+- On a machine that holds models and downloads gated or private Hugging
+  Face repos, add `HF_TOKEN_FILE=/home/<account>/hf_token.txt` to `tj.env`
+  and put the token in that file (mode 600). A viewer never runs `hf` — its
+  downloads happen on the peers — so it needs no token in any form.
 - Have root run `loginctl enable-linger <account>` once. A user unit only
   starts at boot, and only outlives the account's login sessions, for a
   lingering account.

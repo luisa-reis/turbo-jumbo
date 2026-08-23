@@ -34,6 +34,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **No more "HF_TOKEN is not set" for downloads that run on another peer.**
+  The notice described the machine serving the UI, but the download — and
+  the token it uses — belongs to the peer it lands on. A viewer, whose
+  downloads all run on peers, needs no token at all.
+
 - **A copy aimed at this machine without `base_path` is refused** with
   "No local storage configured" instead of writing the files into the
   server's working directory. The same guard now covers Hugging Face
