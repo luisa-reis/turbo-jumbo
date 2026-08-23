@@ -34,6 +34,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Expanding a peer's non-GGUF model lists its files again.** On a peer's
+  tab, a model held only on that peer — a FastFlowLM NPU model, say, or any
+  safetensors repo this machine doesn't have a copy of — expanded to nothing:
+  the file list was only ever looked up for models this machine held itself.
+  It now loads for every model the tab shows.
+
 - **No more "HF_TOKEN is not set" for downloads that run on another peer.**
   The notice described the machine serving the UI, but the download — and
   the token it uses — belongs to the peer it lands on. A viewer, whose

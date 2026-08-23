@@ -203,10 +203,24 @@ export function ModelsTableClient({
     });
   }, []);
 
+  // The table's row data and the lookups its header/cells need, derived from
+  // the models, peer inventories and current expansion (see useDisplayRows).
+  const {rows, peerKeys, allVisiblePaths, allExpandableKeys, augmentedModels} =
+    useDisplayRows({
+      models,
+      peers,
+      peerModels,
+      activeLocation,
+      expanded,
+      repoFiles,
+    });
+
   // Fetch the file list for whole-repo models when they're expanded — and
   // eagerly for any flagged invalid, so the audit hovercard can name the bad
   // files without an expansion. Against the active location (the local store, or
-  // a peer proxied to its own endpoint).
+  // a peer proxied to its own endpoint). Resolved against the augmented list:
+  // a model held only on a peer has no entry in `models`, and on that peer's
+  // tab its expansion is exactly this file list.
   useEffect(() => {
     const peer = peers.find((p) => p.address === activeLocation);
     const urlFor = (repoId: string) =>
@@ -218,7 +232,7 @@ export function ModelsTableClient({
     for (const name of wanted) {
       const key = `${activeLocation}::${name}`;
       if (repoFiles.has(key) || inFlight.current.has(key)) continue;
-      const m = models.find((mm) => mm.name === name);
+      const m = augmentedModels.find((mm) => mm.name === name);
       if (!m || !isWholeRepoModel(m)) continue;
       inFlight.current.add(key);
       void (async () => {
@@ -234,18 +248,14 @@ export function ModelsTableClient({
         setRepoFiles((prev) => new Map(prev).set(key, files));
       })();
     }
-  }, [expanded, models, peers, activeLocation, repoFiles, invalidRepos]);
-
-  // The table's row data and the lookups its header/cells need, derived from
-  // the models, peer inventories and current expansion (see useDisplayRows).
-  const {rows, peerKeys, allVisiblePaths, allExpandableKeys} = useDisplayRows({
-    models,
-    peers,
-    peerModels,
-    activeLocation,
+  }, [
     expanded,
+    augmentedModels,
+    peers,
+    activeLocation,
     repoFiles,
-  });
+    invalidRepos,
+  ]);
 
   const showCheckboxes = onToggleSelected != null;
 

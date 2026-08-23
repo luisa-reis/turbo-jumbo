@@ -19,6 +19,10 @@ import {
  * their identity across unrelated re-renders (Table's per-row memo bails out via
  * shallow compare otherwise). The pure row assembly lives in
  * `lib/models/model-row.buildDisplayRows`; this hook is the React glue.
+ *
+ * Also hands back the peer-augmented model list the rows are built from, so
+ * the table can look up rows that exist only on a peer (the un-augmented
+ * `models` prop knows nothing about those).
  */
 export function useDisplayRows({
   models,
@@ -39,6 +43,7 @@ export function useDisplayRows({
   peerKeys: Map<string, Set<string>>;
   allVisiblePaths: string[];
   allExpandableKeys: string[];
+  augmentedModels: ModelRow[];
 } {
   // Lookup: peerAddress -> Set<file join key>. Files are matched across hosts by
   // key because model names are derived per host and can disagree for the same
@@ -180,5 +185,5 @@ export function useDisplayRows({
     return keys;
   }, [effectiveModels]);
 
-  return {rows, peerKeys, allVisiblePaths, allExpandableKeys};
+  return {rows, peerKeys, allVisiblePaths, allExpandableKeys, augmentedModels};
 }
