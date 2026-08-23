@@ -27,8 +27,9 @@ export async function GET(
 
   if (peer === localPeer) {
     logger.debug(`[peers] fetch models from ${peer.name} (local)`);
-    let models = scanModels(localModelsDir, lemonadeDir);
-    if (coldStorageDir) models = annotateColdStorage(models, coldStorageDir);
+    let models = await scanModels(localModelsDir, lemonadeDir);
+    if (coldStorageDir)
+      models = await annotateColdStorage(models, coldStorageDir);
     logger.debug(`[peers] ${peer.name} returned ${models.length} model(s)`);
     return Response.json(models);
   }

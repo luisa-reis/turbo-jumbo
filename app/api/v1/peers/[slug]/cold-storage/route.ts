@@ -20,7 +20,7 @@ export async function GET(
   if (peer === localPeer) {
     logger.debug(`[peers] fetch cold storage from ${peer.name} (local)`);
     if (!coldStorageDir) return new Response('No cold storage', {status: 400});
-    return Response.json(scanModels(coldStorageDir));
+    return Response.json(await scanModels(coldStorageDir));
   }
 
   logger.debug(

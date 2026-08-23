@@ -95,7 +95,10 @@ export async function updateMeta(
 // fullPath-based readMeta/writeMeta above serve the callers that still hold
 // absolute paths; these serve the migrated ones, with the same tolerance:
 // missing is the common case, corrupt or unreadable is worth a warning.
-async function readMetaAt(site: Site, relPath: string): Promise<TjMeta | null> {
+export async function readMetaAt(
+  site: Site,
+  relPath: string,
+): Promise<TjMeta | null> {
   const {storage, root} = siteStorage(site);
   const file = metaPath(relPath);
   let raw: string;
@@ -178,5 +181,9 @@ export async function updateMetaResolved(
   }
   // A stray file with no model dir keeps a legacy per-file sidecar (harmless
   // backward-compat); the model-sidecars spec accepts no provenance for these.
-  await writeMetaAt(site, relPath, mergeMeta(await readMetaAt(site, relPath), next));
+  await writeMetaAt(
+    site,
+    relPath,
+    mergeMeta(await readMetaAt(site, relPath), next),
+  );
 }

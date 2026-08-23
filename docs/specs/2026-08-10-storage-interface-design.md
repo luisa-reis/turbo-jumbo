@@ -79,10 +79,18 @@ export interface FileEntry {
   /** Relative to the root, using `/` on every platform. */
   path: string;
   kind: 'file' | 'dir' | 'symlink';
+  /**
+   * For a symlink, the size and mtime of what it points to: Lemonade's extra
+   * directory and the hub cache's `snapshots/` are links to weights, and what
+   * anyone asks about a link is the weight behind it. A dangling link reports
+   * size 0 and `dangling`.
+   */
   size: number;
   mtimeMs: number;
   /** Where a symlink points, verbatim. Only for `kind: 'symlink'`. */
   linkTarget?: string;
+  /** A symlink whose target is gone. Only for `kind: 'symlink'`. */
+  dangling?: boolean;
   /**
    * The dominant tensor dtype of a `.safetensors` whose filename carries no
    * quant token — the only case `weightLabel` needs it. Read from the header
@@ -268,16 +276,37 @@ Done:
   preview is now literally a dry run of the sync, which fixed an actual
   preview/executor disagreement about a user's file occupying a link's path.
   `ExtraLink.target` and `Placement.from`/`to` became root-relative.
+- `models/models.ts` and `annotateColdStorage`, on the `Site` union. The scan
+  is one `list` with `dtype`; the sidecars it consults are located from that
+  inventory and read once each; and the whole thing became async, which is
+  what turned its twenty callers and the two server components async with
+  it. Two things the old walk did implicitly moved into `list`: a symlink
+  reports its target's size and a `dangling` flag (the scan used to
+  `statSync` through the links in Lemonade's extra directory and the hub
+  cache's `snapshots/`), and the `readdirSync` spy the representative-shard
+  test leaned on became a `Storage` whose `list` answers in another order.
+  Verified by dumping both scanners over this machine's real roots: the JSON
+  is byte-identical.
+- The inventory cache, in `LocalStorage`, in the two forms that cannot go
+  stale: a safetensors header's dtype is remembered against the file's size
+  and mtime, and identical `list` calls in flight share one walk (a mutating
+  verb forgets its root's in-flight walks first). A cached inventory with a
+  lifetime was considered and not built — the `hf` CLI, a peer's transfer and
+  a user's shell all write behind the interface's back, so any lifetime is a
+  window in which a just-finished download or a just-moved file shows wrong.
+  Measured warm on this machine (virtiofs local, NFS cold): local unchanged,
+  cold three times faster, the page-load burst of three concurrent scans five
+  times faster. The transitional string arm of `Site` keeps one
+  `LocalStorage` per directory so its callers share the memo too.
 
 Remaining call sites, easiest first so an interruption lands somewhere
 coherent:
 
-1. `models/models.ts` — the scan becomes one `list`; the cache lands here
-2. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
+1. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
    with them — fix-duplicates looked easy but its I/O is really audit.ts's
    full-path helpers (`resolveSource`, `localSha256`, `findHistoricalMatch`,
    `moveFileWithMeta`), so the two migrate together
-3. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
+2. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
    API, which is specified above but not yet written in code
 
 ## Decided
@@ -291,7 +320,10 @@ coherent:
   the tree and re-reads safetensors headers. Invisible on local disk, and the
   thing that would make a remote walk unusable. It belongs with the
   `models.ts` migration, and the cache lives with whoever owns the
-  filesystem — the agent — rather than the UI host caching responses.
+  filesystem — the agent — rather than the UI host caching responses. Done
+  for the local case in the stale-proof form described under step 2; the
+  lifetime-bearing inventory a remote walk needs belongs to the agent and
+  lands with `HttpStorage`.
 
 ## Open questions
 

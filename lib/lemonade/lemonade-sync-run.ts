@@ -112,9 +112,9 @@ async function lemonadeKnowledge(): Promise<{
  * Lemonade could open but shouldn't — serving a model off the slow tier
  * without saying so.
  */
-function extraPlans(listed: Set<string>): ExtraModelPlan[] {
+async function extraPlans(listed: Set<string>): Promise<ExtraModelPlan[]> {
   if (!localModelsDir) return [];
-  const unlisted = scanModels(localModelsDir, lemonadeDir).filter(
+  const unlisted = (await scanModels(localModelsDir, lemonadeDir)).filter(
     (m) => !listed.has(m.name),
   );
   return planExtraModels(unlisted);
@@ -125,11 +125,13 @@ function extraPlans(listed: Set<string>): ExtraModelPlan[] {
  * the same local-only rule as `extraPlans` — and for the same reason, since a
  * link into the archive would have the NPU serving off the slow tier.
  */
-function flmPlans(registry: Map<string, FlmSource>): Promise<FlmStorePlan[]> {
-  if (!localModelsDir || registry.size === 0) return Promise.resolve([]);
+async function flmPlans(
+  registry: Map<string, FlmSource>,
+): Promise<FlmStorePlan[]> {
+  if (!localModelsDir || registry.size === 0) return [];
   return planFlmStore(
     storage,
-    scanModels(localModelsDir, lemonadeDir),
+    await scanModels(localModelsDir, lemonadeDir),
     registry,
   );
 }
@@ -166,7 +168,7 @@ export async function previewSync(): Promise<SyncPreview> {
   const [placement, preview, extra, flm] = await Promise.all([
     planPlacement(storage, listed),
     previewLemonadeSync(localModelsDir, s, catalog, listed),
-    previewExtraModels(storage, extraPlans(listed)),
+    extraPlans(listed).then((plans) => previewExtraModels(storage, plans)),
     flmPlans(registry).then((plans) => previewFlmStore(storage, plans)),
   ]);
   return {
@@ -228,7 +230,7 @@ export async function runSync(): Promise<{
   const results = await syncLemonadeToTurboJumbo(localModelsDir, s, catalog);
   // Last, because they reflect what local storage holds once the passes above
   // have finished moving things into it.
-  const extra = await syncExtraModels(storage, extraPlans(listed));
+  const extra = await syncExtraModels(storage, await extraPlans(listed));
   const plans = await flmPlans(registry);
   const flm = await syncFlmStore(storage, plans);
   const flmRefresh = await refreshFlm(

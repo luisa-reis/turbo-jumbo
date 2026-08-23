@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   });
   const {signal} = abortController;
 
-  const models = scanModels(basePath);
+  const models = await scanModels(basePath);
   const relPaths: string[] = [];
   for (const model of models) {
     for (const file of model.files) {

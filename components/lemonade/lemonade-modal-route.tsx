@@ -15,15 +15,15 @@ import {LemonadeModal} from '@/components/lemonade/lemonade-modal';
 // Server side of the Lemonade download modal: scans the stores the modal
 // needs and renders it. Shared by the intercepted (soft-nav) pages in the
 // @modal slot and the real (hard-nav) pages, so the route files stay thin.
-export function LemonadeModalRoute({location}: {location: string}) {
-  const coldModels = scanModels(coldStorageDir);
-  const localModels = scanModels(localModelsDir, lemonadeDir);
+export async function LemonadeModalRoute({location}: {location: string}) {
+  const coldModels = await scanModels(coldStorageDir);
+  const localModels = await scanModels(localModelsDir, lemonadeDir);
   // Lemonade's own model cache lives outside the managed storage; scan both
   // halves so the Lemonade browser can flag catalog entries already present
   // there, whichever side they sit on.
   const lemonadeCacheModels =
     lemonadeBuiltinDir && lemonadeExtraDir
-      ? scanLemonadeCache({
+      ? await scanLemonadeCache({
           builtin: lemonadeBuiltinDir,
           extra: lemonadeExtraDir,
         })

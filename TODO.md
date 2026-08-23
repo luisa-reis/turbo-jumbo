@@ -13,8 +13,11 @@ is the source of truth for the remaining call sites (ordered, easiest first),
 the decisions already settled, and the open questions — agent authorization,
 and Lemonade's bind mounts when the agent runs in LXC:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
-"Where step 2 has got to". Done so far: the interface, `LocalStorage`,
-`storage-instance.ts`, and disk usage.
+"Where step 2 has got to". Done so far: the interface, `LocalStorage` (with
+its header memo and shared walks), `storage-instance.ts`, disk usage, delete,
+the sidecars, support files, the Lemonade link and place passes, and the
+models scan. Next: `audit.ts`, with `lemonade-sync.ts` and
+`fix-duplicates.ts` alongside.
 
 ## Keep the standalone build from tracing the repo root
 

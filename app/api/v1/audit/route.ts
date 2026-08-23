@@ -58,7 +58,7 @@ export async function POST(req: Request) {
   });
   const {signal} = abortController;
 
-  const models = scanModels(root);
+  const models = await scanModels(root);
   // Basename collisions across the whole location (not just the selection):
   // a selected file is a duplicate even when its twin wasn't selected.
   const dups = duplicateBasenames(models);

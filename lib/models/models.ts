@@ -1,4 +1,3 @@
-import fs from 'fs';
 import path from 'path';
 import type {
   Model,
@@ -7,23 +6,25 @@ import type {
   SingleFile,
   SplitGroup,
 } from '@/lib/models/model-types';
-import {metaPath, pathImpliedRepo} from '@/lib/audit/audit';
+import {pathImpliedRepo} from '@/lib/audit/audit-verdict';
 import {parseHubCachePath} from '@/lib/hf/hf-cache';
-import {readSafetensorsDtype} from '@/lib/models/safetensors';
 import {isMmprojFilename, repoIdFromModelUrl} from '@/lib/models/model-name';
 import {isDiffusersComponentFile} from '@/lib/models/diffusers';
-import {MODEL_SIDECAR_NAME, summarizeModel} from '@/lib/models/model-sidecar';
-import type {
-  SidecarSummary,
-  TjModel,
-  TjModelFile,
+import {
+  MODEL_SIDECAR_NAME,
+  readModelSidecar,
+  summarizeModel,
 } from '@/lib/models/model-sidecar';
+import type {TjModel} from '@/lib/models/model-sidecar';
+import {metaPath, readMetaAt} from '@/lib/models/tjmeta';
 import {
   ggmlModelVariant,
   isGenericWeightName,
   isWeightFile,
 } from '@/lib/models/weight-files';
 import {SPLIT_RE, extractModelName, extractQuant} from '@/lib/models/quant';
+import {siteStorage, type Site} from '@/lib/storage/site';
+import type {FileEntry} from '@/lib/storage/storage';
 
 // Re-exported so existing `@/lib/models` importers keep working.
 export {isWeightFile};
@@ -40,81 +41,47 @@ export type {
 } from '@/lib/models/model-types';
 export {shardPath, shardSize} from '@/lib/models/model-types';
 
-/**
- * The model identity recorded in a file's `.tjmeta.json` sidecar, if any: the
- * `org/repo` the file was downloaded from / verified against. Read synchronously
- * to fit the synchronous scan. Returns null when the sidecar is absent or its
- * `modelUrl` is missing/unparseable, so the caller falls back to the
- * filename-derived name.
- */
-function sidecarRepoId(fullPath: string): string | null {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(metaPath(fullPath), 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    const meta = JSON.parse(raw) as {modelUrl?: unknown};
-    return typeof meta.modelUrl === 'string'
-      ? repoIdFromModelUrl(meta.modelUrl)
-      : null;
-  } catch {
-    return null;
-  }
+/** The directory part of a root-relative path; `''` for the root itself. */
+function parentDir(relPath: string): string {
+  const i = relPath.lastIndexOf('/');
+  return i < 0 ? '' : relPath.slice(0, i);
 }
 
 /**
- * The model sidecar (`tjmodel.json`) that owns `fullPath`, found by walking up
- * from the file's directory to the nearest ancestor holding one (bounded by
- * `storagePath`). Read synchronously to fit the sync scan. Returns null when
- * none is found or the JSON is unparseable.
+ * Which model sidecar (`tjmodel.json`) owns each file of an inventory: the
+ * nearest ancestor directory holding one, the root included. The sidecars are
+ * located from the inventory itself — no probing directory by directory — and
+ * each is read once, however many files it owns. An unparseable sidecar is
+ * passed over for the next one up, as the walk that tried each directory in
+ * turn always did.
  */
-function readSidecarFor(fullPath: string, storagePath: string): TjModel | null {
-  let dir = path.dirname(fullPath);
-  const root = path.resolve(storagePath);
-  for (;;) {
-    try {
-      const raw = fs.readFileSync(path.join(dir, MODEL_SIDECAR_NAME), 'utf8');
-      return JSON.parse(raw) as TjModel;
-    } catch {
-      // no (readable) sidecar here; keep walking up
+function sidecarOwners(
+  site: Site,
+  entries: FileEntry[],
+): (relPath: string) => Promise<TjModel | null> {
+  const dirs = new Set<string>();
+  for (const e of entries) {
+    if (e.kind !== 'dir' && path.posix.basename(e.path) === MODEL_SIDECAR_NAME)
+      dirs.add(parentDir(e.path));
+  }
+  const reads = new Map<string, Promise<TjModel | null>>();
+  const read = (dir: string): Promise<TjModel | null> => {
+    let p = reads.get(dir);
+    if (!p) {
+      p = readModelSidecar(site, dir);
+      reads.set(dir, p);
     }
-    if (path.resolve(dir) === root) return null;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-/**
- * The repoId recorded in the model sidecar that owns `fullPath`, or null. The
- * authoritative name for the whole model dir.
- */
-function modelSidecarRepoId(
-  fullPath: string,
-  storagePath: string,
-): string | null {
-  const m = readSidecarFor(fullPath, storagePath);
-  return m && typeof m.repoId === 'string' ? m.repoId : null;
-}
-
-/** The model-level summary of the sidecar owning `fullPath`, or null. */
-function modelSidecarSummary(
-  fullPath: string,
-  storagePath: string,
-): SidecarSummary | null {
-  const m = readSidecarFor(fullPath, storagePath);
-  return m && typeof m.repoId === 'string' ? summarizeModel(m) : null;
-}
-
-/** The per-file records of the sidecar owning `fullPath`, or null. */
-function modelSidecarFiles(
-  fullPath: string,
-  storagePath: string,
-): TjModelFile[] | null {
-  const m = readSidecarFor(fullPath, storagePath);
-  return m && Array.isArray(m.files) ? m.files : null;
+    return p;
+  };
+  return async (relPath) => {
+    for (let dir = parentDir(relPath); ; dir = parentDir(dir)) {
+      if (dirs.has(dir)) {
+        const m = await read(dir);
+        if (m) return m;
+      }
+      if (dir === '') return null;
+    }
+  };
 }
 
 /**
@@ -123,21 +90,16 @@ function modelSidecarFiles(
  * standalone models with no quant token, so each is its own variant — like a
  * GGUF quant — rather than collapsing under a generic `pytorch` tag. Otherwise a
  * filename quant token wins (GGUF, or a dtype-tagged safetensors); a generic
- * safetensors file is labeled by its header dtype (BF16/F16/…), a `.bin` by a
- * generic tag, and a tokenless GGUF keeps `unknown`. `fullPath` is only read for
- * tokenless safetensors.
+ * safetensors file is labeled by its header dtype (BF16/F16/…, read by the
+ * inventory walk), a `.bin` by a generic tag, and a tokenless GGUF keeps
+ * `unknown`.
  */
-function weightLabel(
-  fullPath: string,
-  filename: string,
-  quant: string,
-): string {
+function weightLabel(entry: FileEntry, quant: string): string {
+  const filename = path.posix.basename(entry.path);
   const ggmlVariant = ggmlModelVariant(filename);
   if (ggmlVariant) return ggmlVariant;
   if (quant !== 'unknown') return quant;
-  if (/\.safetensors$/i.test(filename)) {
-    return readSafetensorsDtype(fullPath) ?? 'safetensors';
-  }
+  if (/\.safetensors$/i.test(filename)) return entry.dtype ?? 'safetensors';
   if (/\.bin$/i.test(filename)) return 'pytorch';
   // FastFlowLM's NPU-compiled weights are all one 4-bit format; the extension
   // is the precision label.
@@ -196,15 +158,52 @@ export function normalizeModelNames(scans: Model[][]): Model[][] {
   });
 }
 
-export function scanModels(
-  storagePath: string | undefined,
+/**
+ * The models a site holds, from one inventory of it. Every file named like a
+ * weight becomes a variant of some model: a split set's shards are gathered
+ * into one group, anything else stands alone. A model's name is, in order,
+ * the repo the hub-cache layout encodes, the `repoId` of the `tjmodel.json`
+ * owning the file, the `modelUrl` of a legacy per-file `.tjmeta.json`, the
+ * `<org>/<repo>/` directory a flat-layout weight sits in, and finally the
+ * filename.
+ *
+ * A symlinked weight (Lemonade's extra directory, the hub cache's
+ * `snapshots/`) reports the size of what it points at; a dangling one is
+ * `missing`.
+ *
+ * `lemonadePath` names Lemonade's own cache, skipped (by directory name, at
+ * any depth) when it lives inside the site, so its copies don't show up as
+ * this site's models.
+ */
+export async function scanModels(
+  site: Site | undefined,
   lemonadePath?: string,
-): Model[] {
-  if (!storagePath) return [];
-  const root = storagePath;
-  // Lemonade keeps its own model cache; when it lives inside storagePath, skip
-  // the directory (matched by name) so its copies don't show up as local models.
-  const lemonadeDir = lemonadePath ? path.basename(lemonadePath) : null;
+): Promise<Model[]> {
+  if (!site) return [];
+  const {storage, root} = siteStorage(site);
+  const lemonadeName = lemonadePath ? path.basename(lemonadePath) : null;
+  const entries = await storage.list(root, {dtype: true});
+  const present = new Set(entries.map((e) => e.path));
+  const ownerOf = sidecarOwners(site, entries);
+
+  /** The repoId recorded in the model sidecar owning `relPath`, or null. The
+   *  authoritative name for the whole model dir. */
+  const ownerRepoId = async (relPath: string): Promise<string | null> => {
+    const m = await ownerOf(relPath);
+    return m && typeof m.repoId === 'string' ? m.repoId : null;
+  };
+
+  /** The model identity a file's legacy `.tjmeta.json` records — the
+   *  `org/repo` it was downloaded from / verified against — or null when
+   *  there is no such sidecar or its `modelUrl` is missing or unparseable. */
+  const metaRepoId = async (relPath: string): Promise<string | null> => {
+    if (!present.has(metaPath(relPath))) return null;
+    const meta = await readMetaAt(site, relPath);
+    return typeof meta?.modelUrl === 'string'
+      ? repoIdFromModelUrl(meta.modelUrl)
+      : null;
+  };
+
   const singleMap = new Map<string, SingleFile[]>();
 
   // One representative file path per model name, to read the model's sidecar
@@ -221,128 +220,98 @@ export function scanModels(
     representativeFilename: string;
     // Which shard the representative (and the quant read from it) came from.
     // Kept so the lowest-numbered shard always wins regardless of the order
-    // the walk sees them in — see the update below.
+    // the inventory lists them in — see the update below.
     representativeIndex: number;
   }
   const splitMap = new Map<string, SplitAccum>();
 
-  function walk(dir: string) {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, {withFileTypes: true});
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (lemonadeDir && entry.name === lemonadeDir) continue;
-        walk(path.join(dir, entry.name));
-        continue;
+  for (const entry of entries) {
+    if (entry.kind === 'dir') continue;
+    const relPath = entry.path;
+    const segments = relPath.split('/');
+    const filename = segments[segments.length - 1];
+    if (lemonadeName && segments.slice(0, -1).includes(lemonadeName)) continue;
+    const splitMatch = filename.match(SPLIT_RE);
+    if (!splitMatch && !isWeightFile(filename)) continue;
+
+    // In the hub cache layout the repo is encoded in the directory, so it's
+    // the authoritative name regardless of the (often generic) filename.
+    const cacheRepoId = parseHubCachePath(relPath)?.repoId ?? null;
+    // A weight file stored under an `<org>/<repo>/` directory (the flat mirror
+    // layout) takes that repo as its name when no sidecar says otherwise — the
+    // directory is authoritative even for a GGUF whose filename carries the
+    // model name. Otherwise the same file is named `gemma-3-4b-it` on a host
+    // without a sidecar but `ggml-org/gemma-3-4b-it-GGUF` on one with it, so
+    // the two copies don't join (and the peer tab shows the wrong name). A
+    // truly loose file (no `<org>/<repo>/` path) still falls back to its
+    // filename-derived name.
+    const flatRepoId = isWeightFile(filename)
+      ? (pathImpliedRepo(relPath)?.repoId ?? null)
+      : null;
+    // Prefer the authoritative org/repo from the sidecars; fall back to the
+    // filename-derived name when there's none.
+    const modelNameFor = async (fallback: string): Promise<string> =>
+      cacheRepoId ??
+      (await ownerRepoId(relPath)) ??
+      (await metaRepoId(relPath)) ??
+      flatRepoId ??
+      fallback;
+    const size = entry.size;
+
+    if (splitMatch) {
+      const base = splitMatch[1];
+      const index = parseInt(splitMatch[2], 10);
+      const total = parseInt(splitMatch[3], 10);
+      const modelName = await modelNameFor(extractModelName(`${base}.gguf`));
+      const quant = extractQuant(`${base}.gguf`);
+      const key = `${modelName}::${base}`;
+      if (!sampleByModel.has(modelName)) sampleByModel.set(modelName, relPath);
+
+      if (!splitMap.has(key)) {
+        splitMap.set(key, {
+          modelName,
+          quant: weightLabel(entry, quant),
+          totalShards: total,
+          presentIndices: new Set(),
+          presentPaths: [],
+          totalSize: 0,
+          representativeFilename: filename,
+          representativeIndex: index,
+        });
       }
-
-      const fullPath = path.join(dir, entry.name);
-      const relPath = path.relative(root, fullPath);
-      // In the hub cache layout the repo is encoded in the directory, so it's
-      // the authoritative name regardless of the (often generic) filename.
-      const cacheRepoId = parseHubCachePath(relPath)?.repoId ?? null;
-      // A weight file stored under an `<org>/<repo>/` directory (the flat mirror
-      // layout) takes that repo as its name when no sidecar says otherwise — the
-      // directory is authoritative even for a GGUF whose filename carries the
-      // model name. Otherwise the same file is named `gemma-3-4b-it` on a host
-      // without a sidecar but `ggml-org/gemma-3-4b-it-GGUF` on one with it, so
-      // the two copies don't join (and the peer tab shows the wrong name). A
-      // truly loose file (no `<org>/<repo>/` path) still falls back to its
-      // filename-derived name.
-      const flatRepoId = isWeightFile(entry.name)
-        ? (pathImpliedRepo(relPath)?.repoId ?? null)
-        : null;
-      const splitMatch = entry.name.match(SPLIT_RE);
-
-      if (splitMatch) {
-        const base = splitMatch[1];
-        const index = parseInt(splitMatch[2], 10);
-        const total = parseInt(splitMatch[3], 10);
-        // Prefer the authoritative org/repo from the sidecar; fall back to the
-        // filename-derived name when there's no sidecar.
-        const modelName =
-          cacheRepoId ??
-          modelSidecarRepoId(fullPath, root) ??
-          sidecarRepoId(fullPath) ??
-          flatRepoId ??
-          extractModelName(`${base}.gguf`);
-        const quant = extractQuant(`${base}.gguf`);
-        const key = `${modelName}::${base}`;
-        if (!sampleByModel.has(modelName))
-          sampleByModel.set(modelName, fullPath);
-
-        let size = 0;
-        try {
-          size = fs.statSync(fullPath).size;
-        } catch {
-          /* inaccessible shard */
-        }
-
-        if (!splitMap.has(key)) {
-          splitMap.set(key, {
-            modelName,
-            quant: weightLabel(fullPath, entry.name, quant),
-            totalShards: total,
-            presentIndices: new Set(),
-            presentPaths: [],
-            totalSize: 0,
-            representativeFilename: entry.name,
-            representativeIndex: index,
-          });
-        }
-        const accum = splitMap.get(key)!;
-        // Directory order is arbitrary and differs between machines holding the
-        // same files, so the representative must not be "whichever shard we saw
-        // first": the lowest-numbered one wins. The quant follows it, because a
-        // mixed-dtype checkpoint reads BF16 off shard 1 and F32 off shard 40 —
-        // which made two peers label the identical model differently.
-        if (index < accum.representativeIndex) {
-          accum.representativeIndex = index;
-          accum.representativeFilename = entry.name;
-          accum.quant = weightLabel(fullPath, entry.name, quant);
-        }
-        accum.presentIndices.add(index);
-        accum.presentPaths.push({path: relPath, size});
-        accum.totalSize += size;
-      } else if (isWeightFile(entry.name)) {
-        let size = 0;
-        let missing = false;
-        try {
-          size = fs.statSync(fullPath).size;
-        } catch {
-          missing = true;
-        }
-        const modelName =
-          cacheRepoId ??
-          modelSidecarRepoId(fullPath, root) ??
-          sidecarRepoId(fullPath) ??
-          flatRepoId ??
-          extractModelName(entry.name);
-        if (!sampleByModel.has(modelName))
-          sampleByModel.set(modelName, fullPath);
-        const file: SingleFile = {
-          isSplit: false,
-          filename: entry.name,
-          path: relPath,
-          quant: weightLabel(fullPath, entry.name, extractQuant(entry.name)),
-          size,
-          missing,
-        };
-        const existing = singleMap.get(modelName);
-        if (existing) {
-          existing.push(file);
-        } else {
-          singleMap.set(modelName, [file]);
-        }
+      const accum = splitMap.get(key)!;
+      // Inventory order is arbitrary and differs between machines holding the
+      // same files, so the representative must not be "whichever shard we saw
+      // first": the lowest-numbered one wins. The quant follows it, because a
+      // mixed-dtype checkpoint reads BF16 off shard 1 and F32 off shard 40 —
+      // which made two peers label the identical model differently.
+      if (index < accum.representativeIndex) {
+        accum.representativeIndex = index;
+        accum.representativeFilename = filename;
+        accum.quant = weightLabel(entry, quant);
+      }
+      accum.presentIndices.add(index);
+      accum.presentPaths.push({path: relPath, size});
+      accum.totalSize += size;
+    } else {
+      const modelName = await modelNameFor(extractModelName(filename));
+      if (!sampleByModel.has(modelName)) sampleByModel.set(modelName, relPath);
+      const file: SingleFile = {
+        isSplit: false,
+        filename,
+        path: relPath,
+        quant: weightLabel(entry, extractQuant(filename)),
+        size,
+        missing: entry.dangling === true,
+      };
+      const existing = singleMap.get(modelName);
+      if (existing) {
+        existing.push(file);
+      } else {
+        singleMap.set(modelName, [file]);
       }
     }
   }
-
-  walk(storagePath);
 
   const modelMap = new Map<string, ModelFile[]>();
 
@@ -373,21 +342,22 @@ export function scanModels(
     }
   }
 
-  return Array.from(modelMap.entries())
-    .map(([name, files]) => {
-      const sample = sampleByModel.get(name);
-      const sidecar = sample ? modelSidecarSummary(sample, storagePath) : null;
-      const sidecarFiles = sample
-        ? modelSidecarFiles(sample, storagePath)
-        : null;
-      return {
-        name,
-        files: files.sort((a, b) => a.quant.localeCompare(b.quant)),
-        ...(sidecar ? {sidecar} : {}),
-        ...(sidecarFiles ? {sidecarFiles} : {}),
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const models: Model[] = [];
+  for (const [name, files] of modelMap) {
+    const sample = sampleByModel.get(name);
+    const owner = sample ? await ownerOf(sample) : null;
+    const sidecar =
+      owner && typeof owner.repoId === 'string' ? summarizeModel(owner) : null;
+    const sidecarFiles =
+      owner && Array.isArray(owner.files) ? owner.files : null;
+    models.push({
+      name,
+      files: files.sort((a, b) => a.quant.localeCompare(b.quant)),
+      ...(sidecar ? {sidecar} : {}),
+      ...(sidecarFiles ? {sidecarFiles} : {}),
+    });
+  }
+  return models.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -455,28 +425,24 @@ export function duplicateBasenames(models: Model[]): Map<string, string[]> {
 }
 
 // Flag each file that has no matching copy in cold storage, so the UI can warn
-// that it isn't backed up. A split group counts as present if any shard is.
-export function annotateColdStorage(
+// that it isn't backed up. A split group counts as present if any shard is. A
+// dangling link in the archive is no copy at all.
+export async function annotateColdStorage(
   models: Model[],
-  coldPath: string,
-): Model[] {
-  const coldBase = path.resolve(coldPath);
-  const existsInCold = (rel: string): boolean => {
-    try {
-      fs.statSync(path.join(coldBase, rel));
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  coldSite: Site,
+): Promise<Model[]> {
+  const {storage, root} = siteStorage(coldSite);
+  const inCold = new Set(
+    (await storage.list(root)).filter((e) => !e.dangling).map((e) => e.path),
+  );
   return models.map((model) => ({
     ...model,
     files: model.files.map((file): ModelFile => {
       if (file.isSplit) {
-        const inCold = file.files.some((shard) => existsInCold(shard.path));
-        return {...file, notInColdStorage: !inCold};
+        const present = file.files.some((shard) => inCold.has(shard.path));
+        return {...file, notInColdStorage: !present};
       }
-      return {...file, notInColdStorage: !existsInCold(file.path)};
+      return {...file, notInColdStorage: !inCold.has(file.path)};
     }),
   }));
 }

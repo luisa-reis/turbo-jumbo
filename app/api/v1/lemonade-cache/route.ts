@@ -8,9 +8,9 @@ import {scanLemonadeCache} from '@/lib/lemonade/lemonade-cache-scan';
 // this directory; here we scan both halves of it directly so the Lemonade
 // browser can flag catalog entries that live in that cache, and say which half
 // each was found on.
-export function GET() {
+export async function GET() {
   if (!lemonadeBuiltinDir || !lemonadeExtraDir) return NextResponse.json([]);
-  const models = scanLemonadeCache({
+  const models = await scanLemonadeCache({
     builtin: lemonadeBuiltinDir,
     extra: lemonadeExtraDir,
   });

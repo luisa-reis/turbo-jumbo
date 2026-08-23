@@ -13,9 +13,9 @@ import {HomeClient} from '@/components/home/home-client';
 // Server-rendered models table for one location tab. Shared by the catch-all
 // page and the hard-navigation Lemonade pages (which render it under the
 // already-open download modal).
-export function HomeView({location}: {location: string}) {
-  const coldModels = scanModels(coldStorageDir);
-  const localModels = scanModels(localModelsDir, lemonadeDir);
+export async function HomeView({location}: {location: string}) {
+  const coldModels = await scanModels(coldStorageDir);
+  const localModels = await scanModels(localModelsDir, lemonadeDir);
   const modelsTableData = getModelsTableData(localModels, coldModels);
   return (
     <HomeClient

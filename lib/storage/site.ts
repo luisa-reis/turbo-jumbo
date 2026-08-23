@@ -1,3 +1,4 @@
+import nodePath from 'path';
 import {createLocalStorage} from '@/lib/storage/local-storage';
 import type {Root, Storage} from '@/lib/storage/storage';
 
@@ -11,9 +12,20 @@ import type {Root, Storage} from '@/lib/storage/storage';
  */
 export type Site = string | {storage: Storage; root: Root};
 
+// One wrapper per directory rather than one per call: a `LocalStorage` holds
+// the safetensors-header memo that makes repeated scans cheap, and a fresh
+// instance per call would start it empty every time.
+const wrappers = new Map<string, Storage>();
+
 export function siteStorage(site: Site): {storage: Storage; root: Root} {
   if (typeof site !== 'string') return site;
-  // Which root name the wrapper uses is arbitrary — the storage it creates
-  // maps only that one root, onto exactly the directory the caller named.
-  return {storage: createLocalStorage({models: site}), root: 'models'};
+  const dir = nodePath.resolve(site);
+  let storage = wrappers.get(dir);
+  if (!storage) {
+    // Which root name the wrapper uses is arbitrary — the storage it creates
+    // maps only that one root, onto exactly the directory the caller named.
+    storage = createLocalStorage({models: dir});
+    wrappers.set(dir, storage);
+  }
+  return {storage, root: 'models'};
 }

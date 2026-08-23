@@ -10,12 +10,12 @@ import {logger} from '@/lib/util/logger';
 import {scanModels, annotateColdStorage} from '@/lib/models/models';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 
-export function GET(req: Request) {
+export async function GET(req: Request) {
   logger.trace('[models] list requested');
-  let models = scanModels(localModelsDir, lemonadeDir);
+  let models = await scanModels(localModelsDir, lemonadeDir);
   const url = new URL(req.url);
   if (url.searchParams.get('checkColdStorage') === 'true' && coldStorageDir)
-    models = annotateColdStorage(models, coldStorageDir);
+    models = await annotateColdStorage(models, coldStorageDir);
   logger.trace(`[models] list received: ${models.length} model(s)`);
   return NextResponse.json(models);
 }

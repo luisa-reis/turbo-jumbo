@@ -10,7 +10,8 @@ const MAX_HEADER_BYTES = 100 * 1024 * 1024;
  * u64 header length, followed by that many bytes of JSON mapping tensor names
  * to `{dtype, …}`. Returns the first non-`__metadata__` tensor's dtype,
  * uppercased, or null when the file can't be read or isn't a valid
- * safetensors container. Synchronous to fit the synchronous scan; reads only
+ * safetensors container. Synchronous: it runs inside the storage walk that is
+ * already standing on the file (see `Storage.list`'s `dtype`); reads only
  * the header, not the (multi-GB) tensor data.
  */
 export function readSafetensorsDtype(fullPath: string): string | null {

@@ -29,6 +29,32 @@ export type Roots = Partial<Record<Root, string>>;
 const SAFETENSORS = /\.safetensors$/i;
 
 export function createLocalStorage(roots: Roots): Storage {
+  // The inventory cache, in the two forms that can't go stale.
+  //
+  // Reading a safetensors header is the one expensive thing a walk does, and
+  // the header of a file whose size and mtime haven't moved hasn't moved
+  // either — so the dtype is remembered against both, and a walk re-reads
+  // only what changed. Per root so a full walk can drop what it no longer
+  // saw.
+  //
+  // Identical `list` calls in flight at once share one walk: a page load asks
+  // for the same inventory from several places within the same second, and
+  // each would otherwise walk the tree again. Nothing is kept once the walk
+  // has answered — a cached inventory would have to know about every writer,
+  // and the `hf` CLI, a peer's transfer and a user's shell are not among the
+  // verbs here. A mutating verb forgets the root's in-flight walks, so a
+  // caller listing after its own write never shares a walk that began
+  // before it.
+  type DtypeMemo = Map<string, {size: number; mtimeMs: number; dtype: string}>;
+  const dtypeMemo = new Map<Root, DtypeMemo>();
+  const inFlight = new Map<string, Promise<FileEntry[]>>();
+
+  function forgetInFlight(root: Root): void {
+    for (const key of inFlight.keys()) {
+      if (key.startsWith(`${root}\0`)) inFlight.delete(key);
+    }
+  }
+
   function rootDir(root: Root): string {
     const dir = roots[root];
     if (!dir) throw new Error(`No ${root} directory is configured`);
@@ -67,7 +93,12 @@ export function createLocalStorage(roots: Roots): Storage {
     dir: string,
     rel: string,
     out: FileEntry[],
-    opts: {dtype: boolean; strict: boolean},
+    opts: {
+      dtype: boolean;
+      strict: boolean;
+      memo: DtypeMemo;
+      seen: DtypeMemo;
+    },
   ): Promise<void> {
     let entries;
     try {
@@ -90,16 +121,26 @@ export function createLocalStorage(roots: Roots): Storage {
         throw e;
       }
       if (entry.isSymbolicLink()) {
-        out.push({
+        const link: FileEntry = {
           path,
           kind: 'symlink',
-          size: st.size,
+          size: 0,
           mtimeMs: st.mtimeMs,
           linkTarget: await fsp.readlink(full).catch(() => ''),
-        });
-        // Deliberately not followed: Lemonade's extra directory is symlinks
-        // pointing back into the models root, and following them would report
-        // every weight twice.
+        };
+        // Deliberately not descended into: Lemonade's extra directory is
+        // symlinks pointing back into the models root, and following them
+        // would report every weight twice. But the size is the target's —
+        // what a link to a weight means to anyone asking.
+        try {
+          const target = await fsp.stat(full);
+          link.size = target.size;
+          link.mtimeMs = target.mtimeMs;
+          if (target.isFile()) readDtype(link, full, opts);
+        } catch {
+          link.dangling = true;
+        }
+        out.push(link);
         continue;
       }
       if (entry.isDirectory()) {
@@ -113,11 +154,29 @@ export function createLocalStorage(roots: Roots): Storage {
         size: st.size,
         mtimeMs: st.mtimeMs,
       };
-      if (opts.dtype && SAFETENSORS.test(entry.name)) {
-        const dtype = readSafetensorsDtype(full);
-        if (dtype) file.dtype = dtype;
-      }
+      readDtype(file, full, opts);
       out.push(file);
+    }
+  }
+
+  /** Label a `.safetensors` entry with its dtype, from the memo when the file
+   *  hasn't changed since it was last read, else from its header. */
+  function readDtype(
+    file: FileEntry,
+    full: string,
+    opts: {dtype: boolean; memo: DtypeMemo; seen: DtypeMemo},
+  ): void {
+    if (!opts.dtype || !SAFETENSORS.test(file.path)) return;
+    const hit = opts.memo.get(full);
+    if (hit && hit.size === file.size && hit.mtimeMs === file.mtimeMs) {
+      file.dtype = hit.dtype;
+      opts.seen.set(full, hit);
+      return;
+    }
+    const dtype = readSafetensorsDtype(full);
+    if (dtype) {
+      file.dtype = dtype;
+      opts.seen.set(full, {size: file.size, mtimeMs: file.mtimeMs, dtype});
     }
   }
 
@@ -154,17 +213,46 @@ export function createLocalStorage(roots: Roots): Storage {
     }
   }
 
+  async function listUncached(
+    root: Root,
+    opts: ListOptions,
+  ): Promise<FileEntry[]> {
+    const dir = opts.under ? resolve({root, path: opts.under}) : rootDir(root);
+    const memo = dtypeMemo.get(root) ?? new Map();
+    const seen: DtypeMemo = new Map();
+    const out: FileEntry[] = [];
+    await walk(dir, opts.under ?? '', out, {
+      dtype: opts.dtype ?? false,
+      strict: opts.strict ?? false,
+      memo,
+      seen,
+    });
+    if (opts.dtype) {
+      // A full walk saw every file there is, so what it didn't see is gone;
+      // a partial one only adds to what's known.
+      dtypeMemo.set(root, opts.under ? new Map([...memo, ...seen]) : seen);
+    }
+    return out;
+  }
+
   return {
     async list(root: Root, opts: ListOptions = {}): Promise<FileEntry[]> {
-      const dir = opts.under
-        ? resolve({root, path: opts.under})
-        : rootDir(root);
-      const out: FileEntry[] = [];
-      await walk(dir, opts.under ?? '', out, {
-        dtype: opts.dtype ?? false,
-        strict: opts.strict ?? false,
-      });
-      return out;
+      const key = [
+        root,
+        opts.under ?? '',
+        opts.dtype ? 1 : 0,
+        opts.strict ? 1 : 0,
+      ].join('\0');
+      let pending = inFlight.get(key);
+      if (!pending) {
+        pending = listUncached(root, opts).finally(() => {
+          if (inFlight.get(key) === pending) inFlight.delete(key);
+        });
+        inFlight.set(key, pending);
+      }
+      // Each caller gets its own array: two of them mutating one shared
+      // inventory would be a very quiet bug.
+      return [...(await pending)];
     },
 
     async read(ref: Ref): Promise<Uint8Array> {
@@ -184,16 +272,19 @@ export function createLocalStorage(roots: Roots): Storage {
           `${ref.path} is ${bytes.byteLength} bytes; write is for small files only`,
         );
       }
+      forgetInFlight(ref.root);
       const full = resolve(ref);
       await fsp.mkdir(nodePath.dirname(full), {recursive: true});
       await fsp.writeFile(full, bytes);
     },
 
     async mkdir(ref: Ref): Promise<void> {
+      forgetInFlight(ref.root);
       await fsp.mkdir(resolve(ref), {recursive: true});
     },
 
     async remove(refs: Ref[], opts: RemoveOptions = {}): Promise<void> {
+      for (const ref of refs) forgetInFlight(ref.root);
       for (const ref of refs) {
         const full = resolve(ref);
         await fsp.rm(full, {recursive: true, force: true});
@@ -202,12 +293,15 @@ export function createLocalStorage(roots: Roots): Storage {
     },
 
     async move(from: Ref, to: Ref): Promise<void> {
+      forgetInFlight(from.root);
+      forgetInFlight(to.root);
       const dst = resolve(to);
       await fsp.mkdir(nodePath.dirname(dst), {recursive: true});
       await fsp.rename(resolve(from), dst);
     },
 
     async copy(from: Ref, to: Ref): Promise<void> {
+      forgetInFlight(to.root);
       const dst = resolve(to);
       await fsp.mkdir(nodePath.dirname(dst), {recursive: true});
       await fsp.copyFile(resolve(from), dst);
@@ -217,6 +311,7 @@ export function createLocalStorage(roots: Roots): Storage {
       links: Array<{target: Ref; at: Ref}>,
       opts: {dryRun?: boolean} = {},
     ): Promise<LinkOutcome[]> {
+      if (!opts.dryRun) for (const {at} of links) forgetInFlight(at.root);
       const out: LinkOutcome[] = [];
       for (const {target, at} of links) {
         const linkPath = resolve(at);

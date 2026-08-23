@@ -29,10 +29,18 @@ export interface FileEntry {
   /** Relative to the root, `/`-separated on every platform. */
   path: string;
   kind: 'file' | 'dir' | 'symlink';
+  /**
+   * For a symlink, the size and mtime of what it points to — Lemonade's
+   * extra directory and the hub cache's `snapshots/` are links to weights,
+   * and what anyone asks about a link is the weight behind it, never the
+   * link's own byte count. A dangling link reports size 0 and `dangling`.
+   */
   size: number;
   mtimeMs: number;
   /** Where a symlink points, verbatim and unresolved. Symlinks only. */
   linkTarget?: string;
+  /** A symlink whose target is gone. Symlinks only. */
+  dangling?: boolean;
   /**
    * The dominant tensor dtype of a `.safetensors`, when `list` was asked for
    * it. Read during the walk because that is the one moment it is cheap: a
@@ -91,7 +99,10 @@ export interface RemoveOptions {
 }
 
 export interface Storage {
-  /** Recursive inventory. The only traversal verb. */
+  /**
+   * Recursive inventory. The only traversal verb. Symlinks are reported, not
+   * followed: descending into one would inventory the same weights twice.
+   */
   list(root: Root, opts?: ListOptions): Promise<FileEntry[]>;
 
   /** A small file — a sidecar, a catalog. Throws past `MAX_SMALL_FILE`. */

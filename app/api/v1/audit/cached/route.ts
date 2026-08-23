@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   const root = target.basePath;
 
   const results: AuditResult[] = [];
-  const models = scanModels(root);
+  const models = await scanModels(root);
   const dups = duplicateBasenames(models);
 
   // The live on-disk size of every scanned file (scanModels already stat'd

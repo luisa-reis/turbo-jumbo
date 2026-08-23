@@ -10,9 +10,9 @@ import {logger} from '@/lib/util/logger';
 import {scanModels} from '@/lib/models/models';
 import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 
-export function GET() {
+export async function GET() {
   if (!coldStorageDir) return new Response('No cold storage', {status: 400});
-  return NextResponse.json(scanModels(coldStorageDir));
+  return NextResponse.json(await scanModels(coldStorageDir));
 }
 
 export async function DELETE(req: Request) {

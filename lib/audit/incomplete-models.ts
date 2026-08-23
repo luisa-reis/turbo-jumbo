@@ -74,7 +74,7 @@ export async function findIncompleteRepos(
   lemonadePath?: string,
 ): Promise<string[]> {
   const base = nodePath.resolve(storagePath);
-  const local = scanModels(storagePath, lemonadePath);
+  const local = await scanModels(storagePath, lemonadePath);
   const candidates = local.filter((m) => !isSelfContainedGguf(m.files));
   const results = await Promise.all(
     candidates.map(async (m) => {
@@ -123,7 +123,7 @@ export async function findReposWithInvalidFiles(
   storagePath: string,
   lemonadePath?: string,
 ): Promise<string[]> {
-  const local = scanModels(storagePath, lemonadePath);
+  const local = await scanModels(storagePath, lemonadePath);
   const candidates = local.filter((m) => !isSelfContainedGguf(m.files));
   const results = await Promise.all(
     candidates.map(async (m) => {

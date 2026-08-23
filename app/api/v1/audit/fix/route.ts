@@ -90,7 +90,7 @@ export async function POST(req: Request) {
     }
   };
 
-  for (const model of scanModels(root)) {
+  for (const model of await scanModels(root)) {
     for (const file of model.files) {
       if (file.isSplit) {
         for (const shard of file.files) {

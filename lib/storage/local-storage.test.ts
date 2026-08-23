@@ -147,9 +147,9 @@ test('a strict list of a missing subdirectory is empty, not an error', async () 
   // Gone is an answer — a vanished directory holds nothing. Only "couldn't
   // look" is worth failing over.
   const {storage} = await tmpStorage();
-  expect(await storage.list('models', {under: 'no/such', strict: true})).toEqual(
-    [],
-  );
+  expect(
+    await storage.list('models', {under: 'no/such', strict: true}),
+  ).toEqual([]);
 });
 
 test('list can be limited to a subdirectory, with paths still root-relative', async () => {
@@ -296,4 +296,76 @@ test('usage reports the filesystem holding a root', async () => {
   expect(device).not.toBe('');
   // Both temp roots are on one filesystem, which is what sameDevice detects.
   expect((await storage.usage('cold')).device).toBe(device);
+});
+
+/** A minimal safetensors file whose one tensor has the given dtype. */
+function safetensors(dtype: string): Buffer {
+  const header = Buffer.from(JSON.stringify({w: {dtype}}), 'utf8');
+  const len = Buffer.alloc(8);
+  len.writeBigUInt64LE(BigInt(header.length));
+  return Buffer.concat([len, header]);
+}
+
+test('list reports a symlink with the size of what it points at', async () => {
+  // Lemonade's extra directory and the hub cache's snapshots/ are links to
+  // weights: the size anyone wants is the weight's, and a dangling link is no
+  // weight at all.
+  const {storage, models} = await tmpStorage();
+  await fsp.writeFile(nodePath.join(models, 'real.gguf'), 'abcde');
+  await fsp.mkdir(nodePath.join(models, 'extra'));
+  await fsp.symlink(
+    nodePath.join(models, 'real.gguf'),
+    nodePath.join(models, 'extra/link.gguf'),
+  );
+  await fsp.symlink(
+    nodePath.join(models, 'gone.gguf'),
+    nodePath.join(models, 'extra/dangling.gguf'),
+  );
+
+  const byPath = new Map(
+    (await storage.list('models')).map((e) => [e.path, e]),
+  );
+  expect(byPath.get('extra/link.gguf')).toMatchObject({
+    kind: 'symlink',
+    size: 5,
+  });
+  expect(byPath.get('extra/link.gguf')?.dangling).toBeUndefined();
+  expect(byPath.get('extra/dangling.gguf')).toMatchObject({
+    kind: 'symlink',
+    size: 0,
+    dangling: true,
+  });
+});
+
+test('list reads the dtype through a symlinked safetensors', async () => {
+  const {storage, models} = await tmpStorage();
+  await fsp.writeFile(
+    nodePath.join(models, 'real.safetensors'),
+    safetensors('F16'),
+  );
+  await fsp.symlink(
+    nodePath.join(models, 'real.safetensors'),
+    nodePath.join(models, 'link.safetensors'),
+  );
+  const entries = await storage.list('models', {dtype: true});
+  expect(entries.find((e) => e.path === 'link.safetensors')?.dtype).toBe('F16');
+});
+
+test('list re-reads a safetensors header only when the file changes', async () => {
+  const {storage, models} = await tmpStorage();
+  const file = nodePath.join(models, 'w.safetensors');
+  await fsp.writeFile(file, safetensors('BF16'));
+  expect((await storage.list('models', {dtype: true}))[0].dtype).toBe('BF16');
+
+  // Swap the bytes underneath with the size and mtime held still: the memo
+  // answers, and the header isn't consulted.
+  const st = await fsp.stat(file);
+  await fsp.writeFile(file, safetensors('BF32'));
+  await fsp.utimes(file, st.atime, st.mtime);
+  expect((await storage.list('models', {dtype: true}))[0].dtype).toBe('BF16');
+
+  // Move the mtime and the file is read again.
+  const later = new Date(st.mtimeMs + 60_000);
+  await fsp.utimes(file, later, later);
+  expect((await storage.list('models', {dtype: true}))[0].dtype).toBe('BF32');
 });

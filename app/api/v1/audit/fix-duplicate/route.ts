@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   const selected = new Set(files ?? []);
   clearHfCache();
 
-  const models = scanModels(root);
+  const models = await scanModels(root);
   const dups = duplicateBasenames(models);
   const results: DuplicateFixResult[] = [];
   const processed = new Set<string>();

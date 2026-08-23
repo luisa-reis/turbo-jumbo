@@ -20,8 +20,13 @@ export interface CachedModel extends Model {
  * The cache is two Hugging Face trees now, and a model is in Lemonade if it is
  * in either — which half only says whether Lemonade lists the model itself.
  */
-export function scanLemonadeCache(sides: LemonadeSides): CachedModel[] {
-  return LEMONADE_SIDES.flatMap((side) =>
-    scanModels(sides[side]).map((m) => ({...m, side})),
+export async function scanLemonadeCache(
+  sides: LemonadeSides,
+): Promise<CachedModel[]> {
+  const scans = await Promise.all(
+    LEMONADE_SIDES.map(async (side) =>
+      (await scanModels(sides[side])).map((m) => ({...m, side})),
+    ),
   );
+  return scans.flat();
 }
