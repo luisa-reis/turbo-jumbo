@@ -134,4 +134,16 @@ export interface Storage {
   ): Promise<LinkOutcome[]>;
 
   usage(root: Root): Promise<Usage>;
+
+  /**
+   * The SHA-256 of a file, however large — the one read that may cross
+   * `MAX_SMALL_FILE`, because it never hands the bytes back. This is the
+   * hash job of the design in its in-process form: `signal` cancels it and
+   * `onBytes` reports each chunk hashed, which is all a progress bar needs.
+   * A remote implementation runs it as a job underneath.
+   */
+  hash(
+    ref: Ref,
+    opts?: {signal?: AbortSignal; onBytes?: (n: number) => void},
+  ): Promise<string>;
 }

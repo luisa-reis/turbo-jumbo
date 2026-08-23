@@ -23,6 +23,7 @@ import {
   isWeightFile,
 } from '@/lib/models/weight-files';
 import {SPLIT_RE, extractModelName, extractQuant} from '@/lib/models/quant';
+import {parentDir} from '@/lib/storage/entries';
 import {siteStorage, type Site} from '@/lib/storage/site';
 import type {FileEntry} from '@/lib/storage/storage';
 
@@ -40,12 +41,6 @@ export type {
   SplitGroup,
 } from '@/lib/models/model-types';
 export {shardPath, shardSize} from '@/lib/models/model-types';
-
-/** The directory part of a root-relative path; `''` for the root itself. */
-function parentDir(relPath: string): string {
-  const i = relPath.lastIndexOf('/');
-  return i < 0 ? '' : relPath.slice(0, i);
-}
 
 /**
  * Which model sidecar (`tjmodel.json`) owns each file of an inventory: the

@@ -136,13 +136,15 @@ async function flmPlans(
   );
 }
 
+// The halves of the cache as the `lemonade` root holds them. Lemonade is
+// configured when the config names both.
 function sides(): LemonadeSides | null {
   if (!lemonadeBuiltinDir || !lemonadeExtraDir) return null;
   return {
-    builtin: lemonadeBuiltinDir,
-    extra: lemonadeExtraDir,
-    // Entries an older version left here are still part of the cache.
-    ...(lemonadeDir ? {root: lemonadeDir} : {}),
+    builtin: 'builtin',
+    extra: 'extra',
+    // Entries an older version left at the root are still part of the cache.
+    root: '',
   };
 }
 
@@ -167,7 +169,7 @@ export async function previewSync(): Promise<SyncPreview> {
   const {catalog, listed, registry} = await lemonadeKnowledge();
   const [placement, preview, extra, flm] = await Promise.all([
     planPlacement(storage, listed),
-    previewLemonadeSync(localModelsDir, s, catalog, listed),
+    previewLemonadeSync(storage, s, catalog, listed),
     extraPlans(listed).then((plans) => previewExtraModels(storage, plans)),
     flmPlans(registry).then((plans) => previewFlmStore(storage, plans)),
   ]);
@@ -227,7 +229,7 @@ export async function runSync(): Promise<{
   // Sort the cache before consolidating it, so the passes below see every entry
   // on the side it belongs on rather than wherever it happened to be.
   const placement = await placeRepos(storage, listed);
-  const results = await syncLemonadeToTurboJumbo(localModelsDir, s, catalog);
+  const results = await syncLemonadeToTurboJumbo(storage, s, catalog);
   // Last, because they reflect what local storage holds once the passes above
   // have finished moving things into it.
   const extra = await syncExtraModels(storage, await extraPlans(listed));

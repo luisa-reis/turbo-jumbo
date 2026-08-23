@@ -1,7 +1,13 @@
 import {scanModels} from '@/lib/models/models';
 import type {Model} from '@/lib/models/model-types';
-import type {LemonadeSides} from '@/lib/lemonade/lemonade-sync';
 import {LEMONADE_SIDES, type LemonadeSide} from '@/lib/lemonade/lemonade-sides';
+
+/** The two halves of Lemonade's cache as directories to scan — absolute, the
+ *  transitional string form of a site (see `lib/storage/site`). */
+export interface LemonadeCacheDirs {
+  builtin: string;
+  extra: string;
+}
 
 /**
  * A model found in Lemonade's cache, carrying which half it was found on.
@@ -21,7 +27,7 @@ export interface CachedModel extends Model {
  * in either — which half only says whether Lemonade lists the model itself.
  */
 export async function scanLemonadeCache(
-  sides: LemonadeSides,
+  sides: LemonadeCacheDirs,
 ): Promise<CachedModel[]> {
   const scans = await Promise.all(
     LEMONADE_SIDES.map(async (side) =>

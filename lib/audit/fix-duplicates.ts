@@ -1,10 +1,7 @@
-import {promises as fsp} from 'fs';
-import path from 'path';
 import {
   expectedRelPath,
   findHistoricalMatch,
   hfSummary,
-  localSha256,
   metaPath,
   moveFileWithMeta,
   resolveSource,
@@ -12,6 +9,8 @@ import {
 } from '@/lib/audit/audit';
 import type {HfFileInfo} from '@/lib/hf/hf-infer';
 import {modelDirForRepo, removeFileMeta} from '@/lib/models/model-sidecar';
+import {fileSize} from '@/lib/storage/entries';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 export interface DuplicateFixResult {
   file: string; // original path relative to the storage root
@@ -45,12 +44,13 @@ interface Copy {
  * stale prior sidecar hash over the one just computed).
  */
 export async function fixDuplicateGroup(
-  basePath: string,
+  site: Site,
   relPaths: string[],
   modelName: string,
   filename: string,
   signal?: AbortSignal,
 ): Promise<DuplicateFixResult[]> {
+  const {storage, root} = siteStorage(site);
   const skipAll = (message: string) =>
     relPaths.map((file): DuplicateFixResult => ({
       file,
@@ -65,24 +65,19 @@ export async function fixDuplicateGroup(
   // copy, so try each until one resolves.
   let source: HfFileInfo | null = null;
   for (const relPath of relPaths) {
-    source = await resolveSource(
-      path.join(basePath, relPath),
-      relPath,
-      modelName,
-      filename,
-    );
+    source = await resolveSource(site, relPath, modelName, filename);
     if (source) break;
   }
   if (!source) return skipAll('unverifiable');
 
-  // Stat and hash every copy. An unhashable copy can't be ruled in or out as
+  // Size and hash every copy. An unhashable copy can't be ruled in or out as
   // the survivor, so any failure forfeits the whole group.
   const copies: Copy[] = [];
   for (const relPath of relPaths) {
-    const full = path.join(basePath, relPath);
     try {
-      const size = (await fsp.stat(full)).size;
-      const sha256 = await localSha256(full, signal);
+      const size = await fileSize(storage, root, relPath);
+      if (size === null) throw new Error('no file');
+      const sha256 = await storage.hash({root, path: relPath}, {signal});
       copies.push({relPath, size, sha256});
     } catch {
       return skipAll(`could not hash ${relPath}`);
@@ -100,7 +95,8 @@ export async function fixDuplicateGroup(
         matched = source;
       } else {
         const prev = await findHistoricalMatch(
-          path.join(basePath, copy.relPath),
+          site,
+          copy.relPath,
           source,
           copy.size,
           copy.sha256,
@@ -133,14 +129,15 @@ export async function fixDuplicateGroup(
   const results: DuplicateFixResult[] = [];
   for (const copy of copies) {
     if (copy === survivor) continue;
-    const full = path.join(basePath, copy.relPath);
     try {
-      await fsp.rm(full);
-      await fsp.rm(metaPath(full), {force: true});
+      await storage.remove([
+        {root, path: copy.relPath},
+        {root, path: metaPath(copy.relPath)},
+      ]);
       const loc = copy.matched
         ? modelDirForRepo(copy.relPath, copy.matched.repoId)
         : null;
-      if (loc) await removeFileMeta(basePath, loc.dir, loc.key);
+      if (loc) await removeFileMeta(site, loc.dir, loc.key);
       results.push({file: copy.relPath, status: 'deleted'});
     } catch (e) {
       results.push({
@@ -161,11 +158,11 @@ export async function fixDuplicateGroup(
   let message: string | undefined;
   try {
     if (survivor.relPath !== target) {
-      await moveFileWithMeta(basePath, survivor.relPath, target);
+      await moveFileWithMeta(site, survivor.relPath, target);
       to = target;
     }
     const summary = hfSummary(pinned);
-    await updateMetaResolved(basePath, to ?? survivor.relPath, pinned.repoId, {
+    await updateMetaResolved(site, to ?? survivor.relPath, pinned.repoId, {
       modelUrl: summary.modelUrl,
       originUrl: summary.fileUrl,
       ...(pinned.commit ? {sourceCommit: pinned.commit} : {}),

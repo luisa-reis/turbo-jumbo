@@ -145,6 +145,16 @@ export interface Storage {
 
   usage(root: Root): Promise<Usage>;
 
+  /**
+   * The SHA-256 of a file of any size, with cancellation and per-chunk
+   * progress: the hash job in its in-process form. A remote implementation
+   * runs it as a `start({kind: 'hash'})` job underneath.
+   */
+  hash(
+    ref: Ref,
+    opts?: {signal?: AbortSignal; onBytes?: (n: number) => void},
+  ): Promise<string>;
+
   /** FastFlowLM's models exist only inside a running Lemonade; ask its binary. */
   flmModels(): Promise<FlmModel[]>;
 
@@ -298,16 +308,33 @@ Done:
   cold three times faster, the page-load burst of three concurrent scans five
   times faster. The transitional string arm of `Site` keeps one
   `LocalStorage` per directory so its callers share the memo too.
+- `audit/audit.ts`, `audit/fix-duplicates.ts` and `lemonade/lemonade-sync.ts`,
+  as one step, since fix-duplicates' I/O was audit.ts's helpers all along.
+  Every helper takes a `Site` and a root-relative path; `resolveSource` lost
+  the full path it used to recover its base from. Two additions to the
+  interface: `hash` (above), because a `{storage, root}` site has no
+  absolute path to stream, and an `EXDEV` fallback in `LocalStorage.move`,
+  since lemonade-sync moves files between the `lemonade` and `models`
+  roots. Sizes and existence come from `lib/storage/entries.ts` — a `list`
+  of the parent directory, there being no `stat` — and lemonade-sync takes
+  one inventory per root up front instead of a stat per file, re-listing
+  between its two passes. Its `LemonadeSides` are now paths within the
+  `lemonade` root (`builtin`, `extra`, `''`); the cache _scan_ keeps
+  absolute directories under its own `LemonadeCacheDirs`. `copyFileWithMeta`
+  moved to `storage/copy-meta.ts` beside the transfer core it wraps, still on
+  absolute paths, so `audit.ts` carries no `fs` import without touching the
+  job API's territory; `audit.ts` keeps re-exporting it.
 
-Remaining call sites, easiest first so an interruption lands somewhere
-coherent:
+Remaining call sites:
 
-1. `audit/audit.ts`, `lemonade/lemonade-sync.ts`, and `audit/fix-duplicates.ts`
-   with them — fix-duplicates looked easy but its I/O is really audit.ts's
-   full-path helpers (`resolveSource`, `localSha256`, `findHistoricalMatch`,
-   `moveFileWithMeta`), so the two migrate together
-2. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` — these need the job
-   API, which is specified above but not yet written in code
+1. `hf/hf-download-stream.ts`, `storage/file-transfer.ts` (with
+   `copyFileWithMeta` in `storage/copy-meta.ts`) — these need the job API,
+   which is specified above but not yet written in code
+2. Outside the original list but still on `fs`: `audit/incomplete-models.ts`
+   and `models/repo-files.ts` check local presence with `existsSync`/`statSync`
+   beside their Hugging Face reads, and the routes that stream bytes (`copy`,
+   `push`, `upload`, `download`, `checksum`, the cold-storage transfers) open
+   files directly — the job API's callers, once it exists. `lib/config` stays.
 
 ## Decided
 

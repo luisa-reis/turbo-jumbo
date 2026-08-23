@@ -15,9 +15,9 @@ and Lemonade's bind mounts when the agent runs in LXC:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
 "Where step 2 has got to". Done so far: the interface, `LocalStorage` (with
 its header memo and shared walks), `storage-instance.ts`, disk usage, delete,
-the sidecars, support files, the Lemonade link and place passes, and the
-models scan. Next: `audit.ts`, with `lemonade-sync.ts` and
-`fix-duplicates.ts` alongside.
+the sidecars, support files, the Lemonade link and place passes, the models
+scan, the audit helpers with duplicate fixing, and the Lemonade sync. Next:
+the job API, for `hf-download-stream.ts` and `file-transfer.ts`.
 
 ## Keep the standalone build from tracing the repo root
 

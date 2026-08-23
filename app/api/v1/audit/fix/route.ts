@@ -55,12 +55,7 @@ export async function POST(req: Request) {
     // Same resolution the audit used (placement, inference, then a manually-set
     // sidecar source), so the relocation target matches the verdict that
     // surfaced Fix.
-    const hf = await resolveSource(
-      path.join(root, relPath),
-      relPath,
-      modelName,
-      filename,
-    );
+    const hf = await resolveSource(root, relPath, modelName, filename);
     if (!hf) {
       results.push({file: relPath, status: 'skipped', message: 'unverifiable'});
       return;

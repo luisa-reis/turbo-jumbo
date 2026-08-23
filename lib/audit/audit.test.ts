@@ -604,7 +604,7 @@ test('resolveSource resolves a placed file from its repo directory, without sear
 
   try {
     const hf = await resolveSource(
-      full,
+      base,
       rel,
       'LFM2-1.2B',
       'LFM2-1.2B-Q4_K_M.gguf',
@@ -654,7 +654,7 @@ test('resolveSource falls back to search when the path-implied repo misses', asy
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(full, rel, 'm2', 'm2.gguf');
+    const hf = await resolveSource(base, rel, 'm2', 'm2.gguf');
     expect(hf?.repoId).toBe('found/by-search');
   } finally {
     globalThis.fetch = realFetch;
@@ -698,7 +698,7 @@ test('resolveSource resolves a cache-layout file from its decoded repo', async (
 
   try {
     const out = await resolveSource(
-      full,
+      base,
       rel,
       'Qwen3-0.6B',
       'Qwen3-0.6B-Q4_0.gguf',
@@ -749,7 +749,7 @@ test('resolveSource falls back to the sidecar source when inference fails', asyn
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(full, 'GPT.gguf', 'GPT', 'GPT.gguf');
+    const hf = await resolveSource(base, 'GPT.gguf', 'GPT', 'GPT.gguf');
     expect(hf).toEqual({
       repoId: 'Hauhau/Repo',
       branch: 'main',
@@ -824,7 +824,7 @@ test('resolveSource resolves a commit-pinned sidecar source at the branch head',
 
   try {
     const hf = await resolveSource(
-      full,
+      base,
       'Pinned.gguf',
       'Pinned',
       'Pinned.gguf',
@@ -2031,7 +2031,7 @@ test('resolveSource pins a hub-cache file to its snapshot revision', async () =>
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(full, rel, 'org/repo', 'm.gguf');
+    const hf = await resolveSource(base, rel, 'org/repo', 'm.gguf');
     expect(hf?.commit).toBe('abc123');
     expect(hf?.branch).toBe('main');
     expect(hf?.sha256).toBe('beef');

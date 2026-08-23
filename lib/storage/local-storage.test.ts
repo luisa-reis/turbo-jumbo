@@ -369,3 +369,44 @@ test('list re-reads a safetensors header only when the file changes', async () =
   await fsp.utimes(file, later, later);
   expect((await storage.list('models', {dtype: true}))[0].dtype).toBe('BF32');
 });
+
+test('hash is the SHA-256 of a file, reporting every chunk on the way', async () => {
+  const {storage, models} = await tmpStorage();
+  const bytes = Buffer.alloc(3 * 1024 * 1024, 7);
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), bytes);
+  let seen = 0;
+  const digest = await storage.hash(
+    {root: 'models', path: 'w.gguf'},
+    {onBytes: (n) => (seen += n)},
+  );
+  const {createHash} = await import('crypto');
+  expect(digest).toBe(createHash('sha256').update(bytes).digest('hex'));
+  expect(seen).toBe(bytes.length);
+});
+
+test('hash stops when its signal aborts', async () => {
+  const {storage, models} = await tmpStorage();
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), Buffer.alloc(1024));
+  const ctl = new AbortController();
+  ctl.abort();
+  await expect(
+    storage.hash({root: 'models', path: 'w.gguf'}, {signal: ctl.signal}),
+  ).rejects.toThrow();
+});
+
+test('move carries a file from one root to another', async () => {
+  // Lemonade's cache and the models root are the two ends of a sync; what a
+  // move does when they sit on different filesystems (copy, then delete) is
+  // the same promise, kept by the EXDEV fallback this exercises only when
+  // the temp dir happens to span one.
+  const {storage, models, cold} = await tmpStorage();
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), 'x');
+  await storage.move(
+    {root: 'models', path: 'w.gguf'},
+    {root: 'cold', path: 'org/repo/w.gguf'},
+  );
+  expect(
+    await fsp.readFile(nodePath.join(cold, 'org/repo/w.gguf'), 'utf8'),
+  ).toBe('x');
+  await expect(fsp.access(nodePath.join(models, 'w.gguf'))).rejects.toThrow();
+});

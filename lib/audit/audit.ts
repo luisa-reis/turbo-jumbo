@@ -1,5 +1,3 @@
-import {promises as fsp} from 'fs';
-import path from 'path';
 import {parseHubCachePath} from '@/lib/hf/hf-cache';
 import {
   canonicalBranch,
@@ -55,7 +53,6 @@ export {
 
 import {
   metaPath,
-  readMeta,
   readMetaResolved,
   updateMetaResolved,
   type TjMeta,
@@ -73,6 +70,8 @@ export {
   updateMetaResolved,
   writeMeta,
 } from '@/lib/models/tjmeta';
+import {entryAt, fileSize} from '@/lib/storage/entries';
+import {siteStorage, type Site} from '@/lib/storage/site';
 
 export type AuditStatus =
   | 'pass'
@@ -173,10 +172,10 @@ export interface UpdateResult {
  * or `update`. Never hashes the local file.
  */
 export async function auditFileUpdate(
-  basePath: string,
+  site: Site,
   relPath: string,
 ): Promise<UpdateResult | null> {
-  const meta = await readMetaResolved(basePath, relPath);
+  const meta = await readMetaResolved(site, relPath);
   if (!meta?.originUrl || !meta.sourceCommit) return null;
   const ref = parseHfFileUrl(meta.originUrl);
   if (!ref) return null;
@@ -209,18 +208,20 @@ export async function auditFileUpdate(
  * sidecar even when the original predates a field (e.g. `sourceSize`).
  */
 export async function refreshMetaSource(
-  basePath: string,
+  site: Site,
   relPath: string,
   hf: HfFileInfo,
   signal?: AbortSignal,
 ): Promise<void> {
-  const fullPath = path.join(basePath, relPath);
-  const prev = await readMetaResolved(basePath, relPath);
-  const computedSize = (await fsp.stat(fullPath)).size;
+  const {storage, root} = siteStorage(site);
+  const prev = await readMetaResolved(site, relPath);
+  const computedSize = await fileSize(storage, root, relPath);
+  if (computedSize === null) throw new Error(`no file at ${relPath}`);
   const computedSha256 =
-    prev?.computedSha256 || (await localSha256(fullPath, signal));
+    prev?.computedSha256 ||
+    (await storage.hash({root, path: relPath}, {signal}));
   const summary = hfSummary(hf);
-  await updateMetaResolved(basePath, relPath, hf.repoId, {
+  await updateMetaResolved(site, relPath, hf.repoId, {
     modelUrl: summary.modelUrl,
     originUrl: summary.fileUrl,
     ...(hf.commit ? {sourceCommit: hf.commit} : {}),
@@ -241,36 +242,31 @@ export interface FixResult {
 
 /**
  * Relocate a model file (and its `.tjmeta.json` sidecar, if any) from `fromRel`
- * to `toRel`, both relative to `basePath`, creating intermediate directories.
- * The move within a storage root is a same-filesystem rename. Refuses to escape
- * the root or to overwrite an existing destination.
+ * to `toRel`, both relative to the site's root, creating intermediate
+ * directories. Refuses to escape the root or to overwrite an existing
+ * destination.
  */
 export async function moveFileWithMeta(
-  basePath: string,
+  site: Site,
   fromRel: string,
   toRel: string,
 ): Promise<void> {
-  const fromFull = path.join(basePath, fromRel);
-  const toFull = path.join(basePath, toRel);
+  const {storage, root} = siteStorage(site);
 
-  const rel = path.relative(basePath, toFull);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  // The storage confines paths structurally too; checked here as well so the
+  // refusal is this function's own promise, whatever storage it is handed.
+  if (toRel.startsWith('/') || toRel.split('/').some((seg) => seg === '..')) {
     throw new Error(`target escapes storage root: ${toRel}`);
   }
 
-  const destExists = await fsp
-    .access(toFull)
-    .then(() => true)
-    .catch(() => false);
-  if (destExists) {
+  if (await entryAt(storage, root, toRel)) {
     throw new Error(`destination already exists: ${toRel}`);
   }
 
   // Read provenance before the move (model sidecar, or a legacy per-file one).
-  const meta = await readMetaResolved(basePath, fromRel);
+  const meta = await readMetaResolved(site, fromRel);
 
-  await fsp.mkdir(path.dirname(toFull), {recursive: true});
-  await fsp.rename(fromFull, toFull);
+  await storage.move({root, path: fromRel}, {root, path: toRel});
 
   // Carry the provenance entry to the destination model sidecar and drop it
   // from the source; a move stays within one repo, so the repoId is shared.
@@ -279,47 +275,22 @@ export async function moveFileWithMeta(
     const destLoc = modelDirForRepo(toRel, repoId);
     if (destLoc) {
       await upsertFileMeta(
-        basePath,
+        site,
         destLoc.dir,
         repoId,
         metaToEntry(destLoc.key, meta),
       );
     }
     const srcLoc = modelDirForRepo(fromRel, repoId);
-    if (srcLoc) await removeFileMeta(basePath, srcLoc.dir, srcLoc.key);
+    if (srcLoc) await removeFileMeta(site, srcLoc.dir, srcLoc.key);
   }
   // Remove an orphaned legacy per-file sidecar left at the source, if any.
-  await fsp.rm(metaPath(fromFull), {force: true});
+  await storage.remove([{root, path: metaPath(fromRel)}]);
 }
 
-/**
- * Copy a file and its `.tjmeta.json` sidecar (if present) to `dstFull`. Wraps
- * `streamCopyResumable` (resume, cross-filesystem stream) and adds the sidecar.
- * `onBytes` reports copied chunk sizes of the model file for progress —
- * including, up front, the bytes a resume skipped — so progress still sums to
- * the full file size; the sidecar is tiny and not counted.
- */
-export async function copyFileWithMeta(
-  srcFull: string,
-  dstFull: string,
-  onBytes?: (n: number) => void,
-): Promise<void> {
-  await streamCopyResumable(srcFull, dstFull, {
-    // Report the skipped prefix up front, before the streamed remainder, so
-    // progress sums to the full size in prefix-then-chunks order.
-    onResume: (offset) => {
-      if (offset > 0 && onBytes) onBytes(offset);
-    },
-    onChunk: onBytes,
-  });
-
-  // Copy the sidecar alongside if it exists; absence is fine.
-  try {
-    await fsp.copyFile(metaPath(srcFull), metaPath(dstFull));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-  }
-}
+// Copying a file with its sidecar is the transfer side's business; it kept
+// this address.
+export {copyFileWithMeta} from '@/lib/storage/copy-meta';
 
 /** How `hf` compares against an on-disk file, as a `RevisionCheck` record. */
 function revisionCheck(
@@ -366,7 +337,8 @@ function trackHashProgress(
  * when one was computed, and every distinct revision checked along the way.
  */
 export async function findHistoricalMatch(
-  fullPath: string,
+  site: Site,
+  relPath: string,
   hf: HfFileInfo,
   actualSize: number,
   precomputedSha256: string | null,
@@ -377,6 +349,7 @@ export async function findHistoricalMatch(
   computedSha256: string | null;
   checked: RevisionCheck[];
 }> {
+  const {storage, root} = siteStorage(site);
   const checked: RevisionCheck[] = [];
   let sha = precomputedSha256;
   const commits = await listHfCommits(hf.repoId, hf.branch);
@@ -402,10 +375,9 @@ export async function findHistoricalMatch(
     }
     if (sha === null) {
       try {
-        sha = await localSha256(
-          fullPath,
-          signal,
-          trackHashProgress(actualSize, onHashProgress),
+        sha = await storage.hash(
+          {root, path: relPath},
+          {signal, onBytes: trackHashProgress(actualSize, onHashProgress)},
         );
       } catch {
         return {hf: null, computedSha256: null, checked};
@@ -432,7 +404,7 @@ export async function findHistoricalMatch(
  * determined.
  */
 export async function resolveSource(
-  fullPath: string,
+  site: Site,
   relPath: string,
   modelName: string,
   filename: string,
@@ -456,14 +428,7 @@ export async function resolveSource(
   if (implied) {
     // Resolve against the revision the model tracks (its sidecar pin), so a
     // repo downloaded at a tag isn't judged — or "updated" — against main.
-    // fullPath is always path.join(basePath, relPath); recover basePath to
-    // read the model sidecar.
-    const basePath = fullPath.endsWith(relPath)
-      ? fullPath.slice(0, fullPath.length - relPath.length - 1)
-      : null;
-    const revision = basePath
-      ? await modelRevision(basePath, implied.repoId)
-      : 'main';
+    const revision = await modelRevision(site, implied.repoId);
     const fromPath = await resolveHfFileByPath(
       implied.repoId,
       revision,
@@ -473,14 +438,8 @@ export async function resolveSource(
   }
   const inferred = await inferHfFile(modelName, filename);
   if (inferred) return inferred;
-  // fullPath is always path.join(basePath, relPath); recover basePath so the
-  // sidecar fallback reads the model sidecar (then a legacy per-file one).
-  const meta = fullPath.endsWith(relPath)
-    ? await readMetaResolved(
-        fullPath.slice(0, fullPath.length - relPath.length - 1),
-        relPath,
-      )
-    : await readMeta(fullPath);
+  // The sidecar fallback: the model sidecar, then a legacy per-file one.
+  const meta = await readMetaResolved(site, relPath);
   const ref = meta?.originUrl ? parseHfFileUrl(meta.originUrl) : null;
   if (!ref) return null;
   // A sidecar may carry a commit permalink; audit against the branch head so
@@ -534,7 +493,7 @@ function observedMeta(
  * can't guess it.
  */
 export async function auditFile(
-  basePath: string,
+  site: Site,
   relPath: string,
   modelName: string,
   filename: string,
@@ -542,19 +501,17 @@ export async function auditFile(
   source?: HfFileInfo,
   onHashProgress?: (hashedBytes: number, totalBytes: number) => void,
 ): Promise<AuditResult> {
-  const fullPath = path.join(basePath, relPath);
+  const {storage, root} = siteStorage(site);
 
-  let actualSize: number;
-  try {
-    actualSize = (await fsp.stat(fullPath)).size;
-  } catch {
+  const actualSize = await fileSize(storage, root, relPath);
+  if (actualSize === null) {
     // The file vanished between scan and audit — there's nothing to attest, so
     // no sidecar is written.
     return {file: relPath, status: 'incomplete', message: 'file missing'};
   }
 
   const latest =
-    source ?? (await resolveSource(fullPath, relPath, modelName, filename));
+    source ?? (await resolveSource(site, relPath, modelName, filename));
 
   // The repo's HEAD commit (the revision HF's cache names its snapshot dir
   // after) — resolved once, cached per repo+branch, and recorded model-level
@@ -569,7 +526,7 @@ export async function auditFile(
   // merge keeps a prior source alive when this run resolved none.
   try {
     await updateMetaResolved(
-      basePath,
+      site,
       relPath,
       modelName,
       observedMeta(latest, actualSize, ''),
@@ -587,10 +544,9 @@ export async function auditFile(
   let revisionsChecked: RevisionCheck[] | undefined;
   if (latest && actualSize === latest.size) {
     try {
-      computedSha256 = await localSha256(
-        fullPath,
-        signal,
-        trackHashProgress(actualSize, onHashProgress),
+      computedSha256 = await storage.hash(
+        {root, path: relPath},
+        {signal, onBytes: trackHashProgress(actualSize, onHashProgress)},
       );
     } catch {
       computedSha256 = null; // hashing failed → 'error'
@@ -599,7 +555,8 @@ export async function auditFile(
       // Same size but different bytes than the latest revision — check whether
       // an earlier revision of the file matches instead.
       const prev = await findHistoricalMatch(
-        fullPath,
+        site,
+        relPath,
         latest,
         actualSize,
         computedSha256,
@@ -617,7 +574,8 @@ export async function auditFile(
     // Size differs from the latest revision — before calling the file
     // incomplete, check whether it is an intact older revision.
     const prev = await findHistoricalMatch(
-      fullPath,
+      site,
+      relPath,
       latest,
       actualSize,
       null,
@@ -639,10 +597,9 @@ export async function auditFile(
   // revision anywhere in history).
   if (revisionsChecked && computedSha256 === null) {
     try {
-      computedSha256 = await localSha256(
-        fullPath,
-        signal,
-        trackHashProgress(actualSize, onHashProgress),
+      computedSha256 = await storage.hash(
+        {root, path: relPath},
+        {signal, onBytes: trackHashProgress(actualSize, onHashProgress)},
       );
     } catch {
       computedSha256 = null; // shown as unavailable
@@ -657,7 +614,7 @@ export async function auditFile(
   let metaWriteFailed = false;
   try {
     await updateMetaResolved(
-      basePath,
+      site,
       relPath,
       modelName,
       observedMeta(hf ?? null, actualSize, computedSha256 ?? ''),

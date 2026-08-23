@@ -1,12 +1,45 @@
+import {promises as fsp} from 'fs';
 import path from 'path';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {modelDirForRepo, readModelSidecar} from '@/lib/models/model-sidecar';
 import {
+  metaPath,
   readMetaResolved,
   updateMeta,
   updateMetaResolved,
   type TjMeta,
 } from '@/lib/models/tjmeta';
+import {streamCopyResumable} from '@/lib/storage/file-transfer';
+
+/**
+ * Copy a file and its `.tjmeta.json` sidecar (if present) to `dstFull`. Wraps
+ * `streamCopyResumable` (resume, cross-filesystem stream) and adds the sidecar.
+ * `onBytes` reports copied chunk sizes of the model file for progress —
+ * including, up front, the bytes a resume skipped — so progress still sums to
+ * the full file size; the sidecar is tiny and not counted. Absolute paths,
+ * like the transfer core it wraps: both move behind the job API together.
+ */
+export async function copyFileWithMeta(
+  srcFull: string,
+  dstFull: string,
+  onBytes?: (n: number) => void,
+): Promise<void> {
+  await streamCopyResumable(srcFull, dstFull, {
+    // Report the skipped prefix up front, before the streamed remainder, so
+    // progress sums to the full size in prefix-then-chunks order.
+    onResume: (offset) => {
+      if (offset > 0 && onBytes) onBytes(offset);
+    },
+    onChunk: onBytes,
+  });
+
+  // Copy the sidecar alongside if it exists; absence is fine.
+  try {
+    await fsp.copyFile(metaPath(srcFull), metaPath(dstFull));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+}
 
 export interface RepoHead {
   id: string;

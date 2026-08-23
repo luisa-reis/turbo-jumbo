@@ -10,6 +10,7 @@ import {promises as fsp} from 'fs';
 import {statfs} from 'fs/promises';
 import nodePath from 'path';
 import {readSafetensorsDtype} from '@/lib/models/safetensors';
+import {localSha256} from '@/lib/storage/file-transfer';
 import {
   MAX_SMALL_FILE,
   type FileEntry,
@@ -295,9 +296,19 @@ export function createLocalStorage(roots: Roots): Storage {
     async move(from: Ref, to: Ref): Promise<void> {
       forgetInFlight(from.root);
       forgetInFlight(to.root);
+      const src = resolve(from);
       const dst = resolve(to);
       await fsp.mkdir(nodePath.dirname(dst), {recursive: true});
-      await fsp.rename(resolve(from), dst);
+      try {
+        await fsp.rename(src, dst);
+      } catch (e) {
+        // Two roots need not share a filesystem (cold storage is usually a
+        // different disk or a NAS): a rename that can't cross is a copy and
+        // a delete.
+        if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e;
+        await fsp.copyFile(src, dst);
+        await fsp.unlink(src);
+      }
     },
 
     async copy(from: Ref, to: Ref): Promise<void> {
@@ -348,6 +359,13 @@ export function createLocalStorage(roots: Roots): Storage {
         }
       }
       return out;
+    },
+
+    hash(
+      ref: Ref,
+      opts: {signal?: AbortSignal; onBytes?: (n: number) => void} = {},
+    ): Promise<string> {
+      return localSha256(resolve(ref), opts.signal, opts.onBytes);
     },
 
     async usage(root: Root): Promise<Usage> {
