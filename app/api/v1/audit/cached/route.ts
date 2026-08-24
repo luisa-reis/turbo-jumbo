@@ -1,6 +1,7 @@
 import path from 'path';
-import {existsSync} from 'fs';
 import {duplicateBasenames, scanModels} from '@/lib/models/models';
+import {entryAt} from '@/lib/storage/entries';
+import {siteStorage} from '@/lib/storage/site';
 import {
   cachedResultFromMeta,
   duplicateResult,
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
       req.signal,
     );
   }
-  const root = target.basePath;
+  const root = target.site;
 
   const results: AuditResult[] = [];
   const models = await scanModels(root);
@@ -88,13 +89,14 @@ export async function POST(req: Request) {
   // Files a prior audit recorded as expected-on-HF but absent on disk live only
   // in the sidecar — `scanModels` can't see them. Surface each as incomplete,
   // skipping any that have since been downloaded (a stale flag).
+  const {storage: rootStorage, root: rootName} = siteStorage(root);
   for (const dir of await findModelSidecarDirs(root)) {
     const sidecar = await readModelSidecar(root, dir);
     if (!sidecar) continue;
     for (const entry of sidecar.files) {
       if (!entry.missing) continue;
       const relPath = path.join(dir, entry.path);
-      if (existsSync(path.join(root, relPath))) continue;
+      if (await entryAt(rootStorage, rootName, relPath)) continue;
       results.push(
         cachedResultFromMeta(relPath, entryToMeta(sidecar.modelUrl, entry)),
       );

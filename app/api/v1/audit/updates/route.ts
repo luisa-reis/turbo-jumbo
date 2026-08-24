@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       req.signal,
     );
   }
-  const basePath = target.basePath;
+  const basePath = target.site;
 
   // Fresh inference cache so head commits reflect HF now, not a tree cached by
   // an earlier audit in this process. Abort if the client disconnects.

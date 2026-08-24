@@ -18,8 +18,8 @@ records the decisions and progress:
 reference retired; deployment is a release binary plus a systemd
 user unit (deploy/tj-agent.service), no container. Step 4 is under
 way: the peer views (models, cold, disk usage, deletes, monitor,
-version) and downloads already run over `HttpStorage` for a peer
-with an `agent_address` — leaving the audits and Lemonade views,
+version), downloads and audits already run over `HttpStorage` for a peer
+with an `agent_address` — leaving the Lemonade views,
 the agent-side inventory cache that makes remote walks cheap, and
 `site.ts`'s transitional string arm once the last caller passes a
 real site.

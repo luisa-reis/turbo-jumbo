@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       req.signal,
     );
   }
-  const root = target.basePath;
+  const root = target.site;
 
   const selected = new Set(files ?? []);
   clearHfCache();

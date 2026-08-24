@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       req.signal,
     );
   }
-  const basePath = target.basePath;
+  const basePath = target.site;
 
   if (!file || typeof file !== 'string') {
     return new Response('Missing file', {status: 400});

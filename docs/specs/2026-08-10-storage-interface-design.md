@@ -488,6 +488,15 @@ last caller passes a real site. `lib/config` stays on the host.
   PATH — argv, spawn, stderr into log events, exit into the done
   record, bytes on disk.
 
+- Audits, over the agent. `AuditTarget`'s path arm became a site, so
+  every audit route — the hashing audit, cached verdicts, updates,
+  fix, fix-duplicate, set-source — runs here over an agent peer's
+  storage exactly as over local or cold, hashing on the agent's own
+  disk through its hash verb; only a full-app peer is still proxied.
+  The one filesystem peek left in a route (cached's existsSync on
+  missing-flagged entries) became an inventory question, and
+  detectMissingShards took a site like the rest.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

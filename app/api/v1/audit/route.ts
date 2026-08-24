@@ -43,7 +43,7 @@ export async function POST(req: Request) {
   if (target.kind === 'peer') {
     return proxyAuditRequest(target.peer, '/api/v1/audit', body, req.signal);
   }
-  const root = target.basePath;
+  const root = target.site;
 
   // Audit only the explicitly selected files (relative paths from the storage
   // root, the same identifiers copy/delete use).

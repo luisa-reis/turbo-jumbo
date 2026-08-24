@@ -5,28 +5,39 @@ import {
   coldStorageDir,
   type Peer,
 } from '@/lib/config';
+import {storageForPeer} from '@/lib/storage/peer-storage';
+import type {Site} from '@/lib/storage/site';
 import {logger} from '@/lib/util/logger';
 
 export type AuditTarget =
-  {kind: 'path'; basePath: string} | {kind: 'peer'; peer: Peer};
+  | {kind: 'site'; site: Site}
+  | {kind: 'peer'; peer: Peer};
 
 /**
- * Resolve an audit location to its target: 'local' and 'cold-storage' map to
- * this host's storage roots; a remote peer's address means the request should
+ * Resolve an audit location to its target: 'local' and 'cold-storage' are
+ * this host's own roots; a peer with an `agent_address` is a site too — the
+ * audit runs here, over the agent's storage, hashing on the agent's own
+ * disk through its hash verb. Only a full-app peer means the request should
  * be proxied to that peer (which audits its own local storage).
  */
 export function resolveAuditLocation(
   location: string | undefined,
 ): AuditTarget | null {
   if (location === 'cold-storage') {
-    return coldStorageDir ? {kind: 'path', basePath: coldStorageDir} : null;
+    return coldStorageDir ? {kind: 'site', site: coldStorageDir} : null;
   }
   if (location === 'local') {
-    return localModelsDir ? {kind: 'path', basePath: localModelsDir} : null;
+    return localModelsDir ? {kind: 'site', site: localModelsDir} : null;
   }
   const peer = config.peers.find((p) => p.address === location);
-  if (peer && peer !== localPeer) return {kind: 'peer', peer};
-  return null;
+  if (!peer || peer === localPeer) return null;
+  if (peer.agent_address) {
+    return {
+      kind: 'site',
+      site: {storage: storageForPeer(peer.address), root: 'models'},
+    };
+  }
+  return {kind: 'peer', peer};
 }
 
 /**

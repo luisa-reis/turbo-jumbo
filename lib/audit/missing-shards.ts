@@ -10,7 +10,7 @@ import {shardSetPaths} from '@/lib/hf/hf-download';
 import {listRepoFiles} from '@/lib/hf/hf-infer';
 import {modelRevision} from '@/lib/models/model-sidecar';
 import type {Model} from '@/lib/models/models';
-import nodePath from 'path';
+import type {Site} from '@/lib/storage/site';
 
 const basename = (p: string) => p.split('/').pop() ?? p;
 
@@ -25,10 +25,9 @@ const basename = (p: string) => p.split('/').pop() ?? p;
 export async function detectMissingShards(
   models: Model[],
   selected: Set<string>,
-  storageBase: string,
+  site: Site,
   branch: string,
 ): Promise<AuditResult[]> {
-  const base = nodePath.resolve(storageBase);
   const out: AuditResult[] = [];
   for (const model of models) {
     // Without an `<org>/<repo>` name there's no repo to resolve the shards in.
@@ -36,7 +35,7 @@ export async function detectMissingShards(
     for (const file of model.files) {
       if (!file.isSplit || file.missingIndices.length === 0) continue;
       if (!file.files.some((s) => selected.has(s.path))) continue;
-      const pinned = await modelRevision(base, model.name);
+      const pinned = await modelRevision(site, model.name);
       const repoBranch = pinned !== 'main' ? pinned : branch;
       const lfs = await listRepoFiles(model.name, repoBranch);
       if (!lfs) continue;

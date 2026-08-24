@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       req.signal,
     );
   }
-  const root = auditTarget.basePath;
+  const root = auditTarget.site;
 
   const selected = new Set(files ?? []);
   clearHfCache();
