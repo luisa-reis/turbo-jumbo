@@ -53,7 +53,7 @@ async fn liveness() -> &'static str {
 /// answers 501 rather than 404, so a probe can tell "too new for this
 /// agent" from "no such op". They graduate one at a time, gated by the TS
 /// conformance suites.
-const UNIMPLEMENTED: &[&str] = &["hash", "job", "receive"];
+const UNIMPLEMENTED: &[&str] = &["job"];
 
 async fn dispatch(
     State(state): State<Arc<AppState>>,
@@ -75,7 +75,11 @@ async fn dispatch(
             let (parts, body) = req.into_parts();
             ops::write(storage, &parts.headers, body).await
         }
-        "list" | "read" | "mkdir" | "usage" | "remove" | "move" | "copy" | "link" => {
+        "receive" => {
+            let (parts, body) = req.into_parts();
+            ops::receive(storage, &parts.headers, body).await
+        }
+        "list" | "read" | "mkdir" | "usage" | "remove" | "move" | "copy" | "link" | "hash" => {
             let body = match buffer_json_body(req.into_body()).await {
                 Ok(b) => b,
                 Err(e) => return e.into_response(),
@@ -88,6 +92,7 @@ async fn dispatch(
                 "move" => ops::move_or_copy(storage, body, true).await,
                 "copy" => ops::move_or_copy(storage, body, false).await,
                 "link" => ops::link(storage, body).await,
+                "hash" => ops::hash(storage, body).await,
                 _ => ops::usage(storage, body).await,
             }
         }

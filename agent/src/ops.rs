@@ -237,3 +237,107 @@ pub async fn link(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, A
     let outcomes = blocking(move || storage.link(&links, dry_run)).await?;
     Ok(Json(json!({"outcomes": outcomes})).into_response())
 }
+
+pub async fn hash(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, AgentError> {
+    let value = parse_json(&body)?;
+    let r = parse_ref(&value).ok_or_else(|| bad("ref"))?;
+    let (tx, response) = crate::ndjson::ndjson_response();
+    tokio::task::spawn_blocking(move || {
+        let full = match storage.resolve(&r) {
+            Ok(full) => full,
+            Err(e) => {
+                tx.blocking_json(&json!({"error": e.message}));
+                return;
+            }
+        };
+        let mut bytes: u64 = 0;
+        let mut sent: u64 = 0;
+        let outcome = crate::hashing::sha256_region(&full, None, |n| {
+            bytes += n;
+            if bytes - sent >= crate::wire::HASH_EMIT_BYTES {
+                sent = bytes;
+                return tx.blocking_json(&json!({"bytes": bytes}));
+            }
+            !tx.is_closed()
+        });
+        match outcome {
+            Ok(crate::hashing::HashOutcome::Done(sha256)) => {
+                // Close the count before the digest, so a caller's progress
+                // total reaches the file's size however small the file.
+                if bytes > sent {
+                    tx.blocking_json(&json!({"bytes": bytes}));
+                }
+                tx.blocking_json(&json!({"sha256": sha256}));
+            }
+            // The client went away; there is nobody to tell.
+            Ok(crate::hashing::HashOutcome::Cancelled) => {}
+            Err(e) => {
+                tx.blocking_json(&json!({"error": e.to_string()}));
+            }
+        }
+    });
+    Ok(response)
+}
+
+pub async fn receive(
+    storage: Arc<LocalStorage>,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<Response, AgentError> {
+    use tokio::io::AsyncWriteExt;
+    let r = header_ref(headers)?;
+    let offset: u64 = headers
+        .get(crate::wire::OFFSET_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("0")
+        .parse()
+        .map_err(|_| bad("offset"))?;
+    // The receive handler answers 400 (not 500) for an unreachable root or
+    // a confined-away path, as the TS one does.
+    let full = storage.resolve(&r).map_err(|mut e| {
+        e.status = StatusCode::BAD_REQUEST;
+        e
+    })?;
+    if let Some(parent) = full.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(AgentError::from)?;
+    }
+    // A non-zero offset appends, so it has to name exactly the end of what
+    // is already here. Senders resume from a prefix they verified moments
+    // earlier; if the file changed since, appending would splice bytes into
+    // the wrong place and leave a plausible-looking corrupt file.
+    if offset > 0 {
+        let held = match tokio::fs::metadata(&full).await {
+            Ok(m) => Some(m.len()),
+            Err(_) => None,
+        };
+        if held != Some(offset) {
+            return Err(AgentError {
+                status: StatusCode::CONFLICT,
+                message: format!(
+                    "Offset {offset} does not match the {} byte(s) already here",
+                    held.map_or_else(|| "missing".to_string(), |h| h.to_string())
+                ),
+                code: None,
+            });
+        }
+    }
+    let mut file = if offset == 0 {
+        tokio::fs::File::create(&full).await
+    } else {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&full)
+            .await
+    }
+    .map_err(AgentError::from)?;
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AgentError::internal(format!("body read: {e}")))?;
+        file.write_all(&chunk).await.map_err(AgentError::from)?;
+    }
+    file.flush().await.map_err(AgentError::from)?;
+    Ok(ok_json())
+}

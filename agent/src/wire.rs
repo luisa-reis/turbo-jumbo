@@ -68,3 +68,10 @@ pub enum LinkOutcome {
     Kept,
     Skipped,
 }
+
+/// `receive` only: the byte offset this chunk starts at.
+pub const OFFSET_HEADER: &str = "x-tj-offset";
+
+/// How often the hash stream reports a cumulative byte count. A final
+/// frame always closes the count.
+pub const HASH_EMIT_BYTES: u64 = 8 * 1024 * 1024;

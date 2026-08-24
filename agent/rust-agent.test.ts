@@ -232,7 +232,7 @@ conf('auth and dispatch statuses match the protocol', async () => {
       headers: {authorization: 'Bearer secret'},
       body,
     });
-  expect((await post('hash', '{}')).status).toBe(501); // pending, not absent
+  expect((await post('job', '{}')).status).toBe(501); // pending, not absent
   expect((await post('nope', '{}')).status).toBe(404);
   expect((await post('list', 'not json')).status).toBe(400);
   expect((await post('list', '{"root":"attic"}')).status).toBe(400);
@@ -307,4 +307,64 @@ conf('link creates, replaces, keeps, skips — and honors dry runs', async () =>
     await remote.link([{target: {root: 'models', path: 'right.gguf'}, at: own}]),
   ).toEqual(['skipped']);
   expect(text(await remote.read(own))).toBe('the user put this here');
+});
+
+conf('a hash streams progress and lands on the right digest', async () => {
+  const {remote, models} = await rustAgent('secret');
+  const payload = Buffer.alloc(3 * 1024 * 1024, 7);
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), payload);
+  let seen = 0;
+  const digest = await remote.hash(
+    {root: 'models', path: 'w.gguf'},
+    {onBytes: (n) => (seen += n)},
+  );
+  const {createHash} = await import('crypto');
+  expect(digest).toBe(createHash('sha256').update(payload).digest('hex'));
+  expect(seen).toBe(payload.length);
+});
+
+conf('a hash of a missing file rejects with the failure', async () => {
+  const {remote} = await rustAgent('secret');
+  await expect(
+    remote.hash({root: 'models', path: 'nope.gguf'}),
+  ).rejects.toThrow();
+});
+
+conf('an aborted hash rejects', async () => {
+  const {remote, models} = await rustAgent('secret');
+  await fsp.writeFile(nodePath.join(models, 'w.gguf'), Buffer.alloc(1024));
+  const ctl = new AbortController();
+  ctl.abort();
+  await expect(
+    remote.hash({root: 'models', path: 'w.gguf'}, {signal: ctl.signal}),
+  ).rejects.toThrow();
+});
+
+conf('receive appends chunks and refuses a mismatched offset', async () => {
+  const {remote, url} = await rustAgent('secret');
+  const post = (offset: number, body: BodyInit | null) =>
+    fetch(`${url}/receive`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer secret',
+        'x-tj-root': 'models',
+        'x-tj-path': encodeURIComponent('org/repo/w.gguf'),
+        'x-tj-offset': String(offset),
+      },
+      body,
+    });
+  expect((await post(0, bytes('hello '))).status).toBe(200);
+  expect((await post(6, bytes('world'))).status).toBe(200);
+  expect(
+    text(await remote.read({root: 'models', path: 'org/repo/w.gguf'})),
+  ).toBe('hello world');
+  // The wrong offset must refuse, naming what is actually here.
+  const conflict = await post(3, bytes('x'));
+  expect(conflict.status).toBe(409);
+  expect(await conflict.text()).toContain('does not match the 11');
+  // Offset 0 starts the file over.
+  expect((await post(0, bytes('fresh'))).status).toBe(200);
+  expect(
+    text(await remote.read({root: 'models', path: 'org/repo/w.gguf'})),
+  ).toBe('fresh');
 });

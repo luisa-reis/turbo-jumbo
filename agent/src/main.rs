@@ -4,6 +4,8 @@
 
 mod config;
 mod error;
+mod hashing;
+mod ndjson;
 mod ops;
 mod prune;
 mod refs;
