@@ -33,7 +33,10 @@ afterEach(async () => {
   }
 });
 
-async function rustAgent(token?: string): Promise<{
+async function rustAgent(
+  token?: string,
+  extraEnv?: Record<string, string>,
+): Promise<{
   url: string;
   remote: Storage;
   local: Storage;
@@ -53,7 +56,7 @@ async function rustAgent(token?: string): Promise<{
       `roots:\n  models: ${models}\n  cold: ${cold}\n  lemonade: ${lemonade}\n`,
   );
   const proc = Bun.spawn([BIN], {
-    env: {...process.env, TJ_AGENT_CONFIG: cfg},
+    env: {...process.env, ...extraEnv, TJ_AGENT_CONFIG: cfg},
     stdout: 'pipe',
     stderr: 'inherit',
   });
@@ -724,4 +727,44 @@ conf('the host policy modules run whole over the agent', async () => {
     'org/repo-GGUF/model-Q4_K_M.gguf',
   );
   expect(await local.list('models')).toEqual([]);
+});
+
+conf('a download job spawns the tool on the agent and reports its exit', async () => {
+  // A stand-in `hf` on the agent's PATH: writes the requested file into
+  // --local-dir and prints the JSON record, like the real one — so the
+  // whole job (argv, spawn, stderr → log events, exit → done) runs without
+  // a network.
+  const binDir = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'tj-fakehf-'));
+  made.push(binDir);
+  await fsp.writeFile(
+    nodePath.join(binDir, 'hf'),
+    '#!/bin/sh\n' +
+      'dir=""; prev=""\n' +
+      'for a in "$@"; do [ "$prev" = "--local-dir" ] && dir="$a"; prev="$a"; done\n' +
+      'mkdir -p "$dir" && printf weights > "$dir/w.gguf"\n' +
+      'echo "fetching w.gguf" >&2\n' +
+      'printf \'{"path": "%s"}\' "$dir"\n',
+  );
+  await fsp.chmod(nodePath.join(binDir, 'hf'), 0o755);
+
+  const {remote, models} = await rustAgent('secret', {
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  });
+  const events = await drain(
+    await remote.start({
+      kind: 'download',
+      repoId: 'org/repo',
+      files: ['w.gguf'],
+      into: {root: 'models', path: 'org/repo'},
+    }),
+  );
+  const done = events.at(-1);
+  expect(done?.kind).toBe('done');
+  expect((done as {result: {exitCode: number | null}}).result.exitCode).toBe(0);
+  expect(
+    events.some((e) => e.kind === 'log' && e.line.includes('fetching')),
+  ).toBe(true);
+  expect(
+    await fsp.readFile(nodePath.join(models, 'org/repo/w.gguf'), 'utf8'),
+  ).toBe('weights');
 });

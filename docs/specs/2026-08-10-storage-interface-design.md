@@ -477,6 +477,17 @@ last caller passes a real site. `lib/config` stays on the host.
   local answers. Still asking the peer's app: downloads, audits and
   Lemonade — the next slices.
 
+- Downloads, over the agent. `streamHfDownload` takes a
+  `DownloadTarget` — this host's storage by default, an agent peer's
+  from the download proxy — and everything inside follows it: the
+  `hf` spawn (the agent's machine, whose environment carries the
+  CLI), the once-a-second progress poll of the landing directory,
+  the sidecar pass, and the optional cold transfer. Which roots the
+  agent has is probed, as everywhere. The conformance suite runs a
+  download job end to end against a stand-in `hf` on the agent's
+  PATH — argv, spawn, stderr into log events, exit into the done
+  record, bytes on disk.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

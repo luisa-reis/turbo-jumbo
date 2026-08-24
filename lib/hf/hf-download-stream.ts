@@ -23,11 +23,33 @@ import {
 import {fileSize} from '@/lib/storage/entries';
 import {storage} from '@/lib/storage/storage-instance';
 import type {Site} from '@/lib/storage/site';
-import type {DownloadResult} from '@/lib/storage/storage';
+import type {DownloadResult, Storage} from '@/lib/storage/storage';
 
 // The two places a download touches, as sites of this server's storage.
 const local: Site = {storage, root: 'models'};
 const cold: Site = {storage, root: 'cold'};
+
+/**
+ * Where a download lands and transfers: this host's storage by default, an
+ * agent peer's when the download proxy hands one over — the job then spawns
+ * `hf` on the agent's machine, and every sidecar and transfer follows
+ * through the same storage.
+ */
+export interface DownloadTarget {
+  storage: Storage;
+  local: Site;
+  cold: Site;
+  hasModels: boolean;
+  hasCold: boolean;
+}
+
+const localTarget: DownloadTarget = {
+  storage,
+  local,
+  cold,
+  hasModels: localModelsDir !== undefined,
+  hasCold: coldStorageDir !== undefined,
+};
 
 /**
  * Record the HuggingFace source for each freshly-downloaded file: resolve its
@@ -36,6 +58,7 @@ const cold: Site = {storage, root: 'cold'};
  * and, being placed at <repoId>/<filePath>, passes — without a manual step.
  */
 async function recordSources(
+  target: DownloadTarget,
   repoId: string,
   branch: string,
   filePaths: string[],
@@ -43,6 +66,7 @@ async function recordSources(
   signal: AbortSignal,
   enqueue: (s: string) => void,
 ): Promise<{failures: string[]}> {
+  const {local, storage} = target;
   // Files that did not end up safely on disk (missing, or present but failing
   // verification). The caller uses this to refuse the cold-storage transfer.
   const failures: string[] = [];
@@ -123,11 +147,12 @@ function fmtTime(sec: number): string {
  * directory not there yet is zero of everything.
  */
 async function downloadProgress(
+  target: DownloadTarget,
   repoId: string,
   filePaths: string[],
   sizes: Map<string, number>,
 ): Promise<{bytes: number; filesDone: number}> {
-  const entries = await storage.list('models', {under: repoId});
+  const entries = await target.storage.list('models', {under: repoId});
   let bytes = 0;
   const sizeAt = new Map<string, number>();
   for (const e of entries) {
@@ -149,10 +174,12 @@ const isMissing = (e: unknown) =>
   (e as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 async function moveToColdstorage(
+  target: DownloadTarget,
   relPaths: string[],
   deleteAfterTransfer: boolean,
   enqueue: (s: string) => void,
 ): Promise<void> {
+  const {local, cold, storage} = target;
   const label = deleteAfterTransfer ? 'Moving' : 'Copying';
   enqueue(`\n${label} to cold storage...\n`);
 
@@ -234,7 +261,11 @@ async function moveToColdstorage(
  * starting the job — the storage validates again, on its own account. `signal`
  * cancels the job (SIGTERM to hf) when the client disconnects.
  */
-export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
+export function streamHfDownload(
+  body: unknown,
+  signal: AbortSignal,
+  target: DownloadTarget = localTarget,
+): Response {
   const {
     repoId,
     branch,
@@ -271,7 +302,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
     return new Response('Invalid fileScope', {status: 400});
 
   // A viewer has nowhere to put the files; its downloads run on the peers.
-  if (!localModelsDir)
+  if (!target.hasModels)
     return new Response('No local storage configured', {status: 400});
 
   // Download into <models>/<repoId> so files land at <repoId>/<filePath> — the
@@ -314,7 +345,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
         let lastDone = 0;
         let lastT = t0;
         pollTimer = setInterval(() => {
-          void downloadProgress(repoId, filePaths, sizes).then(
+          void downloadProgress(target, repoId, filePaths, sizes).then(
             ({bytes, filesDone}) => {
               // The walk is async; if the run ended (stopPoll cleared the
               // timer) while it was in flight, the controller may be closed —
@@ -341,7 +372,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
       void (async () => {
         let result: DownloadResult | null = null;
         try {
-          const job = await storage.start({
+          const job = await target.storage.start({
             kind: 'download',
             repoId,
             revision: branch,
@@ -397,6 +428,7 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
           // some failures (and the historical exit-code masking) can slip
           // through. A failed verification must not reach cold storage.
           const {failures} = await recordSources(
+            target,
             repoId,
             branch,
             filePaths,
@@ -411,8 +443,13 @@ export function streamHfDownload(body: unknown, signal: AbortSignal): Response {
             );
             return;
           }
-          if (sendToCold && coldStorageDir) {
-            await moveToColdstorage(relPaths, !!deleteAfterTransfer, enqueue);
+          if (sendToCold && target.hasCold) {
+            await moveToColdstorage(
+              target,
+              relPaths,
+              !!deleteAfterTransfer,
+              enqueue,
+            );
           }
         } catch (err: unknown) {
           enqueue(`\nError: ${(err as Error).message}\n`);

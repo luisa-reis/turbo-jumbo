@@ -15,13 +15,14 @@ copy and check routes driven entirely through sites and jobs. The spec
 records the decisions and progress:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
 "Where step 3 has got to". The Rust agent is complete and the TS
-reference retired; deployment is a release binary plus a systemd user
-unit (deploy/tj-agent.service), no container. Next: step 4 — cut
-peers over one at a time: a peer that runs only an agent still needs
-the host to answer its models table, downloads and audits through
-`HttpStorage` (today those ask the peer's app) plus the agent-side
-inventory cache that makes remote walks usable, and `site.ts`'s
-transitional string arm goes when the last caller passes a real site.
+reference retired; deployment is a release binary plus a systemd
+user unit (deploy/tj-agent.service), no container. Step 4 is under
+way: the peer views (models, cold, disk usage, deletes, monitor,
+version) and downloads already run over `HttpStorage` for a peer
+with an `agent_address` — leaving the audits and Lemonade views,
+the agent-side inventory cache that makes remote walks cheap, and
+`site.ts`'s transitional string arm once the last caller passes a
+real site.
 
 ## Keep the standalone build from tracing the repo root
 
