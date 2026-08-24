@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Root {
     Models,
@@ -29,16 +29,13 @@ impl Root {
 }
 
 /// A path within a root, as it arrives on the wire.
-// Dead code until the path-taking verbs land; unit-tested below meanwhile.
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Ref {
     pub root: Root,
     pub path: String,
 }
 
 /// `rel_path` as an absolute path confined to `dir`.
-#[allow(dead_code)] // first consumer is the `read` verb
 pub fn resolve_ref(dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
     if Path::new(rel_path).is_absolute() {
         return Err(format!("Path must be relative to its root: {rel_path}"));

@@ -22,6 +22,16 @@ impl AgentError {
             code: None,
         }
     }
+
+    /// A thrown storage error, as the TS handlers surface one: 500, the
+    /// message as the body, no errno (those come from `From<io::Error>`).
+    pub fn internal(message: impl Into<String>) -> Self {
+        AgentError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+            code: None,
+        }
+    }
 }
 
 impl From<std::io::Error> for AgentError {

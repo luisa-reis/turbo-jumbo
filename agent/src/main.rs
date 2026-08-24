@@ -6,7 +6,10 @@ mod config;
 mod error;
 mod ops;
 mod refs;
+mod safetensors;
 mod server;
+mod storage;
+mod wire;
 
 use std::process::ExitCode;
 
@@ -14,8 +17,7 @@ use std::process::ExitCode;
 async fn main() -> ExitCode {
     tracing_subscriber::fmt().init();
 
-    let file =
-        std::env::var("TJ_AGENT_CONFIG").unwrap_or_else(|_| "./agent.yaml".to_string());
+    let file = std::env::var("TJ_AGENT_CONFIG").unwrap_or_else(|_| "./agent.yaml".to_string());
     let cfg = match config::AgentConfig::load(&file) {
         Ok(cfg) => cfg,
         Err(message) => {

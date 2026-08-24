@@ -7,17 +7,20 @@ publish = false
 
 [dependencies]
 axum = "0.8"
-rustix = { version = "1", features = ["fs"] }
+bytes = "1"
+# No TLS on purpose: agents speak plain http on the LAN, like the app's own
+# peer traffic. `stream` feeds the hash-frame reader in the send job.
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
+rustix = { version = "1", features = ["fs", "process"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: a safetensors header's "dominant dtype" is the *first*
+# tensor in the document, and serde_json's default map would sort the keys.
+serde_json = { version = "1", features = ["preserve_order"] }
 # Archived upstream but stable; swap for a maintained fork (serde_yaml_ng /
 # saphyr) once one is picked deliberately rather than by guess.
 serde_yaml = "0.9"
+sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-
-# Wired in as the verbs land (see the storage-interface spec, Decided):
-# sha2      — the hash verb and resume verification
-# reqwest   — a send job's outbound legs (rustls)
-# notify    — inotify-backed inventory-cache invalidation (step 4)

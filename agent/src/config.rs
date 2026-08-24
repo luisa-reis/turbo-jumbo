@@ -45,18 +45,16 @@ impl RootsConfig {
 
 impl AgentConfig {
     pub fn load(file: &str) -> Result<Self, String> {
-        let raw = std::fs::read_to_string(file)
-            .map_err(|e| format!("cannot read {file}: {e}"))?;
-        let cfg: AgentConfig =
-            serde_yaml::from_str(&raw).map_err(|e| format!("{file}: {e}"))?;
+        let raw = std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+        let cfg: AgentConfig = serde_yaml::from_str(&raw).map_err(|e| format!("{file}: {e}"))?;
         cfg.validate(file)?;
         Ok(cfg)
     }
 
     fn validate(&self, file: &str) -> Result<(), String> {
-        if self.port == 0 {
-            return Err(format!("{file}: port must be a positive integer"));
-        }
+        // Port 0 is legal on purpose: it picks a free port, which is how
+        // the conformance tests run this binary (the announced port is on
+        // the startup line).
         let mut any = false;
         for root in Root::ALL {
             if let Some(dir) = self.roots.get(root) {
@@ -103,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_needs_a_real_root_and_port() {
+    fn validate_needs_a_real_root() {
         let cfg = parse("port: 3900\nroots: {models: /nonexistent-tj}\n").unwrap();
         assert!(cfg.validate("f").unwrap_err().contains("does not exist"));
         let cfg = parse("port: 3900\nroots: {}\n").unwrap();
