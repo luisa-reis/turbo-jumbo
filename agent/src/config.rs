@@ -98,7 +98,8 @@ mod tests {
     fn refuses_unknown_keys() {
         // A typoed `tokn` must fail loudly, not run an agent with no auth.
         assert!(parse("port: 1\ntokn: t\nroots: {models: /tmp}\n").is_err());
-        assert!(parse("port: 1\nroots: {models: /tmp}\n").is_err());
+        // A deliberately absent token is legal — main() warns instead.
+        assert!(parse("port: 1\nroots: {models: /tmp}\n").is_ok());
     }
 
     #[test]
