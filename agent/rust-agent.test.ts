@@ -237,3 +237,74 @@ conf('auth and dispatch statuses match the protocol', async () => {
   expect((await post('list', 'not json')).status).toBe(400);
   expect((await post('list', '{"root":"attic"}')).status).toBe(400);
 });
+
+conf('move, copy and a pruning remove work the far filesystem', async () => {
+  const {remote, local} = await rustAgent('secret');
+  await remote.write({root: 'models', path: 'org/repo/a.gguf'}, bytes('w'));
+  await remote.copy(
+    {root: 'models', path: 'org/repo/a.gguf'},
+    {root: 'cold', path: 'org/repo/a.gguf'},
+  );
+  expect(text(await remote.read({root: 'cold', path: 'org/repo/a.gguf'}))).toBe(
+    'w',
+  );
+  await remote.move(
+    {root: 'models', path: 'org/repo/a.gguf'},
+    {root: 'models', path: 'org/repo/b.gguf'},
+  );
+  await expect(
+    remote.read({root: 'models', path: 'org/repo/a.gguf'}),
+  ).rejects.toThrow();
+  await remote.remove([{root: 'models', path: 'org/repo/b.gguf'}], {
+    pruneEmptyDirs: true,
+  });
+  expect(await local.list('models')).toEqual([]);
+});
+
+conf('pruning treats hf .cache bookkeeping as emptiness', async () => {
+  const {remote, local, models} = await rustAgent('secret');
+  await fsp.mkdir(nodePath.join(models, 'org/repo/.cache/huggingface'), {
+    recursive: true,
+  });
+  await fsp.writeFile(
+    nodePath.join(models, 'org/repo/.cache/huggingface/a.gguf.metadata'),
+    'x',
+  );
+  await fsp.writeFile(nodePath.join(models, 'org/repo/a.gguf'), 'x');
+  await remote.remove([{root: 'models', path: 'org/repo/a.gguf'}], {
+    pruneEmptyDirs: true,
+  });
+  expect(await local.list('models')).toEqual([]);
+});
+
+conf('link creates, replaces, keeps, skips — and honors dry runs', async () => {
+  const {remote} = await rustAgent('secret');
+  await remote.write({root: 'models', path: 'right.gguf'}, bytes('r'));
+  await remote.write({root: 'models', path: 'wrong.gguf'}, bytes('w'));
+  const at = {root: 'lemonade', path: 'extra/m/x.gguf'} as const;
+
+  expect(
+    await remote.link([{target: {root: 'models', path: 'right.gguf'}, at}], {
+      dryRun: true,
+    }),
+  ).toEqual(['created']);
+  await expect(remote.read(at)).rejects.toThrow(); // dry: nothing created
+  expect(
+    await remote.link([{target: {root: 'models', path: 'wrong.gguf'}, at}]),
+  ).toEqual(['created']);
+  expect(
+    await remote.link([{target: {root: 'models', path: 'right.gguf'}, at}]),
+  ).toEqual(['replaced']);
+  expect(text(await remote.read(at))).toBe('r');
+  expect(
+    await remote.link([{target: {root: 'models', path: 'right.gguf'}, at}]),
+  ).toEqual(['kept']);
+
+  // A real file is somebody's own model — never replaced with a link.
+  const own = {root: 'lemonade', path: 'extra/m/own.gguf'} as const;
+  await remote.write(own, bytes('the user put this here'));
+  expect(
+    await remote.link([{target: {root: 'models', path: 'right.gguf'}, at: own}]),
+  ).toEqual(['skipped']);
+  expect(text(await remote.read(own))).toBe('the user put this here');
+});

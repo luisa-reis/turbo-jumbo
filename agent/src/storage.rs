@@ -12,7 +12,7 @@ use crate::config::RootsConfig;
 use crate::error::AgentError;
 use crate::refs::{resolve_ref, Ref, Root};
 use crate::safetensors::read_safetensors_dtype;
-use crate::wire::{EntryKind, FileEntry, ListOptions, Usage, MAX_SMALL_FILE};
+use crate::wire::{EntryKind, FileEntry, LinkOutcome, ListOptions, Usage, MAX_SMALL_FILE};
 
 pub struct LocalStorage {
     roots: RootsConfig,
@@ -267,5 +267,109 @@ fn read_dtype(
                 dtype,
             },
         );
+    }
+}
+
+/// Linux's EXDEV: a rename that would cross filesystems.
+const EXDEV: i32 = 18;
+
+fn remove_all_force(full: &Path) -> Result<(), std::io::Error> {
+    match fs::symlink_metadata(full) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+        Ok(m) if m.is_dir() => fs::remove_dir_all(full),
+        Ok(_) => fs::remove_file(full),
+    }
+}
+
+impl LocalStorage {
+    pub fn remove(&self, refs: &[Ref], prune: bool) -> Result<(), AgentError> {
+        for r in refs {
+            let full = self.resolve(r)?;
+            remove_all_force(&full)?;
+            if prune {
+                crate::prune::prune_empty_dirs(&full, self.root_dir(r.root)?)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn mv(&self, from: &Ref, to: &Ref) -> Result<(), AgentError> {
+        let src = self.resolve(from)?;
+        let dst = self.resolve(to)?;
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match fs::rename(&src, &dst) {
+            Ok(()) => Ok(()),
+            // Two roots need not share a filesystem (cold storage is usually
+            // a different disk or a NAS): a rename that can't cross is a
+            // copy and a delete.
+            Err(e) if e.raw_os_error() == Some(EXDEV) => {
+                fs::copy(&src, &dst)?;
+                fs::remove_file(&src)?;
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn copy(&self, from: &Ref, to: &Ref) -> Result<(), AgentError> {
+        let src = self.resolve(from)?;
+        let dst = self.resolve(to)?;
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&src, &dst)?;
+        Ok(())
+    }
+
+    pub fn link(
+        &self,
+        links: &[(Ref, Ref)], // (target, at)
+        dry_run: bool,
+    ) -> Result<Vec<LinkOutcome>, AgentError> {
+        let mut out = Vec::new();
+        for (target, at) in links {
+            let link_path = self.resolve(at)?;
+            let target_path = self.resolve(target)?;
+            // What currently sits at the link's path: None = nothing (or
+            // unreadable, which the TS side also treats as nothing),
+            // Some(None) = a real file, Some(Some(p)) = a symlink to p.
+            let current = match fs::symlink_metadata(&link_path) {
+                Err(_) => None,
+                Ok(m) if m.file_type().is_symlink() => {
+                    Some(Some(fs::read_link(&link_path).unwrap_or_default()))
+                }
+                Ok(_) => Some(None),
+            };
+            match current {
+                None => {
+                    if !dry_run {
+                        if let Some(parent) = link_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        std::os::unix::fs::symlink(&target_path, &link_path)?;
+                    }
+                    out.push(LinkOutcome::Created);
+                }
+                // A real file. Somebody's own model — never replaced.
+                Some(None) => out.push(LinkOutcome::Skipped),
+                Some(Some(cur)) if cur == target_path => out.push(LinkOutcome::Kept),
+                // Replace rather than fail: a link pointing at the wrong
+                // target is exactly what a sync run exists to correct.
+                Some(Some(_)) => {
+                    if !dry_run {
+                        match fs::remove_file(&link_path) {
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            other => other?,
+                        }
+                        std::os::unix::fs::symlink(&target_path, &link_path)?;
+                    }
+                    out.push(LinkOutcome::Replaced);
+                }
+            }
+        }
+        Ok(out)
     }
 }

@@ -59,3 +59,12 @@ impl Root {
         Root::ALL.iter().copied().find(|r| r.as_str() == name)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkOutcome {
+    Created,
+    Replaced,
+    Kept,
+    Skipped,
+}

@@ -5,6 +5,7 @@
 mod config;
 mod error;
 mod ops;
+mod prune;
 mod refs;
 mod safetensors;
 mod server;

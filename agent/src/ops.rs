@@ -176,3 +176,64 @@ pub async fn usage(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, 
     let usage = blocking(move || storage.usage(root)).await?;
     Ok(Json(usage).into_response())
 }
+
+pub async fn remove(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, AgentError> {
+    let value = parse_json(&body)?;
+    let obj = value.as_object().ok_or_else(|| bad("refs"))?;
+    let refs: Vec<Ref> = obj
+        .get("refs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| bad("refs"))?
+        .iter()
+        .map(parse_ref)
+        .collect::<Option<_>>()
+        .ok_or_else(|| bad("refs"))?;
+    let prune = truthy(obj.get("pruneEmptyDirs"));
+    blocking(move || storage.remove(&refs, prune)).await?;
+    Ok(ok_json())
+}
+
+pub async fn move_or_copy(
+    storage: Arc<LocalStorage>,
+    body: Bytes,
+    is_move: bool,
+) -> Result<Response, AgentError> {
+    let value = parse_json(&body)?;
+    let obj = value.as_object().ok_or_else(|| bad("refs"))?;
+    let from = obj
+        .get("from")
+        .and_then(parse_ref)
+        .ok_or_else(|| bad("refs"))?;
+    let to = obj
+        .get("to")
+        .and_then(parse_ref)
+        .ok_or_else(|| bad("refs"))?;
+    blocking(move || {
+        if is_move {
+            storage.mv(&from, &to)
+        } else {
+            storage.copy(&from, &to)
+        }
+    })
+    .await?;
+    Ok(ok_json())
+}
+
+pub async fn link(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, AgentError> {
+    let value = parse_json(&body)?;
+    let obj = value.as_object().ok_or_else(|| bad("links"))?;
+    let links: Vec<(Ref, Ref)> = obj
+        .get("links")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| bad("links"))?
+        .iter()
+        .map(|l| {
+            let o = l.as_object()?;
+            Some((parse_ref(o.get("target")?)?, parse_ref(o.get("at")?)?))
+        })
+        .collect::<Option<_>>()
+        .ok_or_else(|| bad("links"))?;
+    let dry_run = truthy(obj.get("dryRun"));
+    let outcomes = blocking(move || storage.link(&links, dry_run)).await?;
+    Ok(Json(json!({"outcomes": outcomes})).into_response())
+}
