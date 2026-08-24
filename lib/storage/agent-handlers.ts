@@ -12,6 +12,7 @@
  */
 
 import {
+  ERROR_CODE_HEADER,
   HASH_EMIT_BYTES,
   OFFSET_HEADER,
   REF_PATH_HEADER,
@@ -401,6 +402,14 @@ export async function handleAgentRequest(
         return new Response(`Unknown op: ${op}`, {status: 404});
     }
   } catch (e) {
-    return new Response(message(e), {status: 500});
+    // Carry the fs error code when there is one: a remote ENOENT must stay
+    // an ENOENT to the tolerance checks in the policy modules.
+    const code = (e as NodeJS.ErrnoException).code;
+    return new Response(message(e), {
+      status: 500,
+      ...(typeof code === 'string'
+        ? {headers: {[ERROR_CODE_HEADER]: code}}
+        : {}),
+    });
   }
 }

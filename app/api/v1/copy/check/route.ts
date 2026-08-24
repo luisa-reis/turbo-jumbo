@@ -1,45 +1,25 @@
-import {config, localModelsDir, coldStorageDir, localPeer} from '@/lib/config';
+import {config, localPeer} from '@/lib/config';
+import {fileSize} from '@/lib/storage/entries';
+import {siteForName} from '@/lib/storage/peer-storage';
+import {recordedSha256} from '@/lib/storage/recorded-digest';
+import {siteStorage} from '@/lib/storage/site';
 import {
   resolveSupportFiles,
   supportFileSources,
 } from '@/lib/storage/support-files';
-import {recordedSha256} from '@/lib/storage/recorded-digest';
-import {localSha256} from '@/lib/storage/file-transfer';
 import {logger} from '@/lib/util/logger';
 import {isObject, isStringArray, readJsonBody} from '@/lib/util/request';
-import nodePath from 'path';
-import {promises as fsp} from 'fs';
 
 type SourceFile = {path: string; from: string; size: number};
 
-/**
- * A peer's SHA256 for one of its files. With `recorded` the peer answers from
- * the file's sidecar and reads no bytes, returning null when it holds no
- * trustworthy record; without it the peer hashes the file then and there.
- *
- * It is the same digest of the same bytes either way, so a recorded answer
- * from one side compares directly against a computed one from the other, and
- * only the side that lacks a record has to pay for a read.
- *
- * null also covers a peer too old to answer in SHA256 at all — an undecided
- * pair is copied rather than wrongly called identical.
- */
-async function peerSha256(
-  peerAddr: string,
-  file: string,
-  opts: {recorded: boolean},
-): Promise<string | null> {
-  const recorded = opts.recorded ? '&recorded=1' : '';
-  try {
-    const res = await fetch(
-      `http://${peerAddr}/api/v1/local-models/checksum?file=${encodeURIComponent(file)}${recorded}`,
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as {sha256?: string | null};
-    return data.sha256 ?? null;
-  } catch {
-    return null;
-  }
+/** A root-relative path that stays inside its root. The storage refuses the
+ *  rest as well; this answers 400 for it rather than 500. */
+function isWithinRoot(file: string): boolean {
+  return (
+    file !== '' &&
+    !file.startsWith('/') &&
+    !file.split('/').some((seg) => seg === '..')
+  );
 }
 
 // Compare each selected file against what already exists at each destination
@@ -51,12 +31,14 @@ async function peerSha256(
 // file list. Hashing a large model reads every byte through the slowest disk
 // involved, so the client needs to see (and be able to abandon) the wait.
 //
-// Every digest here is a SHA256 of the file's bytes, whether it was recorded
-// at download time or computed on the spot, so the two are interchangeable.
-// A copy still matching its sidecar's recorded size and predating it answers
-// from `tjmodel.json` and reads nothing — the common "already there,
-// unchanged" case costs no I/O at all — and only a side with no trustworthy
-// record is hashed.
+// Every side is a storage site now — this host's own tiers, or a peer's
+// storage over the wire — so sizes come from one inventory entry, recorded
+// digests from the sidecars wherever they sit, and a computed digest from the
+// hash verb of whichever machine holds the file. A copy still matching its
+// sidecar's recorded size and predating it answers from `tjmodel.json` and
+// reads nothing; only a side with no trustworthy record is hashed, and only
+// when `hashFallback` allows it (`tj copy` turns it off — a pair it can't
+// settle for free is copied instead of read to find out it needn't be).
 export async function POST(req: Request) {
   const body = await readJsonBody<{
     files: SourceFile[];
@@ -67,11 +49,6 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const {files, toColdStorage, toPeers} = body;
-  // Whether a side no sidecar can vouch for may be settled by hashing it. On
-  // by default, for the Copy button: a person asked for the comparison and is
-  // watching it run. `tj copy` turns it off — it reads a file only to copy it,
-  // so a pair it can't settle for free is copied instead of read to find out
-  // it needn't be.
   const hashFallback = body.hashFallback !== false;
   if (
     !Array.isArray(files) ||
@@ -88,16 +65,13 @@ export async function POST(req: Request) {
     return new Response('Invalid toPeers', {status: 400});
   }
   const localPeerAddr = localPeer?.address ?? '';
-  const localBase = localModelsDir ? nodePath.resolve(localModelsDir) : '';
-  const coldBase = coldStorageDir ? nodePath.resolve(coldStorageDir) : '';
 
   // Same up-front validation as /api/v1/copy, and for the same reason: every
-  // host this talks to arrives in the request body (`toPeers`, and each file's
-  // `from`) and is fetched as `http://<host>/…`, so an unconfined caller could
-  // aim the server at an arbitrary host. Checking a file also reads it — a
-  // SHA256 of any side with no trustworthy recorded digest — so the paths are
-  // confined to their base too, or a local source could be made to hash a file
-  // outside the model tree and report the digest back.
+  // host this talks to arrives in the request body and gets spoken to as an
+  // agent. Checking a file can also read it — a SHA256 of a side with no
+  // trustworthy recorded digest — so the paths are confined to their roots
+  // too, and a tier this host hasn't configured refuses rather than
+  // resolving against nothing.
   const knownPeers = new Set(config.peers.map((p) => p.address));
   if (toPeers.some((p) => !knownPeers.has(p))) {
     return new Response('Unknown peer', {status: 400});
@@ -106,17 +80,12 @@ export async function POST(req: Request) {
     return new Response('Unknown source', {status: 400});
   }
   for (const f of files) {
-    const base =
-      f.from === 'cold-storage'
-        ? coldBase
-        : f.from === localPeerAddr
-          ? localBase
-          : null;
-    if (base === null) continue; // a remote source resolves the path itself
-    // An unconfigured tier has no base to confine against, and `resolve('', p)`
-    // would land wherever the process happens to be running.
-    if (!base) return new Response('Invalid path', {status: 400});
-    if (!nodePath.resolve(base, f.path).startsWith(base + nodePath.sep)) {
+    if (!isWithinRoot(f.path))
+      return new Response('Invalid path', {status: 400});
+    if (
+      (f.from === 'cold-storage' || f.from === localPeerAddr) &&
+      !siteForName(f.from)
+    ) {
       return new Response('Invalid path', {status: 400});
     }
   }
@@ -135,9 +104,8 @@ export async function POST(req: Request) {
       files.map((f) => f.path),
       supportFileSources({
         froms: files.map((f) => f.from),
-        coldBase,
-        localBase,
         localPeerAddr,
+        siteFor: siteForName,
       }),
       {
         onError: (from, message) =>
@@ -192,113 +160,54 @@ export async function POST(req: Request) {
       if (req.signal.aborted) break;
       try {
         const {path: file, from, size: sourceSize} = f;
+        const srcSite = siteForName(from);
 
         // Both of the source's digests, resolved lazily and cached per file:
-        // the recorded one costs a sidecar read (or a peer request), the
-        // computed one costs a full read of the file.
+        // the recorded one costs sidecar reads (local or over the wire), the
+        // computed one costs a full read of the file on its own machine.
         let sourceRecordedCache: string | null | undefined = undefined;
         const getSourceRecorded = async (): Promise<string | null> => {
           if (sourceRecordedCache !== undefined) return sourceRecordedCache;
-          let result: string | null;
-          if (from === 'cold-storage') {
-            result = coldBase ? await recordedSha256(coldBase, file) : null;
-          } else if (from === localPeerAddr) {
-            result = localBase ? await recordedSha256(localBase, file) : null;
-          } else {
-            result = await peerSha256(from, file, {recorded: true});
-          }
-          sourceRecordedCache = result;
-          return result;
+          sourceRecordedCache = srcSite
+            ? await recordedSha256(srcSite, file)
+            : null;
+          return sourceRecordedCache;
         };
 
         let sourceComputedCache: string | null | undefined = undefined;
         const getSourceComputed = async (): Promise<string | null> => {
           if (sourceComputedCache !== undefined) return sourceComputedCache;
-          // null base = the source is another peer, which hashes its own copy.
-          const base =
-            from === 'cold-storage'
-              ? coldBase
-              : from === localPeerAddr
-                ? localBase
-                : null;
-          let result: string | null;
-          if (base === null) {
-            result = await peerSha256(from, file, {recorded: false});
-          } else if (!base) {
-            result = null; // that tier isn't configured on this host
-          } else {
-            try {
-              result = await localSha256(
-                nodePath.resolve(base, file),
-                req.signal,
-              );
-            } catch {
-              result = null; // unreadable, or the client gave up mid-hash
-            }
+          if (!srcSite) {
+            sourceComputedCache = null;
+            return null;
           }
-          sourceComputedCache = result;
-          return result;
+          const {storage, root} = siteStorage(srcSite);
+          try {
+            sourceComputedCache = await storage.hash(
+              {root, path: file},
+              {signal: req.signal},
+            );
+          } catch {
+            sourceComputedCache = null; // unreadable, or the client gave up
+          }
+          return sourceComputedCache;
         };
 
         for (const destination of destinations) {
           if (destination === from) continue;
           if (req.signal.aborted) break;
 
-          let destSize: number | null = null;
-          let destRecordedFn: () => Promise<string | null>;
-          let destComputedFn: () => Promise<string | null>;
+          const destSite = siteForName(destination);
+          if (!destSite) continue; // a tier this host has not configured
+          const {storage: destStorage, root: destRoot} = siteStorage(destSite);
 
-          if (destination === 'cold-storage') {
-            const destPath = nodePath.resolve(coldBase, file);
-            if (!destPath.startsWith(coldBase + nodePath.sep)) continue;
-            try {
-              destSize = (await fsp.stat(destPath)).size;
-            } catch {
-              continue;
-            }
-            destRecordedFn = () => recordedSha256(coldBase, file);
-            destComputedFn = async () => {
-              try {
-                return await localSha256(destPath, req.signal);
-              } catch {
-                return null;
-              }
-            };
-          } else if (destination === localPeerAddr) {
-            const destPath = nodePath.resolve(localBase, file);
-            if (!destPath.startsWith(localBase + nodePath.sep)) continue;
-            try {
-              destSize = (await fsp.stat(destPath)).size;
-            } catch {
-              continue;
-            }
-            destRecordedFn = () => recordedSha256(localBase, file);
-            destComputedFn = async () => {
-              try {
-                return await localSha256(destPath, req.signal);
-              } catch {
-                return null;
-              }
-            };
-          } else {
-            try {
-              const headRes = await fetch(
-                `http://${destination}/api/v1/local-models/download?file=${encodeURIComponent(file)}`,
-                {method: 'HEAD'},
-              );
-              if (!headRes.ok) continue;
-              destSize = parseInt(
-                headRes.headers.get('content-length') ?? '0',
-                10,
-              );
-            } catch {
-              continue;
-            }
-            destRecordedFn = () =>
-              peerSha256(destination, file, {recorded: true});
-            destComputedFn = () =>
-              peerSha256(destination, file, {recorded: false});
+          let destSize: number | null;
+          try {
+            destSize = await fileSize(destStorage, destRoot, file);
+          } catch {
+            continue; // the machine holding that side is unreachable
           }
+          if (destSize === null) continue; // nothing at the destination
 
           const sizeMatch = sourceSize === destSize;
           let digest: 'sha256' | null = null;
@@ -315,7 +224,7 @@ export async function POST(req: Request) {
             // read rather than two.
             [sourceDigest, destDigest] = await Promise.all([
               getSourceRecorded(),
-              destRecordedFn(),
+              recordedSha256(destSite, file),
             ]);
             if ((!sourceDigest || !destDigest) && hashFallback) {
               await write({
@@ -327,7 +236,10 @@ export async function POST(req: Request) {
               });
               [sourceDigest, destDigest] = await Promise.all([
                 sourceDigest ?? getSourceComputed(),
-                destDigest ?? destComputedFn(),
+                destDigest ??
+                  destStorage
+                    .hash({root: destRoot, path: file}, {signal: req.signal})
+                    .catch(() => null),
               ]);
             }
             if (sourceDigest && destDigest) {
@@ -343,7 +255,7 @@ export async function POST(req: Request) {
             file,
             destination,
             sourceSize,
-            destSize: destSize ?? 0,
+            destSize,
             sizeMatch,
             digest,
             digestMatch,

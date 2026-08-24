@@ -36,3 +36,8 @@ export const OFFSET_HEADER = 'x-tj-offset';
 /** How often the hash stream reports progress — the byte-progress cadence the
  *  transfer routes already emit at. A final frame always closes the count. */
 export const HASH_EMIT_BYTES = 8 * 1024 * 1024;
+
+/** On a failed operation, the fs error code (`ENOENT`, `EACCES`, …) when
+ *  there is one — so a remote error keeps the shape the policy modules'
+ *  tolerance checks expect from a local one. */
+export const ERROR_CODE_HEADER = 'x-tj-error-code';

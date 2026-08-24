@@ -41,8 +41,7 @@ export async function expandSupportFiles(
       if (below.split('/').some((seg) => seg.startsWith('.'))) continue;
       const name = e.path.split('/').pop() ?? '';
       if (isWeightFile(name)) continue;
-      if (name === MODEL_SIDECAR_NAME || name.endsWith(TJMETA_SUFFIX))
-        continue;
+      if (name === MODEL_SIDECAR_NAME || name.endsWith(TJMETA_SUFFIX)) continue;
       if (known.has(e.path)) continue;
       known.add(e.path);
       out.push({path: e.path, size: e.size});
@@ -118,65 +117,32 @@ export async function resolveSupportFiles(
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** Listing support files is a directory read, so a peer that hasn't answered
- *  by now is down rather than slow — and a copy must not wait on it. */
-const PEER_LIST_TIMEOUT_MS = 10_000;
-
-/** Ask a peer for the support files beside the given weight files. */
-async function peerSupportFiles(
-  addr: string,
-  paths: string[],
-): Promise<Array<{path: string; size: number}>> {
-  const res = await fetch(`http://${addr}/api/v1/local-models/support-files`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({files: paths}),
-    signal: AbortSignal.timeout(PEER_LIST_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (
-    ((await res.json()) as {files?: Array<{path: string; size: number}>})
-      .files ?? []
-  );
-}
-
 /**
  * Where to look for a copy's support files, in preference order: the sources
- * the copy already reads its weights from, then this host's cold storage and
- * local models — which routinely hold what the resolved source is missing.
- * Tiers this host hasn't configured are left out.
+ * the copy already reads its weights from, then cold storage and the local
+ * models — which routinely hold what the resolved source is missing. Every
+ * source is one `expandSupportFiles` over its site, a remote peer's models
+ * included — the same directory listing whichever machine holds it. A tier
+ * `siteFor` can't reach (null) is simply not asked.
  */
 export function supportFileSources(opts: {
   froms: Iterable<string>;
-  coldBase: string;
-  localBase: string;
   localPeerAddr: string;
-  listPeer?: (
-    addr: string,
-    paths: string[],
-  ) => Promise<Array<{path: string; size: number}>>;
+  /** The site a source name reads from; null for an unreachable tier. */
+  siteFor: (from: string) => Site | null;
 }): SupportSource[] {
-  const {coldBase, localBase, localPeerAddr} = opts;
-  const listPeer = opts.listPeer ?? peerSupportFiles;
   const out: SupportSource[] = [];
   const seen = new Set<string>();
 
   const add = (from: string) => {
     if (!from || seen.has(from)) return;
     seen.add(from);
-    if (from === 'cold-storage') {
-      if (coldBase)
-        out.push({from, list: (p) => expandSupportFiles(coldBase, p)});
-    } else if (from === localPeerAddr) {
-      if (localBase)
-        out.push({from, list: (p) => expandSupportFiles(localBase, p)});
-    } else {
-      out.push({from, list: (p) => listPeer(from, p)});
-    }
+    const site = opts.siteFor(from);
+    if (site) out.push({from, list: (p) => expandSupportFiles(site, p)});
   };
 
   for (const from of opts.froms) add(from);
   add('cold-storage');
-  add(localPeerAddr);
+  add(opts.localPeerAddr);
   return out;
 }

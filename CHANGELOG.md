@@ -32,6 +32,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
   paths were required; a host without them showed empty local tabs and
   failed requests.
 
+### Changed
+
+- **Copies between peers now run over the storage protocol.** The
+  machines talk to each other's `/api/v1/storage` endpoints for
+  transfers, conflict checks and the provenance that rides along,
+  instead of the old bespoke push/upload/checksum endpoints (now
+  gone). Update all peers together: a peer on an older release cannot
+  take part in copies with an updated one until it is updated too.
+  Deleting sources after an archive copy now also cleans up sidecars
+  and empty directories on the source machine the same way a normal
+  delete does.
+
 ### Fixed
 
 - **Moving a download on to cold storage leaves no husk behind.** A model

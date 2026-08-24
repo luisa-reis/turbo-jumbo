@@ -288,10 +288,6 @@ export async function moveFileWithMeta(
   await storage.remove([{root, path: metaPath(fromRel)}]);
 }
 
-// Copying a file with its sidecar is the transfer side's business; it kept
-// this address.
-export {copyFileWithMeta} from '@/lib/storage/copy-meta';
-
 /** How `hf` compares against an on-disk file, as a `RevisionCheck` record. */
 function revisionCheck(
   hf: HfFileInfo,

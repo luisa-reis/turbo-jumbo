@@ -1,45 +1,12 @@
-import {promises as fsp} from 'fs';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {modelDirForRepo, readModelSidecar} from '@/lib/models/model-sidecar';
 import {
-  metaPath,
   readMetaResolved,
   updateMetaAt,
   updateMetaResolved,
   type TjMeta,
 } from '@/lib/models/tjmeta';
-import {streamCopyResumable} from '@/lib/storage/file-transfer';
 import type {Site} from '@/lib/storage/site';
-
-/**
- * Copy a file and its `.tjmeta.json` sidecar (if present) to `dstFull`. Wraps
- * `streamCopyResumable` (resume, cross-filesystem stream) and adds the sidecar.
- * `onBytes` reports copied chunk sizes of the model file for progress —
- * including, up front, the bytes a resume skipped — so progress still sums to
- * the full file size; the sidecar is tiny and not counted. Absolute paths,
- * like the transfer core it wraps: both move behind the job API together.
- */
-export async function copyFileWithMeta(
-  srcFull: string,
-  dstFull: string,
-  onBytes?: (n: number) => void,
-): Promise<void> {
-  await streamCopyResumable(srcFull, dstFull, {
-    // Report the skipped prefix up front, before the streamed remainder, so
-    // progress sums to the full size in prefix-then-chunks order.
-    onResume: (offset) => {
-      if (offset > 0 && onBytes) onBytes(offset);
-    },
-    onChunk: onBytes,
-  });
-
-  // Copy the sidecar alongside if it exists; absence is fine.
-  try {
-    await fsp.copyFile(metaPath(srcFull), metaPath(dstFull));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-  }
-}
 
 export interface RepoHead {
   id: string;
@@ -106,8 +73,8 @@ export async function applyFileMeta(
   await updateMetaResolved(dstBase, relPath, repoId, meta, head);
 }
 
-/** Both sides at once, for legs where source and destination are this
- *  machine's own sites. */
+/** Both sides at once. Either site may be another machine's storage — the
+ *  sidecar reads and writes are small and travel the interface. */
 export async function propagateFileMeta(
   srcBase: Site,
   dstBase: Site,
@@ -116,24 +83,4 @@ export async function propagateFileMeta(
   const payload = await readFileMetaWithRepoHead(srcBase, relPath);
   if (!payload) return;
   await applyFileMeta(dstBase, relPath, payload.meta, payload.repoHead);
-}
-
-/** Network leg: hand a file's provenance to the destination peer to apply. */
-export async function sendFileMeta(
-  peerAddr: string,
-  relPath: string,
-  payload: FileMetaPayload,
-  signal?: AbortSignal,
-): Promise<void> {
-  const res = await fetch(`http://${peerAddr}/api/v1/local-models/file-meta`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      path: relPath,
-      meta: payload.meta,
-      ...(payload.repoHead ? {repoHead: payload.repoHead} : {}),
-    }),
-    signal,
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }

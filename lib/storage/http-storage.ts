@@ -11,6 +11,7 @@
  */
 
 import {
+  ERROR_CODE_HEADER,
   OFFSET_HEADER,
   REF_PATH_HEADER,
   REF_ROOT_HEADER,
@@ -38,6 +39,13 @@ export interface AgentTarget {
   /** Test seam: speak the protocol to an in-process handler instead of a
    *  socket. Defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
+  /**
+   * Deadline for the bounded verbs — everything but `hash` and jobs, which
+   * legitimately run for as long as a file is large. Without one, a machine
+   * that stops answering holds its caller forever; with one, it reads as
+   * down, which is what it is.
+   */
+  timeoutMs?: number;
 }
 
 export function createHttpStorage(target: AgentTarget): Storage {
@@ -52,12 +60,25 @@ export function createHttpStorage(target: AgentTarget): Storage {
   }
 
   async function call(op: string, init: RequestInit): Promise<Response> {
+    if (target.timeoutMs !== undefined && !init.signal) {
+      init = {...init, signal: AbortSignal.timeout(target.timeoutMs)};
+    }
     const res = await fetchImpl(`${base}/${op}`, init);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(text || `${op}: HTTP ${res.status}`);
+      const error = new Error(text || `${op}: HTTP ${res.status}`);
+      // Restore the fs error code the far side carried across, so ENOENT
+      // stays ENOENT to a caller's tolerance checks.
+      const code = res.headers.get(ERROR_CODE_HEADER);
+      if (code) (error as NodeJS.ErrnoException).code = code;
+      throw error;
     }
     return res;
+  }
+
+  /** `call` without the default deadline, for the streaming verbs. */
+  function callUnbounded(op: string, init: RequestInit): Promise<Response> {
+    return call(op, init.signal ? init : {...init, signal: null});
   }
 
   async function callJson<T>(op: string, body: unknown): Promise<T> {
@@ -134,7 +155,7 @@ export function createHttpStorage(target: AgentTarget): Storage {
     },
 
     async hash(ref: Ref, opts = {}) {
-      const res = await call('hash', {
+      const res = await callUnbounded('hash', {
         method: 'POST',
         headers: headers({'Content-Type': 'application/json'}),
         body: JSON.stringify(ref),

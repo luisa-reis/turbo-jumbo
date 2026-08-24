@@ -374,12 +374,12 @@ Done:
 
 Remaining call sites:
 
-1. `send`, with the agent and `HttpStorage` — step 3. The `copy` route
-   (peer→peer, with `push`/`upload`/`download`/`file-meta` as its two ends),
-   `checksum` and `copy/check` are its callers: they open files directly
-   today and become `send` and `hash` once an agent stands at the far end.
-   `copyFileWithMeta` in `storage/copy-meta.ts` goes with them.
-   `lib/config` stays.
+1. The standalone agent — the tail of step 3. `HttpStorage`, `send` and
+   the `copy`/`copy/check` routes are done (below); what remains is the
+   thin process itself (the same handlers behind a Bun server, a token,
+   its own roots config) and the peer config that points
+   `storageForPeer` at it, so step 4 can cut peers over one at a time.
+   `lib/config` stays on the host.
 
 ### Where step 3 has got to
 
@@ -412,6 +412,27 @@ Remaining call sites:
   Tested with two in-process agents: fresh sends, proven and refused
   resumes, an already-complete destination sending nothing, and a
   control host driving A→B while holding none of the bytes.
+
+- The peer-to-peer copy, on the wire. `/api/v1/copy` now speaks entirely
+  in sites and jobs: every (file, destination) leg is one job on the
+  machine that holds the bytes — a cold end pairs onto the other end's
+  machine as a local copy job there (the archive is one shared mount),
+  and two different machines' models roots are a `send` — and the route
+  relays job events into the same NDJSON frames the clients already
+  read, phases and resume labels included. Provenance travels as
+  `propagateFileMeta` between any two sites, delete-after-copy is
+  `deleteFileWithMeta` on whichever storage owns the source (local
+  sources now get the same sidecar-and-husk cleanup remote ones always
+  had), and `copy/check` answers sizes from one inventory entry,
+  recorded digests from sidecars wherever they sit, and computed ones
+  from the far machine's own `hash`. Support files expand through
+  `expandSupportFiles` over any site. Retired with their callers:
+  `local-models/push`, `upload`, `download`, `checksum`, `file-meta`,
+  `support-files`, `cold-storage/to-local`, `from-local`,
+  `sendFileMeta`, `copyFileWithMeta`, and peer-resume's endpoint-backed
+  reader. Agents also carry fs error codes across the wire
+  (`x-tj-error-code`), so a remote ENOENT stays an ENOENT to the
+  sidecar readers' tolerance checks.
 
 ## Decided
 

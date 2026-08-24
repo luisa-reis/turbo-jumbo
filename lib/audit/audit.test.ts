@@ -7,7 +7,6 @@ import {
   auditFile,
   auditFileUpdate,
   cachedResultFromMeta,
-  copyFileWithMeta,
   decideStatus,
   decideUpdate,
   duplicateResult,
@@ -906,51 +905,6 @@ test('refreshMetaSource hashes the file when no prior computed sha exists', asyn
   await fsp.rm(dir, {recursive: true, force: true});
 });
 
-test('copyFileWithMeta copies the file and its sidecar, reporting bytes', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'payload');
-  await writeMeta(src, {
-    modelUrl: 'https://huggingface.co/o/r',
-    originUrl: 'https://huggingface.co/o/r/blob/main/m.gguf',
-    sourceSize: 7,
-    computedSize: 7,
-    sourceSha256: 's',
-    computedSha256: 'c',
-  });
-  const dst = path.join(base, 'cold', 'sub', 'm.gguf');
-
-  let bytes = 0;
-  await copyFileWithMeta(src, dst, (n) => {
-    bytes += n;
-  });
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('payload');
-  expect(bytes).toBe('payload'.length);
-  expect((await readMeta(dst))?.sourceSha256).toBe('s');
-  // Source untouched (this is a copy, not a move).
-  expect(await readMeta(src)).not.toBeNull();
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
-test('copyFileWithMeta resumes a matching partial destination', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'hello world');
-  const dst = path.join(base, 'cold', 'm.gguf');
-  await fsp.mkdir(path.dirname(dst), {recursive: true});
-  await fsp.writeFile(dst, 'hello'); // interrupted earlier copy
-
-  const chunks: number[] = [];
-  await copyFileWithMeta(src, dst, (n) => chunks.push(n));
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('hello world');
-  // The skipped prefix is reported up front, then only the remainder streams.
-  expect(chunks[0]).toBe('hello'.length);
-  expect(chunks.reduce((a, b) => a + b, 0)).toBe('hello world'.length);
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
 test('resumeOffset reports verification progress over both hashed regions', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
   const src = path.join(base, 'm.gguf');
@@ -984,66 +938,6 @@ test('resumeOffset never calls onVerify when there is no partial to hash', async
 
   expect(offset).toBe(0);
   expect(calls).toBe(0);
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
-test('copyFileWithMeta recopies from scratch when the partial destination differs', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'hello world');
-  const dst = path.join(base, 'cold', 'm.gguf');
-  await fsp.mkdir(path.dirname(dst), {recursive: true});
-  await fsp.writeFile(dst, 'XXXXX'); // same length as 'hello', different bytes
-
-  let bytes = 0;
-  await copyFileWithMeta(src, dst, (n) => (bytes += n));
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('hello world');
-  expect(bytes).toBe('hello world'.length);
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
-test('copyFileWithMeta recopies when the destination is longer than the source', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'short');
-  const dst = path.join(base, 'cold', 'm.gguf');
-  await fsp.mkdir(path.dirname(dst), {recursive: true});
-  await fsp.writeFile(dst, 'much longer stale content');
-
-  await copyFileWithMeta(src, dst);
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('short');
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
-test('copyFileWithMeta skips the stream when the destination is already complete', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'hello world');
-  const dst = path.join(base, 'cold', 'm.gguf');
-  await fsp.mkdir(path.dirname(dst), {recursive: true});
-  await fsp.writeFile(dst, 'hello world');
-
-  const chunks: number[] = [];
-  await copyFileWithMeta(src, dst, (n) => chunks.push(n));
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('hello world');
-  // Progress still sums to the full size, in a single skipped-prefix report.
-  expect(chunks).toEqual(['hello world'.length]);
-  await fsp.rm(base, {recursive: true, force: true});
-});
-
-test('copyFileWithMeta tolerates a file with no sidecar', async () => {
-  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-cp-'));
-  const src = path.join(base, 'm.gguf');
-  await fsp.writeFile(src, 'data');
-  const dst = path.join(base, 'cold', 'm.gguf');
-
-  await copyFileWithMeta(src, dst);
-
-  expect(await fsp.readFile(dst, 'utf8')).toBe('data');
-  expect(await readMeta(dst)).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 

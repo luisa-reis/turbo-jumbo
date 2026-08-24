@@ -1,10 +1,12 @@
 import {sha256Region} from '@/lib/storage/file-transfer';
 
 /**
- * How a peer is asked about its copy of a file. Split in two because the size
- * is free (a HEAD) while the digest costs the peer a full read of what it
- * holds: knowing the size first lets the source hash its own matching prefix
- * at the same time the peer hashes its copy, instead of after.
+ * How the far side is asked about its copy of a file. Split in two because
+ * the size is free (one inventory entry) while the digest costs a full read
+ * of what it holds: knowing the size first lets the source hash its own
+ * matching prefix at the same time the far side hashes its copy, instead of
+ * after. The caller supplies the reader — the send job backs it with the
+ * target agent's `list` and `hash` verbs.
  */
 export interface PeerFileReader {
   /** Bytes the peer currently holds, or null if it holds the file at all. */
@@ -12,34 +14,6 @@ export interface PeerFileReader {
   /** SHA256 over exactly those bytes, or null if the peer can't say. */
   sha256: (peer: string, file: string) => Promise<string | null>;
 }
-
-const httpReader: PeerFileReader = {
-  size: async (peer, file) => {
-    try {
-      const res = await fetch(
-        `http://${peer}/api/v1/local-models/download?file=${encodeURIComponent(file)}`,
-        {method: 'HEAD'},
-      );
-      if (!res.ok) return null;
-      const len = parseInt(res.headers.get('content-length') ?? '', 10);
-      return Number.isFinite(len) ? len : null;
-    } catch {
-      return null;
-    }
-  },
-  sha256: async (peer, file) => {
-    try {
-      const res = await fetch(
-        `http://${peer}/api/v1/local-models/checksum?file=${encodeURIComponent(file)}`,
-      );
-      if (!res.ok) return null;
-      const data = (await res.json()) as {sha256?: string | null};
-      return data.sha256 ?? null;
-    } catch {
-      return null;
-    }
-  },
-};
 
 /**
  * Where an upload of `srcFull` to `file` on `peer` may resume.
@@ -70,10 +44,9 @@ export async function peerResumeOffset(opts: {
   srcSize: number;
   signal?: AbortSignal;
   onVerify?: (hashedBytes: number, totalBytes: number) => void;
-  reader?: PeerFileReader;
+  reader: PeerFileReader;
 }): Promise<number> {
-  const {peer, file, srcFull, srcSize, signal, onVerify} = opts;
-  const reader = opts.reader ?? httpReader;
+  const {peer, file, srcFull, srcSize, signal, onVerify, reader} = opts;
 
   const destSize = await reader.size(peer, file);
   // Nothing there, nothing held, or more bytes than we are sending — in which

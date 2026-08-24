@@ -164,12 +164,11 @@ test('drops support paths that escape the model tree', async () => {
 });
 
 test('asks the copy sources first, then cold storage and local models', () => {
+  const anySite = {storage: {} as never, root: 'models'} as const;
   const sources = supportFileSources({
     froms: ['cold-storage'],
-    coldBase: '/cold',
-    localBase: '/local',
     localPeerAddr: '192.0.2.1:3000',
-    listPeer: async () => [],
+    siteFor: () => anySite,
   });
   // Cold storage came in as a copy source, so it is not asked twice; the
   // local peer is appended because it may hold what cold storage lacks.
@@ -180,12 +179,12 @@ test('asks the copy sources first, then cold storage and local models', () => {
 });
 
 test('skips tiers this host has not configured', () => {
+  const anySite = {storage: {} as never, root: 'models'} as const;
   const sources = supportFileSources({
     froms: ['192.0.2.9:3000'],
-    coldBase: '',
-    localBase: '',
     localPeerAddr: '192.0.2.1:3000',
-    listPeer: async () => [],
+    // Only the remote source resolves; this host has neither tier.
+    siteFor: (from) => (from === '192.0.2.9:3000' ? anySite : null),
   });
   expect(sources.map((s) => s.from)).toEqual(['192.0.2.9:3000']);
 });
@@ -198,7 +197,10 @@ test('expandSupportFiles accepts a storage site in place of a base path', async 
     'org/m/tjmodel.json': '{}',
     'org/m/.cache/huggingface/x': 'bookkeeping',
   });
-  const site = {storage: createLocalStorage({cold: base}), root: 'cold'} as const;
+  const site = {
+    storage: createLocalStorage({cold: base}),
+    root: 'cold',
+  } as const;
   const extra = await expandSupportFiles(site, ['org/m/a.gguf']);
   // Same rules as the string arm: support files in, weights/sidecars/dot-dirs out.
   expect(extra.map((f) => f.path)).toEqual(['org/m/config.json']);

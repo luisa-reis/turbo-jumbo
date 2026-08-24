@@ -1,25 +1,22 @@
-import {streamCopyResumable} from '@/lib/audit/audit';
-import {config, localModelsDir, coldStorageDir, localPeer} from '@/lib/config';
+import {config, localPeer, localModelsDir, coldStorageDir} from '@/lib/config';
+import {propagateFileMeta} from '@/lib/storage/copy-meta';
 import {
-  propagateFileMeta,
-  readFileMetaWithRepoHead,
-  sendFileMeta,
-} from '@/lib/storage/copy-meta';
+  cleanupWeightlessModelDirs,
+  deleteFileWithMeta,
+} from '@/lib/storage/delete-file';
+import {
+  agentUrlFor,
+  siteForName,
+  storageForPeer,
+} from '@/lib/storage/peer-storage';
+import type {Site} from '@/lib/storage/site';
+import type {CopyResult, JobSpec} from '@/lib/storage/storage';
 import {
   resolveSupportFiles,
   supportFileSources,
 } from '@/lib/storage/support-files';
-import {peerResumeOffset} from '@/lib/storage/peer-resume';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
-import {promises as fsp} from 'fs';
-import {createReadStream} from 'fs';
-import nodePath from 'path';
-import {Readable} from 'stream';
-
-const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB
-// Emit a progress event at most once per this many streamed bytes.
-const EMIT_INTERVAL = 512 * 1024; // 512 KB — frequent enough for per-file progress visibility
 
 type SourceFile = {
   path: string;
@@ -35,13 +32,67 @@ type CopyRequest = {
   skip?: Array<{file: string; destination: string}>;
 };
 
-// A tier this host doesn't have has an empty base, and nothing resolves
-// within it — without that rule `resolve('', file)` would land the file
-// wherever the server happens to be running.
-function resolveWithin(base: string, file: string): string | null {
-  if (!base) return null;
-  const full = nodePath.resolve(base, file);
-  return full.startsWith(base + nodePath.sep) ? full : null;
+/** A root-relative path that stays inside its root. The storage refuses the
+ *  rest as well; this answers 400 for it rather than 500. */
+function isWithinRoot(file: string): boolean {
+  return (
+    file !== '' &&
+    !file.startsWith('/') &&
+    !file.split('/').some((seg) => seg === '..')
+  );
+}
+
+/**
+ * One file → one destination, as a storage job on the machine that holds the
+ * bytes — this host never carries them, whoever the ends are.
+ *
+ * Cold storage is a mount shared across the peers, so a cold end always
+ * pairs onto the other end's machine as a local copy job there — the same
+ * placement the old to-local/from-local forwarding produced. Two different
+ * machines' models roots are a send: the source machine streams straight to
+ * the destination's agent.
+ */
+function legFor(
+  file: string,
+  from: string,
+  dest: string,
+): {runOn: string; spec: JobSpec; srcSite: Site; dstSite: Site} {
+  if (from === 'cold-storage') {
+    const peerStorage = storageForPeer(dest);
+    return {
+      runOn: dest,
+      spec: {
+        kind: 'copy',
+        from: {root: 'cold', path: file},
+        to: {root: 'models', path: file},
+      },
+      srcSite: {storage: peerStorage, root: 'cold'},
+      dstSite: {storage: peerStorage, root: 'models'},
+    };
+  }
+  if (dest === 'cold-storage') {
+    const peerStorage = storageForPeer(from);
+    return {
+      runOn: from,
+      spec: {
+        kind: 'copy',
+        from: {root: 'models', path: file},
+        to: {root: 'cold', path: file},
+      },
+      srcSite: {storage: peerStorage, root: 'models'},
+      dstSite: {storage: peerStorage, root: 'cold'},
+    };
+  }
+  return {
+    runOn: from,
+    spec: {
+      kind: 'send',
+      from: {root: 'models', path: file},
+      to: {agent: agentUrlFor(dest), ref: {root: 'models', path: file}},
+    },
+    srcSite: {storage: storageForPeer(from), root: 'models'},
+    dstSite: {storage: storageForPeer(dest), root: 'models'},
+  };
 }
 
 export async function POST(req: Request) {
@@ -76,13 +127,10 @@ export async function POST(req: Request) {
   if (toColdStorage && !coldStorageDir)
     return new Response('No cold storage configured', {status: 400});
 
-  const coldBase = coldStorageDir ? nodePath.resolve(coldStorageDir) : '';
-  const localBase = localModelsDir ? nodePath.resolve(localModelsDir) : '';
-
-  // Every host we'll talk to comes from the request body (`toPeers`, and each
-  // file's `from`), and we fetch `http://<host>/...` against it — so confine
-  // them to configured peers. Otherwise a caller could aim the server at an
-  // arbitrary host, and the local-source branch would stream local files there.
+  // Every host this run will drive comes from the request body (`toPeers`,
+  // and each file's `from`) and ends up spoken to as an agent — so confine
+  // them to configured peers. Otherwise a caller could aim this server, or a
+  // peer's send, at an arbitrary host.
   const knownPeers = new Set(config.peers.map((p) => p.address));
   if (
     !Array.isArray(toPeers) ||
@@ -95,22 +143,27 @@ export async function POST(req: Request) {
   }
   if (toPeers.includes(localPeerAddr) && !localModelsDir)
     return new Response('No local storage configured', {status: 400});
+  // Tiers of this host that sources name must exist here: the cold archive
+  // is read as this host's own mount, and the local peer's models are local.
+  if (files.some((f) => f.from === 'cold-storage') && !coldStorageDir)
+    return new Response('No cold storage configured', {status: 400});
+  if (files.some((f) => f.from === localPeerAddr) && !localModelsDir)
+    return new Response('No local storage configured', {status: 400});
 
   // A model's support files (config.json, tokenizer, safetensors index) ride
-  // along with its weights, resolved here rather than by the caller: the weight
-  // scan only tracks weights, so no caller's selection can name them. Doing it
-  // in the copy itself covers every route in — the UI (whose pre-check expanded
-  // the same list already, so this finds nothing new), `tj copy`, which skips
-  // that check by design, and the cold-storage resume — instead of only the one
-  // that happens to ask first. Sources are the ones already validated above
-  // plus this host's own tiers, so this opens no new host to talk to.
+  // along with its weights, resolved here rather than by the caller: the
+  // weight scan only tracks weights, so no caller's selection can name them.
+  // Doing it in the copy itself covers every route in — the UI (whose
+  // pre-check expanded the same list already, so this finds nothing new),
+  // `tj copy`, which skips that check by design, and the cold-storage
+  // resume. Sources are the ones already validated above plus this host's
+  // own tiers, so this opens no new host to talk to.
   const support = await resolveSupportFiles(
     files.map((f) => f.path),
     supportFileSources({
       froms: files.map((f) => f.from),
-      coldBase,
-      localBase,
       localPeerAddr,
+      siteFor: siteForName,
     }),
     {
       onError: (from, message) =>
@@ -122,15 +175,9 @@ export async function POST(req: Request) {
   const allFiles: SourceFile[] =
     support.length > 0 ? [...files, ...support] : files;
 
-  // Validate local-source paths up-front.
   for (const f of allFiles) {
-    if (f.from === 'cold-storage') {
-      if (!resolveWithin(coldBase, f.path))
-        return new Response('Invalid path', {status: 400});
-    } else if (f.from === localPeerAddr) {
-      if (!resolveWithin(localBase, f.path))
-        return new Response('Invalid path', {status: 400});
-    }
+    if (!isWithinRoot(f.path))
+      return new Response('Invalid path', {status: 400});
   }
 
   const destinations = [...(toColdStorage ? ['cold-storage'] : []), ...toPeers];
@@ -193,7 +240,9 @@ export async function POST(req: Request) {
     // destination is being hash-compared against the source, phase is
     // 'verifying' and verifyDone/verifyTotal track the hashing; afterwards
     // `resume` records the outcome ('resumed' = prefix matched, 'from-start' =
-    // SHA256 mismatch, null = no partial was found).
+    // SHA256 mismatch, null = no partial was found). All of it read straight
+    // off the job's events now — the jobs report the same phases wherever
+    // they run.
     let phase: 'verifying' | 'copying' = 'copying';
     let verifyDone = 0;
     let verifyTotal = 0;
@@ -248,445 +297,81 @@ export async function POST(req: Request) {
     );
 
     try {
-      // Per-destination, group files by their source so peer→peer pushes can batch.
       for (const dest of destinations) {
-        const bySource = new Map<string, SourceFile[]>();
         for (const f of allFiles) {
           if (f.from === dest || shouldSkip(f.path, dest)) continue;
-          if (!bySource.has(f.from)) bySource.set(f.from, []);
-          bySource.get(f.from)!.push(f);
-        }
+          signal.throwIfAborted();
 
-        const destIsCold = dest === 'cold-storage';
-        const destIsLocalPeer = dest === localPeerAddr;
-        const destIsRemote = !destIsCold && !destIsLocalPeer;
+          const leg = legFor(f.path, f.from, dest);
+          fileTotal = f.size;
+          fileDone = 0;
+          resetFilePhase();
+          await emit();
 
-        for (const [source, groupFiles] of bySource) {
-          const srcIsCold = source === 'cold-storage';
-          const srcIsLocalPeer = source === localPeerAddr;
-          const srcIsRemote = !srcIsCold && !srcIsLocalPeer;
-
-          // Remote source → a peer destination (another peer, or this host):
-          // the source peer pushes the files to the destination itself, in
-          // bounded chunks. The bytes never transit a third host, and — unlike
-          // pulling the file here and piping the fetch body to disk — memory
-          // stays bounded (Bun doesn't backpressure a fetch body into a slower
-          // sink, which OOMs on multi-GB models).
-          if (!destIsCold && srcIsRemote) {
-            const pushBytes = groupFiles.reduce((s, f) => s + f.size, 0);
-            fileTotal = pushBytes;
-            fileDone = 0;
-            resetFilePhase();
-            emit();
-
+          try {
             logger.info(
-              `[copy] push ${groupFiles.length} file(s) from ${source} → ${dest}`,
+              `[copy] ${f.from} → ${dest} (on ${leg.runOn}): ${f.path}`,
             );
-            const res = await fetch(
-              `http://${source}/api/v1/local-models/push`,
-              {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                  files: groupFiles.map((f) => f.path),
-                  toPeer: dest,
-                }),
-                signal,
-              },
-            );
-            if (!res.ok) {
-              fail(`push ${source} → ${dest}`, `HTTP ${res.status}`);
-              continue;
-            }
-            // The push carried each file's provenance to the destination;
-            // surface any per-file meta failures it reported (best effort —
-            // the byte copies themselves succeeded).
-            const {metaErrors} = (await res
-              .json()
-              .catch(() => ({}) as {metaErrors?: string[]})) as {
-              metaErrors?: string[];
-            };
-            for (const e of metaErrors ?? []) {
-              errors.push(`push ${source} → ${dest}: ${e}`);
-            }
-            filesDone += groupFiles.length;
-            bytesDone += pushBytes;
-            fileDone = pushBytes;
-            emit();
-            continue;
-          }
-
-          // Remote dest, cold source → ask dest to copy from its own cold storage.
-          // (Assumes cold storage is shared/mounted identically across peers.)
-          if (destIsRemote && srcIsCold) {
-            const totalBytes = groupFiles.reduce((s, f) => s + f.size, 0);
-            fileTotal = totalBytes;
-            fileDone = 0;
-            resetFilePhase();
-            emit();
-
-            logger.info(
-              `[copy] cold→local ${groupFiles.length} file(s) → ${dest}`,
-            );
-            const res = await fetch(
-              `http://${dest}/api/v1/cold-storage/to-local`,
-              {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({files: groupFiles.map((f) => f.path)}),
-                signal,
-              },
-            );
-            if (!res.ok || !res.body) {
-              fail(`cold→local → ${dest}`, `HTTP ${res.status}`);
-              continue;
-            }
-            // Stream progress from the remote peer.
-            const reader = res.body.getReader();
-            const dec = new TextDecoder();
-            let buf = '';
-            const baseBytesDone = bytesDone;
-            const baseFilesDone = filesDone;
-            let peerErrors: string[] = [];
+            const job = await storageForPeer(leg.runOn).start(leg.spec);
+            const cancel = () => void job.cancel();
+            signal.addEventListener('abort', cancel, {once: true});
+            let sawVerify = false;
+            let result: CopyResult | null = null;
             try {
-              for (;;) {
-                const {done, value} = await reader.read();
-                if (done) break;
-                buf += dec.decode(value, {stream: true});
-                const lines = buf.split('\n');
-                buf = lines.pop() ?? '';
-                for (const line of lines) {
-                  if (!line.trim()) continue;
-                  const p = JSON.parse(line) as {
-                    bytesDone: number;
-                    filesDone: number;
-                    errors?: string[];
-                  };
-                  fileDone = p.bytesDone;
-                  bytesDone = baseBytesDone + p.bytesDone;
-                  filesDone = baseFilesDone + p.filesDone;
-                  if (p.errors) peerErrors = p.errors;
-                  emit();
-                }
-              }
-            } catch (err) {
-              if (signal.aborted) throw err;
-              fail(
-                `cold→local → ${dest}`,
-                err instanceof Error ? err.message : String(err),
-              );
-            }
-            for (const e of peerErrors) {
-              errors.push(`cold→local → ${dest}: ${e}`);
-            }
-            if (peerErrors.length > 0) emit();
-            continue;
-          }
-
-          // Remote dest, local source → upload each file chunked.
-          if (destIsRemote && srcIsLocalPeer) {
-            for (const f of groupFiles) {
-              const src = resolveWithin(localBase, f.path)!;
-              fileTotal = f.size;
-              fileDone = 0;
-              resetFilePhase();
-              emit();
-
-              try {
-                logger.info(`[copy] upload ${f.path} → ${dest}`);
-                const uploadUrl = `http://${dest}/api/v1/local-models/upload`;
-                if (f.size === 0) {
-                  const res = await fetch(uploadUrl, {
-                    method: 'POST',
-                    headers: {'x-file-path': f.path, 'x-chunk-offset': '0'},
-                    signal,
-                  });
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                } else {
-                  // Resume an interrupted upload: when what the peer already
-                  // holds is a verified prefix of this file, only the tail
-                  // travels. Reported through the same verifying/resumed phases
-                  // as a copy within one machine.
+              for await (const event of job.events()) {
+                if (event.kind === 'verify') {
                   phase = 'verifying';
+                  sawVerify = true;
+                  verifyDone = event.done;
+                  verifyTotal = event.total;
                   emit();
-                  let verified = false;
-                  let nextVerifyEmit = 0;
-                  const start = await peerResumeOffset({
-                    peer: dest,
-                    file: f.path,
-                    srcFull: src,
-                    srcSize: f.size,
-                    signal,
-                    onVerify: (done, total) => {
-                      verified = true;
-                      verifyDone = done;
-                      verifyTotal = total;
-                      if (done >= nextVerifyEmit) {
-                        nextVerifyEmit = done + EMIT_INTERVAL;
-                        emit();
-                      }
-                    },
-                  });
-                  phase = 'copying';
-                  if (verified) resume = start > 0 ? 'resumed' : 'from-start';
-                  if (start > 0) {
-                    // The bytes already there count as done, so the bar still
-                    // reaches the total it was given.
-                    fileDone = start;
-                    bytesDone += start;
-                  }
-                  emit();
-
-                  for (
-                    let offset = start;
-                    offset < f.size;
-                    offset += CHUNK_SIZE
-                  ) {
-                    signal.throwIfAborted();
-                    const chunkEnd = Math.min(offset + CHUNK_SIZE, f.size);
-                    const readable = createReadStream(src, {
-                      start: offset,
-                      end: chunkEnd - 1,
-                    });
-                    const res = await fetch(uploadUrl, {
-                      method: 'POST',
-                      headers: {
-                        'x-file-path': f.path,
-                        'x-chunk-offset': String(offset),
-                        'Content-Type': 'application/octet-stream',
-                      },
-                      body: Readable.toWeb(readable) as unknown as BodyInit,
-                      // @ts-expect-error – duplex required for streaming request bodies in Node fetch
-                      duplex: 'half',
-                      signal,
-                    });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    fileDone = chunkEnd;
-                    bytesDone += chunkEnd - offset;
-                    emit();
-                  }
-                }
-                // Bytes are up; hand the destination the file's provenance so
-                // it names and audits the copy without a re-hash. Best effort:
-                // failure is reported but the upload stands.
-                try {
-                  const payload = await readFileMetaWithRepoHead(
-                    localBase,
-                    f.path,
-                  );
-                  if (payload)
-                    await sendFileMeta(dest, f.path, payload, signal);
-                } catch (err) {
-                  if (signal.aborted) throw err;
-                  fail(
-                    `meta ${f.path} → ${dest}`,
-                    err instanceof Error ? err.message : String(err),
-                  );
-                }
-                filesDone++;
-                fileDone = f.size;
-                emit();
-              } catch (err) {
-                if (signal.aborted) throw err;
-                fail(
-                  `upload ${f.path} → ${dest}`,
-                  err instanceof Error ? err.message : String(err),
-                );
-              }
-            }
-            continue;
-          }
-
-          // Cold dest, remote source → have the source peer copy its own local
-          // files into the shared cold-storage mount. The bytes never transit
-          // this host: the peer reads from its local disk and writes to cold
-          // storage directly (a local copy), instead of us proxying a multi-GB
-          // stream that can outrun a slower cold-storage mount and exhaust
-          // memory. (Assumes cold storage is shared/mounted across peers, like
-          // the cold→local path above.)
-          if (destIsCold && srcIsRemote) {
-            const totalBytes = groupFiles.reduce((s, f) => s + f.size, 0);
-            fileTotal = totalBytes;
-            fileDone = 0;
-            resetFilePhase();
-            emit();
-
-            logger.info(
-              `[copy] local→cold on ${source}: ${groupFiles.length} file(s)`,
-            );
-            let res: Response;
-            try {
-              res = await fetch(
-                `http://${source}/api/v1/cold-storage/from-local`,
-                {
-                  method: 'POST',
-                  headers: {'Content-Type': 'application/json'},
-                  body: JSON.stringify({files: groupFiles.map((f) => f.path)}),
-                  signal,
-                },
-              );
-            } catch (err) {
-              if (signal.aborted) throw err;
-              fail(
-                `local→cold on ${source}`,
-                err instanceof Error ? err.message : String(err),
-              );
-              continue;
-            }
-            if (!res.ok || !res.body) {
-              fail(`local→cold on ${source}`, `HTTP ${res.status}`);
-              continue;
-            }
-
-            const reader = res.body.getReader();
-            const dec = new TextDecoder();
-            let buf = '';
-            const baseBytesDone = bytesDone;
-            const baseFilesDone = filesDone;
-            let succeeded: string[] = [];
-            let peerErrors: string[] = [];
-            try {
-              for (;;) {
-                const {done, value} = await reader.read();
-                if (done) break;
-                buf += dec.decode(value, {stream: true});
-                const lines = buf.split('\n');
-                buf = lines.pop() ?? '';
-                for (const line of lines) {
-                  if (!line.trim()) continue;
-                  const p = JSON.parse(line) as {
-                    bytesDone: number;
-                    filesDone: number;
-                    succeeded?: string[];
-                    errors?: string[];
-                  };
-                  fileDone = p.bytesDone;
-                  bytesDone = baseBytesDone + p.bytesDone;
-                  filesDone = baseFilesDone + p.filesDone;
-                  if (p.succeeded) succeeded = p.succeeded;
-                  if (p.errors) peerErrors = p.errors;
-                  emit();
-                }
-              }
-            } catch (err) {
-              if (signal.aborted) throw err;
-              fail(
-                `local→cold on ${source}`,
-                err instanceof Error ? err.message : String(err),
-              );
-              continue;
-            }
-            // Only the files the peer confirmed reaching cold storage are safe
-            // for a delete-after-copy to remove.
-            for (const f of succeeded) coldDone.add(f);
-            for (const e of peerErrors) {
-              errors.push(`${source} → cold-storage: ${e}`);
-            }
-            if (peerErrors.length > 0) emit();
-            continue;
-          }
-
-          // Remaining cases write to this machine (cold storage or local peer).
-          const destBase = destIsCold ? coldBase : localBase;
-          for (const f of groupFiles) {
-            const dst = resolveWithin(destBase, f.path);
-            if (!dst) {
-              fail(`${source} → ${dest}: ${f.path}`, 'invalid dest path');
-              continue;
-            }
-
-            try {
-              await fsp.mkdir(nodePath.dirname(dst), {recursive: true});
-
-              fileTotal = f.size;
-              fileDone = 0;
-              resetFilePhase();
-              emit();
-              await new Promise((r) => setTimeout(r, 0));
-
-              if (srcIsCold || srcIsLocalPeer) {
-                const srcBase = srcIsCold ? coldBase : localBase;
-                const src = resolveWithin(srcBase, f.path)!;
-                logger.info(`[copy] ${source} → ${dest}: ${f.path}`);
-
-                // Resume an interrupted earlier copy: skip the prefix already
-                // at the destination when it hash-matches the source's same
-                // region. The shared core (also used by copyFileWithMeta) owns
-                // the resume + stream; the hooks drive this route's phased
-                // progress reporting.
-                phase = 'verifying';
-                emit();
-                let verified = false;
-                let nextVerifyEmit = 0;
-                let nextEmitAt = 0;
-                await streamCopyResumable(src, dst, {
-                  signal,
-                  onVerify: (done, total) => {
-                    verified = true;
-                    verifyDone = done;
-                    verifyTotal = total;
-                    if (done >= nextVerifyEmit) {
-                      nextVerifyEmit = done + EMIT_INTERVAL;
-                      emit();
-                    }
-                  },
-                  onResume: (offset) => {
+                } else if (event.kind === 'progress') {
+                  if (phase === 'verifying' || (sawVerify && resume === null)) {
                     phase = 'copying';
-                    if (verified) {
-                      resume = offset > 0 ? 'resumed' : 'from-start';
-                      emit();
-                    }
-                    if (offset > 0) {
-                      fileDone = offset;
-                      bytesDone += offset;
-                      emit();
-                    }
-                    nextEmitAt = fileDone + EMIT_INTERVAL;
-                  },
-                  onChunk: (n) => {
-                    fileDone += n;
-                    bytesDone += n;
-                    if (fileDone >= nextEmitAt) {
-                      nextEmitAt = fileDone + EMIT_INTERVAL;
-                      emit();
-                    }
-                  },
-                });
-
-                // Bytes are down; carry the file's provenance so the
-                // destination names and audits it without a re-hash. Best
-                // effort: a meta failure is reported but the copy stands.
-                try {
-                  await propagateFileMeta(srcBase, destBase, f.path);
-                } catch (err) {
-                  fail(
-                    `meta ${source} → ${dest}: ${f.path}`,
-                    err instanceof Error ? err.message : String(err),
-                  );
+                    resume = event.done > 0 ? 'resumed' : 'from-start';
+                  }
+                  bytesDone += event.done - fileDone;
+                  fileDone = event.done;
+                  emit();
+                } else if (event.kind === 'done') {
+                  result = event.result as CopyResult;
+                } else if (event.kind === 'error') {
+                  throw new Error(event.message);
                 }
-              } else {
-                // Unreachable: every remote source is handled above (pushed by
-                // the source peer to cold storage or to the destination peer).
-                // Guard so an unforeseen combo fails loudly rather than falling
-                // back to pulling the file here and OOMing on a slow sink.
-                fail(
-                  `${source} → ${dest}: ${f.path}`,
-                  'unsupported source/destination combination',
-                );
-                continue;
               }
+            } finally {
+              signal.removeEventListener('abort', cancel);
+            }
+            if (result === null) throw new Error('job ended without a result');
+            if (result.resumedFrom > 0 && result.resumedFrom < fileTotal) {
+              logger.info(
+                `[copy] resumed ${f.path} at ${result.resumedFrom}/${fileTotal} bytes`,
+              );
+            }
 
-              filesDone++;
-              fileDone = f.size;
-              if (destIsCold) coldDone.add(f.path);
-              emit();
+            // Bytes are down; carry the file's provenance so the destination
+            // names and audits it without a re-hash. Best effort: a meta
+            // failure is reported but the copy stands.
+            try {
+              await propagateFileMeta(leg.srcSite, leg.dstSite, f.path);
             } catch (err) {
               if (signal.aborted) throw err;
               fail(
-                `${source} → ${dest}: ${f.path}`,
+                `meta ${f.from} → ${dest}: ${f.path}`,
                 err instanceof Error ? err.message : String(err),
               );
             }
+
+            filesDone++;
+            fileDone = f.size;
+            if (dest === 'cold-storage') coldDone.add(f.path);
+            emit();
+          } catch (err) {
+            if (signal.aborted) throw err;
+            fail(
+              `${f.from} → ${dest}: ${f.path}`,
+              err instanceof Error ? err.message : String(err),
+            );
           }
         }
       }
@@ -694,7 +379,8 @@ export async function POST(req: Request) {
       // Delete sources after a successful cold-storage copy — but only files
       // that actually reached cold storage this run, so a failed copy never
       // takes its source with it. (Skipped files were already present at the
-      // destination, hence excluded here.)
+      // destination, hence excluded here.) The delete is the same
+      // sidecar-and-husk cleanup the delete API runs, local or remote alike.
       if (deleteAfterCopy && toColdStorage) {
         const bySource = new Map<string, SourceFile[]>();
         for (const f of allFiles) {
@@ -706,22 +392,20 @@ export async function POST(req: Request) {
         }
         for (const [source, srcFiles] of bySource) {
           try {
-            if (source === localPeerAddr) {
-              for (const f of srcFiles) {
-                await fsp.rm(resolveWithin(localBase, f.path)!, {force: true});
-              }
-            } else {
-              logger.info(
-                `[copy] delete ${srcFiles.length} file(s) from ${source}`,
-              );
-              const res = await fetch(`http://${source}/api/v1/local-models`, {
-                method: 'DELETE',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({files: srcFiles.map((f) => f.path)}),
-                signal,
-              });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            logger.info(
+              `[copy] delete ${srcFiles.length} file(s) from ${source}`,
+            );
+            const peerStorage = storageForPeer(source);
+            const deleted: string[] = [];
+            for (const f of srcFiles) {
+              signal.throwIfAborted();
+              await deleteFileWithMeta(peerStorage, 'models', f.path);
+              deleted.push(f.path);
             }
+            // A model dir stripped of its last weight takes its support
+            // files (config/tokenizer/…) with it — they belong to the
+            // deleted weights.
+            await cleanupWeightlessModelDirs(peerStorage, 'models', deleted);
           } catch (err) {
             if (signal.aborted) throw err;
             fail(
