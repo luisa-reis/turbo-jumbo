@@ -19,9 +19,7 @@ peer config. The spec records the decisions and progress:
 time. A peer that runs only an agent still needs the host to answer
 its models table, downloads and audits through `HttpStorage` (today
 those ask the peer's app), and `site.ts`'s transitional string arm
-goes when the last caller passes a real site. On the way: Lemonade's
-bind mounts when the agent runs in LXC (see the spec's open
-questions).
+goes when the last caller passes a real site.
 
 ## Keep the standalone build from tracing the repo root
 

@@ -462,11 +462,13 @@ on the host.
   lifetime-bearing inventory a remote walk needs belongs to the agent and
   lands with `HttpStorage`.
 
+- **Shared mounts already cover Lemonade beside an agent.** The model
+  directories are shared mounts presented identically to the host and
+  its containers — how the fleet runs today — so an agent in LXC and a
+  Lemonade on the host see the same cache and extra-models directories
+  with nothing extra to bind-mount.
+
 ## Open questions
 
-- **Lemonade's mounts.** If Lemonade runs on the host and the agent in
-  LXC, the container needs its cache and extra-models directories
-  bind-mounted.
-
-(Authorization is decided above: one bearer token per agent, carried
-by the control host.)
+None right now: authorization and Lemonade's mounts are settled under
+Decided.
