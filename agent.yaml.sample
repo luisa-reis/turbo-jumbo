@@ -27,3 +27,9 @@ roots:
   models: /mnt/models/turbo-jumbo
   cold: /mnt/cold-storage
   lemonade: /mnt/models/lemonade
+
+# How long a full-root inventory may answer from cache, in milliseconds.
+# Mutations through the agent invalidate it immediately; the TTL only bounds
+# staleness against writers the agent can't see (another machine on a shared
+# mount, a user's shell). 0 disables. Optional; default 5000.
+# list_ttl_ms: 5000

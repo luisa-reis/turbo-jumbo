@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::config::RootsConfig;
 use crate::error::AgentError;
@@ -21,6 +22,16 @@ pub struct LocalStorage {
     // other half — identical in-flight walks sharing one traversal — is a
     // pure optimization and deliberately not ported yet.)
     dtype_memo: Mutex<HashMap<Root, HashMap<PathBuf, MemoEntry>>>,
+    // The lifetime-bearing inventory cache the design assigns to the agent:
+    // a full-root tolerant walk, served for up to `list_ttl` — which is what
+    // makes the host's remote scans usable. Every mutation through the agent
+    // drops the root's entry at once, so the TTL only bounds staleness
+    // against writers the agent can't see (another machine on a shared
+    // mount, a user's shell). Scoped, strict and per-job walks bypass it:
+    // "couldn't look" must never answer from memory, and a download's
+    // progress poll wants the disk, not the cache.
+    list_cache: Mutex<HashMap<(Root, bool), CachedList>>,
+    list_ttl: Duration,
 }
 
 #[derive(Clone)]
@@ -28,6 +39,11 @@ struct MemoEntry {
     size: u64,
     mtime_ms: f64,
     dtype: String,
+}
+
+struct CachedList {
+    at: Instant,
+    entries: Arc<Vec<FileEntry>>,
 }
 
 /// Node's stat.mtimeMs: seconds*1000 + nanoseconds/1e6, as f64.
@@ -42,11 +58,23 @@ fn tolerable(e: &std::io::Error, strict: bool) -> bool {
 }
 
 impl LocalStorage {
-    pub fn new(roots: RootsConfig) -> Self {
+    pub fn new(roots: RootsConfig, list_ttl: Duration) -> Self {
         LocalStorage {
             roots,
             dtype_memo: Mutex::new(HashMap::new()),
+            list_cache: Mutex::new(HashMap::new()),
+            list_ttl,
         }
+    }
+
+    /// Drop the root's cached inventories: something under it changed, or is
+    /// about to. Public because the byte endpoints and jobs mutate outside
+    /// the verbs here.
+    pub fn invalidate_root(&self, root: Root) {
+        self.list_cache
+            .lock()
+            .unwrap()
+            .retain(|(r, _), _| *r != root);
     }
 
     pub fn root_dir(&self, root: Root) -> Result<&Path, AgentError> {
@@ -66,6 +94,14 @@ impl LocalStorage {
         under: Option<&str>,
         opts: ListOptions,
     ) -> Result<Vec<FileEntry>, AgentError> {
+        let cacheable = under.is_none() && !opts.strict && !self.list_ttl.is_zero();
+        if cacheable {
+            if let Some(hit) = self.list_cache.lock().unwrap().get(&(root, opts.dtype)) {
+                if hit.at.elapsed() < self.list_ttl {
+                    return Ok(hit.entries.as_ref().clone());
+                }
+            }
+        }
         let base = self.root_dir(root)?.to_path_buf();
         let dir = match under {
             Some(u) => resolve_ref(&base, u).map_err(AgentError::internal)?,
@@ -94,6 +130,15 @@ impl LocalStorage {
                 all.insert(root, seen);
             }
         }
+        if cacheable {
+            self.list_cache.lock().unwrap().insert(
+                (root, opts.dtype),
+                CachedList {
+                    at: Instant::now(),
+                    entries: Arc::new(out.clone()),
+                },
+            );
+        }
         Ok(out)
     }
 
@@ -119,6 +164,7 @@ impl LocalStorage {
             )));
         }
         let full = self.resolve(r)?;
+        self.invalidate_root(r.root);
         if let Some(parent) = full.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -127,7 +173,9 @@ impl LocalStorage {
     }
 
     pub fn mkdir(&self, r: &Ref) -> Result<(), AgentError> {
-        fs::create_dir_all(self.resolve(r)?)?;
+        let full = self.resolve(r)?;
+        self.invalidate_root(r.root);
+        fs::create_dir_all(full)?;
         Ok(())
     }
 
@@ -285,6 +333,9 @@ fn remove_all_force(full: &Path) -> Result<(), std::io::Error> {
 impl LocalStorage {
     pub fn remove(&self, refs: &[Ref], prune: bool) -> Result<(), AgentError> {
         for r in refs {
+            self.invalidate_root(r.root);
+        }
+        for r in refs {
             let full = self.resolve(r)?;
             remove_all_force(&full)?;
             if prune {
@@ -295,6 +346,8 @@ impl LocalStorage {
     }
 
     pub fn mv(&self, from: &Ref, to: &Ref) -> Result<(), AgentError> {
+        self.invalidate_root(from.root);
+        self.invalidate_root(to.root);
         let src = self.resolve(from)?;
         let dst = self.resolve(to)?;
         if let Some(parent) = dst.parent() {
@@ -315,6 +368,7 @@ impl LocalStorage {
     }
 
     pub fn copy(&self, from: &Ref, to: &Ref) -> Result<(), AgentError> {
+        self.invalidate_root(to.root);
         let src = self.resolve(from)?;
         let dst = self.resolve(to)?;
         if let Some(parent) = dst.parent() {
@@ -330,6 +384,11 @@ impl LocalStorage {
         dry_run: bool,
     ) -> Result<Vec<LinkOutcome>, AgentError> {
         let mut out = Vec::new();
+        if !dry_run {
+            for (_, at) in links {
+                self.invalidate_root(at.root);
+            }
+        }
         for (target, at) in links {
             let link_path = self.resolve(at)?;
             let target_path = self.resolve(target)?;
@@ -371,5 +430,96 @@ impl LocalStorage {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_roots() -> (RootsConfig, PathBuf) {
+        let base = std::env::temp_dir().join(format!(
+            "tj-storage-rs-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let models = base.join("models");
+        fs::create_dir_all(&models).unwrap();
+        (
+            RootsConfig {
+                models: Some(models.clone()),
+                cold: None,
+                lemonade: None,
+            },
+            models,
+        )
+    }
+
+    fn list_len(s: &LocalStorage) -> usize {
+        s.list(Root::Models, None, ListOptions::default())
+            .unwrap()
+            .len()
+    }
+
+    #[test]
+    fn a_full_walk_is_cached_until_a_mutation_or_the_ttl() {
+        let (roots, models) = tmp_roots();
+        let s = LocalStorage::new(roots, Duration::from_secs(60));
+        fs::write(models.join("a.gguf"), "a").unwrap();
+        assert_eq!(list_len(&s), 1);
+        // A writer the agent can't see: within the TTL, the cache answers.
+        fs::write(models.join("b.gguf"), "b").unwrap();
+        assert_eq!(list_len(&s), 1);
+        // A mutation through the agent drops the cache at once.
+        s.write(
+            &Ref {
+                root: Root::Models,
+                path: "c.gguf".into(),
+            },
+            b"c",
+        )
+        .unwrap();
+        assert_eq!(list_len(&s), 3);
+        fs::remove_dir_all(models.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn scoped_and_strict_walks_bypass_the_cache() {
+        let (roots, models) = tmp_roots();
+        let s = LocalStorage::new(roots, Duration::from_secs(60));
+        fs::create_dir_all(models.join("sub")).unwrap();
+        assert_eq!(list_len(&s), 1); // fills the cache
+        fs::write(models.join("sub/x.gguf"), "x").unwrap();
+        // The scoped walk sees the new file; the cached full walk does not.
+        let under = s
+            .list(Root::Models, Some("sub"), ListOptions::default())
+            .unwrap();
+        assert_eq!(under.len(), 1);
+        assert_eq!(list_len(&s), 1);
+        // A strict walk reads the disk too — and never fills the cache.
+        let strict = s
+            .list(
+                Root::Models,
+                None,
+                ListOptions {
+                    strict: true,
+                    dtype: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(strict.len(), 2);
+        fs::remove_dir_all(models.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn ttl_zero_disables_the_cache() {
+        let (roots, models) = tmp_roots();
+        let s = LocalStorage::new(roots, Duration::ZERO);
+        fs::write(models.join("a.gguf"), "a").unwrap();
+        assert_eq!(list_len(&s), 1);
+        fs::write(models.join("b.gguf"), "b").unwrap();
+        assert_eq!(list_len(&s), 2);
+        fs::remove_dir_all(models.parent().unwrap()).unwrap();
     }
 }

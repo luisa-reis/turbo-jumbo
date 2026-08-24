@@ -21,7 +21,7 @@ pub enum EntryKind {
     Symlink,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub path: String,

@@ -19,10 +19,9 @@ reference retired; deployment is a release binary plus a systemd
 user unit (deploy/tj-agent.service), no container. Step 4 is under
 way: the peer views (models, cold, disk usage, deletes, monitor,
 version), downloads and audits already run over `HttpStorage` for a peer
-with an `agent_address` — leaving
-the agent-side inventory cache that makes remote walks cheap, and
-`site.ts`'s transitional string arm once the last caller passes a
-real site.
+with an `agent_address` — and the agent caches full-root inventories
+(list_ttl_ms) so those remote scans stay cheap — leaving `site.ts`'s
+transitional string arm once the last caller passes a real site.
 
 ## Keep the standalone build from tracing the repo root
 

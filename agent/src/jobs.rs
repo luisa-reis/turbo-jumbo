@@ -74,6 +74,12 @@ fn copy_job(
     mv: bool,
     tx: &NdjsonSender,
 ) -> Result<(), String> {
+    // Before and not after: the job may run for minutes, and a cached
+    // inventory from before it started would outlive its TTL mid-flight.
+    storage.invalidate_root(to.root);
+    if mv {
+        storage.invalidate_root(from.root);
+    }
     let src = storage.resolve(from).map_err(|e| e.message)?;
     let dst = storage.resolve(to).map_err(|e| e.message)?;
     if let Some(parent) = dst.parent() {
@@ -152,7 +158,9 @@ fn copy_job(
         }
         let stop = storage.root_dir(from.root).map_err(|e| e.message)?;
         crate::prune::prune_empty_dirs(&src, stop).map_err(|e| e.to_string())?;
+        storage.invalidate_root(from.root);
     }
+    storage.invalidate_root(to.root);
     tx.blocking_json(&JobEvent::Done {
         result: serde_json::to_value(CopyResult {
             resumed_from: offset,
@@ -492,6 +500,7 @@ pub async fn run_download_job(
             return;
         }
     };
+    storage.invalidate_root(into.root);
 
     let mut cmd = tokio::process::Command::new("hf");
     cmd.arg("download").arg(&repo_id);
@@ -572,6 +581,8 @@ pub async fn run_download_job(
     };
     let _ = stderr_task.await;
     let output = stdout_task.await.unwrap_or_default();
+    // The files landed while any pre-spawn inventory could still be fresh.
+    storage.invalidate_root(into.root);
     match status {
         Ok(status) => {
             use std::os::unix::process::ExitStatusExt;

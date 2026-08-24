@@ -29,7 +29,10 @@ impl AppState {
     pub fn new(config: AgentConfig) -> Arc<Self> {
         Arc::new(AppState {
             token: config.token,
-            storage: Arc::new(LocalStorage::new(config.roots)),
+            storage: Arc::new(LocalStorage::new(
+                config.roots,
+                std::time::Duration::from_millis(config.list_ttl_ms),
+            )),
         })
     }
 }

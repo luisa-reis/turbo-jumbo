@@ -508,6 +508,17 @@ last caller passes a real site. `lib/config` stays on the host.
   no agent branch at all. What remains asks nothing of a peer's app
   any more: an agent_address peer is fully driven from the host.
 
+- The agent-side inventory cache. A full-root tolerant walk answers
+  from memory for up to `list_ttl_ms` (default 5 s; 0 disables):
+  every mutation through the agent — verbs, receive, jobs — drops the
+  root's entry at once, so the TTL only bounds staleness against
+  writers the agent cannot see, like another machine on the shared
+  cold mount or a user's shell. Scoped, strict and mid-download walks
+  bypass it: "couldn't look" must never answer from memory, and a
+  download's progress poll wants the disk. This is what makes the
+  host's remote scans — the models table, the monitor's transition
+  scan — cheap enough to live on.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

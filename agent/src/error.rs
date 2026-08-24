@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 
 pub const ERROR_CODE_HEADER: &str = "x-tj-error-code";
 
+#[derive(Debug)]
 pub struct AgentError {
     pub status: StatusCode,
     pub message: String,

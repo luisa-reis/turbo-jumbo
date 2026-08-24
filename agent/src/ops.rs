@@ -298,6 +298,7 @@ pub async fn receive(
         e.status = StatusCode::BAD_REQUEST;
         e
     })?;
+    storage.invalidate_root(r.root);
     if let Some(parent) = full.parent() {
         tokio::fs::create_dir_all(parent)
             .await

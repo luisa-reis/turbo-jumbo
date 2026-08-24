@@ -14,7 +14,18 @@ use crate::refs::Root;
 pub struct AgentConfig {
     pub port: u16,
     pub token: Option<String>,
+    /// How long a full-root inventory may answer from cache, in
+    /// milliseconds. Every mutation through the agent invalidates it
+    /// immediately; the TTL only bounds staleness against writers the agent
+    /// cannot see — another machine on a shared mount, a user's shell.
+    /// 0 disables caching. Default 5000.
+    #[serde(default = "default_list_ttl_ms")]
+    pub list_ttl_ms: u64,
     pub roots: RootsConfig,
+}
+
+fn default_list_ttl_ms() -> u64 {
+    5000
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +101,10 @@ mod tests {
         assert_eq!(cfg.token.as_deref(), Some("t"));
         assert!(cfg.roots.models.is_some());
         assert!(cfg.roots.cold.is_none());
+        // The inventory-cache TTL defaults on, and 0 is a legal off switch.
+        assert_eq!(cfg.list_ttl_ms, 5000);
+        let cfg = parse("port: 1\nlist_ttl_ms: 0\nroots: {models: /tmp}\n").unwrap();
+        assert_eq!(cfg.list_ttl_ms, 0);
     }
 
     #[test]
