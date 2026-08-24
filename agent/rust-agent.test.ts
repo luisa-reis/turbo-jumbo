@@ -92,7 +92,11 @@ const byPath = (entries: FileEntry[]) =>
  *  mtimes may differ in float detail — everything else must be identical. */
 function expectSameInventory(rust: FileEntry[], ts: FileEntry[]): void {
   const strip = (entries: FileEntry[]) =>
-    byPath(entries).map(({mtimeMs, ...rest}) => rest);
+    byPath(entries).map((entry) => {
+      const rest: Partial<FileEntry> = {...entry};
+      delete rest.mtimeMs;
+      return rest;
+    });
   expect(strip(rust)).toEqual(strip(ts));
   const sortedTs = byPath(ts);
   byPath(rust).forEach((entry, i) => {
@@ -153,9 +157,7 @@ conf('a strict Rust list refuses a truncated inventory', async () => {
   await fsp.mkdir(locked, {recursive: true});
   await fsp.chmod(locked, 0o000);
   try {
-    await expect(
-      remote.list('models', {strict: true}),
-    ).rejects.toThrow();
+    await expect(remote.list('models', {strict: true})).rejects.toThrow();
     const tolerant = await remote.list('models');
     expect(tolerant.some((e) => e.path === 'org/locked')).toBe(true);
   } finally {
@@ -185,9 +187,9 @@ conf('the small-file cap holds at both ends', async () => {
     nodePath.join(models, 'big.gguf'),
     Buffer.alloc(MAX_SMALL_FILE + 1),
   );
-  await expect(
-    remote.read({root: 'models', path: 'big.gguf'}),
-  ).rejects.toThrow(/small files only/);
+  await expect(remote.read({root: 'models', path: 'big.gguf'})).rejects.toThrow(
+    /small files only/,
+  );
   // A hand-rolled over-cap write dies at the agent, mid-stream, with 413.
   const res = await fetch(`${url}/write`, {
     method: 'POST',
@@ -306,7 +308,9 @@ conf('link creates, replaces, keeps, skips — and honors dry runs', async () =>
   const own = {root: 'lemonade', path: 'extra/m/own.gguf'} as const;
   await remote.write(own, bytes('the user put this here'));
   expect(
-    await remote.link([{target: {root: 'models', path: 'right.gguf'}, at: own}]),
+    await remote.link([
+      {target: {root: 'models', path: 'right.gguf'}, at: own},
+    ]),
   ).toEqual(['skipped']);
   expect(text(await remote.read(own))).toBe('the user put this here');
 });
@@ -379,58 +383,66 @@ async function drain(handle: JobHandle): Promise<JobEvent[]> {
   return out;
 }
 
-conf('a copy job runs on the Rust agent, streaming progress to done', async () => {
-  const {remote, models, cold} = await rustAgent('secret');
-  const payload = Buffer.alloc(2 * 1024 * 1024 + 123, 9);
-  await fsp.writeFile(nodePath.join(models, 'w.gguf'), payload);
-  const events = await drain(
-    await remote.start({
-      kind: 'copy',
-      from: {root: 'models', path: 'w.gguf'},
-      to: {root: 'cold', path: 'org/repo/w.gguf'},
-    }),
-  );
-  expect(events.at(-1)).toEqual({
-    kind: 'done',
-    result: {resumedFrom: 0, size: payload.length},
-  });
-  const progress = events.filter((e) => e.kind === 'progress');
-  expect(progress.at(-1)).toEqual({
-    kind: 'progress',
-    done: payload.length,
-    total: payload.length,
-  });
-  expect(await fsp.readFile(nodePath.join(cold, 'org/repo/w.gguf'))).toEqual(
-    payload,
-  );
-});
+conf(
+  'a copy job runs on the Rust agent, streaming progress to done',
+  async () => {
+    const {remote, models, cold} = await rustAgent('secret');
+    const payload = Buffer.alloc(2 * 1024 * 1024 + 123, 9);
+    await fsp.writeFile(nodePath.join(models, 'w.gguf'), payload);
+    const events = await drain(
+      await remote.start({
+        kind: 'copy',
+        from: {root: 'models', path: 'w.gguf'},
+        to: {root: 'cold', path: 'org/repo/w.gguf'},
+      }),
+    );
+    expect(events.at(-1)).toEqual({
+      kind: 'done',
+      result: {resumedFrom: 0, size: payload.length},
+    });
+    const progress = events.filter((e) => e.kind === 'progress');
+    expect(progress.at(-1)).toEqual({
+      kind: 'progress',
+      done: payload.length,
+      total: payload.length,
+    });
+    expect(await fsp.readFile(nodePath.join(cold, 'org/repo/w.gguf'))).toEqual(
+      payload,
+    );
+  },
+);
 
-conf('a Rust copy job resumes a verified partial, reporting the wait', async () => {
-  const {remote, models, cold} = await rustAgent('secret');
-  const payload = Buffer.from('0123456789abcdef'.repeat(4096));
-  await fsp.writeFile(nodePath.join(models, 'w.gguf'), payload);
-  await fsp.mkdir(nodePath.join(cold, 'x'), {recursive: true});
-  await fsp.writeFile(
-    nodePath.join(cold, 'x/w.gguf'),
-    payload.subarray(0, 10000),
-  );
-  const events = await drain(
-    await remote.start({
-      kind: 'copy',
-      from: {root: 'models', path: 'w.gguf'},
-      to: {root: 'cold', path: 'x/w.gguf'},
-    }),
-  );
-  expect(events.at(-1)).toEqual({
-    kind: 'done',
-    result: {resumedFrom: 10000, size: payload.length},
-  });
-  // Both hashed regions feed the verify counter, so it closes at twice
-  // the partial's size — the same arithmetic the TS job reports.
-  const verify = events.filter((e) => e.kind === 'verify');
-  expect(verify.at(-1)).toEqual({kind: 'verify', done: 20000, total: 20000});
-  expect(await fsp.readFile(nodePath.join(cold, 'x/w.gguf'))).toEqual(payload);
-});
+conf(
+  'a Rust copy job resumes a verified partial, reporting the wait',
+  async () => {
+    const {remote, models, cold} = await rustAgent('secret');
+    const payload = Buffer.from('0123456789abcdef'.repeat(4096));
+    await fsp.writeFile(nodePath.join(models, 'w.gguf'), payload);
+    await fsp.mkdir(nodePath.join(cold, 'x'), {recursive: true});
+    await fsp.writeFile(
+      nodePath.join(cold, 'x/w.gguf'),
+      payload.subarray(0, 10000),
+    );
+    const events = await drain(
+      await remote.start({
+        kind: 'copy',
+        from: {root: 'models', path: 'w.gguf'},
+        to: {root: 'cold', path: 'x/w.gguf'},
+      }),
+    );
+    expect(events.at(-1)).toEqual({
+      kind: 'done',
+      result: {resumedFrom: 10000, size: payload.length},
+    });
+    // Both hashed regions feed the verify counter, so it closes at twice
+    // the partial's size — the same arithmetic the TS job reports.
+    const verify = events.filter((e) => e.kind === 'verify');
+    expect(verify.at(-1)).toEqual({kind: 'verify', done: 20000, total: 20000});
+    expect(await fsp.readFile(nodePath.join(cold, 'x/w.gguf'))).toEqual(
+      payload,
+    );
+  },
+);
 
 conf('a Rust move-copy prunes what it empties, .cache included', async () => {
   const {remote, local, models, cold} = await rustAgent('secret');
@@ -457,17 +469,20 @@ conf('a Rust move-copy prunes what it empties, .cache included', async () => {
   expect(await local.list('models')).toEqual([]);
 });
 
-conf('a Rust copy job of a missing source ends in error, not a hang', async () => {
-  const {remote} = await rustAgent('secret');
-  const events = await drain(
-    await remote.start({
-      kind: 'copy',
-      from: {root: 'models', path: 'nope.gguf'},
-      to: {root: 'cold', path: 'nope.gguf'},
-    }),
-  );
-  expect(events.at(-1)?.kind).toBe('error');
-});
+conf(
+  'a Rust copy job of a missing source ends in error, not a hang',
+  async () => {
+    const {remote} = await rustAgent('secret');
+    const events = await drain(
+      await remote.start({
+        kind: 'copy',
+        from: {root: 'models', path: 'nope.gguf'},
+        to: {root: 'cold', path: 'nope.gguf'},
+      }),
+    );
+    expect(events.at(-1)?.kind).toBe('error');
+  },
+);
 
 conf('a send travels Rust agent to Rust agent', async () => {
   const a = await rustAgent('token-a');
@@ -544,70 +559,91 @@ conf('an empty file still comes to exist at the far end', async () => {
   expect((await fsp.stat(nodePath.join(b.models, 'empty.gguf'))).size).toBe(0);
 });
 
-conf('the TS and Rust agents interoperate on send, both directions', async () => {
-  // The mixed fleet in one test: the reference implementation and the
-  // production one, each sending into the other's receive endpoint.
-  const {startAgent} = await import('@/agent/server');
-  const rust = await rustAgent('rust-token');
-  const base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'tj-ts-agent-'));
-  made.push(base);
-  const tsModels = nodePath.join(base, 'models');
-  await fsp.mkdir(tsModels);
-  const tsAgent = startAgent({
-    port: 0,
-    token: 'ts-token',
-    roots: {models: tsModels},
-  });
-  try {
-    const tsUrl = `http://127.0.0.1:${tsAgent.port}/api/v1/storage`;
-    const tsRemote = createHttpStorage({url: tsUrl, token: 'ts-token'});
-    const payload = Buffer.alloc(300_000, 3);
-
-    // TS → Rust.
-    await fsp.writeFile(nodePath.join(tsModels, 'from-ts.gguf'), payload);
-    const tsSend = await drain(
-      await tsRemote.start({
-        kind: 'send',
-        from: {root: 'models', path: 'from-ts.gguf'},
-        to: {
-          agent: rust.url,
-          token: 'rust-token',
-          ref: {root: 'models', path: 'from-ts.gguf'},
-        },
-      }),
-    );
-    expect(tsSend.at(-1)).toEqual({
-      kind: 'done',
-      result: {resumedFrom: 0, size: payload.length},
+conf(
+  'the TS and Rust agents interoperate on send, both directions',
+  async () => {
+    // The mixed fleet in one test: the reference implementation and the
+    // production one, each sending into the other's receive endpoint.
+    // The TS side is the same lib handlers the full app mounts, on a socket —
+    // what the retired agent/server.ts was.
+    const {handleAgentRequest} = await import('@/lib/storage/agent-handlers');
+    const rust = await rustAgent('rust-token');
+    const base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'tj-ts-agent-'));
+    made.push(base);
+    const tsModels = nodePath.join(base, 'models');
+    await fsp.mkdir(tsModels);
+    const roots = {models: tsModels};
+    const ctx = {storage: createLocalStorage(roots), roots};
+    const tsAgent = Bun.serve({
+      port: 0,
+      idleTimeout: 0,
+      fetch: async (req) => {
+        const m = new URL(req.url).pathname.match(
+          /^\/api\/v1\/storage\/([^/]+)$/,
+        );
+        if (!m || req.method !== 'POST') {
+          return new Response('Not found', {status: 404});
+        }
+        if (req.headers.get('authorization') !== 'Bearer ts-token') {
+          return new Response('Unauthorized', {status: 401});
+        }
+        return handleAgentRequest(ctx, m[1], req);
+      },
     });
-    expect(
-      await fsp.readFile(nodePath.join(rust.models, 'from-ts.gguf')),
-    ).toEqual(payload);
+    try {
+      const tsUrl = `http://127.0.0.1:${tsAgent.port}/api/v1/storage`;
+      const tsRemote = createHttpStorage({url: tsUrl, token: 'ts-token'});
+      const payload = Buffer.alloc(300_000, 3);
 
-    // Rust → TS.
-    await fsp.writeFile(nodePath.join(rust.models, 'from-rust.gguf'), payload);
-    const rustSend = await drain(
-      await rust.remote.start({
-        kind: 'send',
-        from: {root: 'models', path: 'from-rust.gguf'},
-        to: {
-          agent: tsUrl,
-          token: 'ts-token',
-          ref: {root: 'models', path: 'from-rust.gguf'},
-        },
-      }),
-    );
-    expect(rustSend.at(-1)).toEqual({
-      kind: 'done',
-      result: {resumedFrom: 0, size: payload.length},
-    });
-    expect(
-      await fsp.readFile(nodePath.join(tsModels, 'from-rust.gguf')),
-    ).toEqual(payload);
-  } finally {
-    tsAgent.stop();
-  }
-});
+      // TS → Rust.
+      await fsp.writeFile(nodePath.join(tsModels, 'from-ts.gguf'), payload);
+      const tsSend = await drain(
+        await tsRemote.start({
+          kind: 'send',
+          from: {root: 'models', path: 'from-ts.gguf'},
+          to: {
+            agent: rust.url,
+            token: 'rust-token',
+            ref: {root: 'models', path: 'from-ts.gguf'},
+          },
+        }),
+      );
+      expect(tsSend.at(-1)).toEqual({
+        kind: 'done',
+        result: {resumedFrom: 0, size: payload.length},
+      });
+      expect(
+        await fsp.readFile(nodePath.join(rust.models, 'from-ts.gguf')),
+      ).toEqual(payload);
+
+      // Rust → TS.
+      await fsp.writeFile(
+        nodePath.join(rust.models, 'from-rust.gguf'),
+        payload,
+      );
+      const rustSend = await drain(
+        await rust.remote.start({
+          kind: 'send',
+          from: {root: 'models', path: 'from-rust.gguf'},
+          to: {
+            agent: tsUrl,
+            token: 'ts-token',
+            ref: {root: 'models', path: 'from-rust.gguf'},
+          },
+        }),
+      );
+      expect(rustSend.at(-1)).toEqual({
+        kind: 'done',
+        result: {resumedFrom: 0, size: payload.length},
+      });
+      expect(
+        await fsp.readFile(nodePath.join(tsModels, 'from-rust.gguf')),
+      ).toEqual(payload);
+    } finally {
+      void tsAgent.stop(true);
+    }
+  },
+);
 
 conf('a download job refuses a spec it cannot make safe', async () => {
   const {remote} = await rustAgent('secret');

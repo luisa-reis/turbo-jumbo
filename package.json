@@ -15,7 +15,7 @@
     "test": "bun test",
     "docker:build": "bin/docker-build.sh",
     "tj": "bun run cli/index.ts",
-    "agent": "bun run agent/index.ts"
+    "agent": "cargo run --release --manifest-path agent/Cargo.toml"
   },
   "dependencies": {
     "@astryxdesign/cli": "0.3.0",

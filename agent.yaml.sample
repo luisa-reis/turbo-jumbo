@@ -1,11 +1,17 @@
-# Configuration for the standalone storage agent (bun run agent). Copy to
-# agent.yaml next to where the agent runs, or point TJ_AGENT_CONFIG at it.
+# Configuration for the storage agent (tj-agent). Copy to agent.yaml next to
+# where the agent runs, or point TJ_AGENT_CONFIG at it.
 #
 # The agent serves the storage protocol for this machine's model disks and
-# knows nothing else — no peer list, no UI. On the control host, point the
-# matching peer entry at it with agent_address/agent_token in config.yaml.
+# knows nothing else — no peer list, no UI. Build it with
+# `cargo build --release` in agent/ (the binary lands at
+# agent/target/release/tj-agent; `bun run agent` wraps cargo run for dev).
+# On the control host, point the matching peer entry at it with
+# agent_address/agent_token in config.yaml. Downloads shell out to the `hf`
+# CLI, so a downloading agent's environment needs hf on PATH plus HF_TOKEN /
+# Xet setup — see deploy/tj-agent.service.
 
-# Port to listen on.
+# Port to listen on. (0 picks a free port and announces it on the startup
+# line — how the conformance tests run the binary.)
 port: 3900
 
 # Bearer token every request must present. Optional, but run without one only
@@ -21,6 +27,3 @@ roots:
   models: /mnt/models/turbo-jumbo
   cold: /mnt/cold-storage
   lemonade: /mnt/models/lemonade
-
-# Both agents read this same file: the Rust binary (tj-agent, the production
-# one — cargo build --release in agent/) and the TS reference (bun run agent).

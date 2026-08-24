@@ -374,16 +374,14 @@ Done:
 
 Remaining call sites:
 
-None. Step 3 is complete. What remains of the migration: the
-production agent in Rust (see Decided — the TS agent stands as
-reference until parity), and step 4 — cutting peers over to thin
-agents one at a time (`agent_address` in their peer entries), which
-needs the host to answer a peer's models table, downloads and audits
-through `HttpStorage` where today it asks the peer's app, plus the
-lifetime-bearing inventory cache in the agent that makes those remote
-walks usable — and retiring `lib/storage/site.ts`'s transitional
-string arm when the last caller passes a real site. `lib/config`
-stays on the host.
+None. Steps 1–3 are complete, the Rust agent included. What remains is
+step 4 — cutting peers over to thin agents one at a time
+(`agent_address` in their peer entries), which needs the host to answer
+a peer's models table, downloads and audits through `HttpStorage`
+where today it asks the peer's app, plus the lifetime-bearing
+inventory cache in the agent that makes those remote walks usable —
+and retiring `lib/storage/site.ts`'s transitional string arm when the
+last caller passes a real site. `lib/config` stays on the host.
 
 ### Where step 3 has got to
 
@@ -448,8 +446,19 @@ stays on the host.
   object. Exercised over real sockets in tests: the verbs, 401s for a
   missing or wrong token, streamed hashes, and an agent-to-agent send
   with resume — the design's end state in miniature.
-  (That TS agent now stands as the reference implementation; the
-  production agent is Rust — see Decided.)
+  (It served as the reference implementation until the Rust agent
+  reached parity, then retired.)
+
+- The Rust agent, complete. Every op and job kind, landed slice by
+  slice, each gated on the conformance suite
+  (`agent/rust-agent.test.ts`) that spawns the compiled binary on real
+  sockets and holds it to `createLocalStorage`'s answers — closing
+  with the TS reference and the Rust binary sending into each other's
+  receive endpoints, both directions, byte-identical at rest. With
+  parity reached the TS agent retired (`agent/*.ts` gone; the lib
+  handlers stay, serving the full app's own `/api/v1/storage`).
+  Deployment is bare metal by decision: a release binary and a
+  systemd user unit (`deploy/tj-agent.service`), no container.
 
 ## Decided
 

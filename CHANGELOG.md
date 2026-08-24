@@ -11,13 +11,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **The groundwork for thin storage agents.** A machine can run
-  `bun run agent` — just the storage protocol over its model disks,
-  behind a bearer token (`agent.yaml.sample`) — and a peer entry can
-  point transfers and conflict checks at it with
-  `agent_address`/`agent_token` in `config.yaml`. The full cutover (a
-  peer running only an agent, no app) is still to come: the models
-  table and downloads still ask the peer's app.
+- **A thin storage agent, in Rust.** A machine can serve its model
+  disks with `tj-agent` — a single small binary speaking just the
+  storage protocol, behind a bearer token (`agent.yaml.sample`),
+  built with `cargo build --release` in `agent/` and run bare (a
+  systemd user unit ships in `deploy/tj-agent.service`; no
+  container). Point the peer's entry at it with
+  `agent_address`/`agent_token` in `config.yaml`, and transfers and
+  conflict checks drive the agent. The full cutover (a peer running
+  only an agent, no app) is still to come: the models table and
+  downloads still ask the peer's app.
 
 - **Deploy without a container.** `bin/deploy.sh` builds Next's standalone
   bundle, ships it over rsync as a new release under `~/tj/releases/` on the
