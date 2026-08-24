@@ -1,10 +1,5 @@
-import {
-  config,
-  localPeer,
-  localModelsDir,
-  coldStorageDir,
-  lemonadeDir,
-} from '@/lib/config';
+import {coldStorageSite, localModelsSite} from '@/lib/storage/storage-instance';
+import {config, localPeer, localModelsDir, lemonadeDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {scanModels, annotateColdStorage} from '@/lib/models/models';
@@ -13,10 +8,7 @@ import {
   cleanupWeightlessModelDirs,
   deleteFileWithMeta,
 } from '@/lib/storage/delete-file';
-import {
-  isUnconfiguredRoot,
-  storageForPeer,
-} from '@/lib/storage/peer-storage';
+import {isUnconfiguredRoot, storageForPeer} from '@/lib/storage/peer-storage';
 import {storage} from '@/lib/storage/storage-instance';
 import nodePath from 'path';
 
@@ -44,9 +36,9 @@ export async function GET(
 
   if (peer === localPeer) {
     logger.debug(`[peers] fetch models from ${peer.name} (local)`);
-    let models = await scanModels(localModelsDir, lemonadeDir);
-    if (coldStorageDir)
-      models = await annotateColdStorage(models, coldStorageDir);
+    let models = await scanModels(localModelsSite, lemonadeDir);
+    if (coldStorageSite)
+      models = await annotateColdStorage(models, coldStorageSite);
     logger.debug(`[peers] ${peer.name} returned ${models.length} model(s)`);
     return Response.json(models);
   }

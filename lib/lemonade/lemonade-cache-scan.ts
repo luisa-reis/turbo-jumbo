@@ -1,4 +1,5 @@
 import {scanModels} from '@/lib/models/models';
+import {dirSite} from '@/lib/storage/site';
 import type {Model} from '@/lib/models/model-types';
 import {LEMONADE_SIDES, type LemonadeSide} from '@/lib/lemonade/lemonade-sides';
 
@@ -31,7 +32,7 @@ export async function scanLemonadeCache(
 ): Promise<CachedModel[]> {
   const scans = await Promise.all(
     LEMONADE_SIDES.map(async (side) =>
-      (await scanModels(sides[side])).map((m) => ({...m, side})),
+      (await scanModels(dirSite(sides[side]))).map((m) => ({...m, side})),
     ),
   );
   return scans.flat();

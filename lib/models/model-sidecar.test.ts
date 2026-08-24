@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {existsSync, promises as fsp} from 'fs';
 import os from 'os';
@@ -179,14 +180,14 @@ test('writeModelSidecar then readModelSidecar round-trips', async () => {
     repoId: 'org/repo',
     files: [entry({path: 'a.gguf', computedSize: 10})],
   };
-  await writeModelSidecar(base, 'org/repo', model);
-  expect(await readModelSidecar(base, 'org/repo')).toEqual(model);
+  await writeModelSidecar(dirSite(base), 'org/repo', model);
+  expect(await readModelSidecar(dirSite(base), 'org/repo')).toEqual(model);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('readModelSidecar returns null when absent', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
-  expect(await readModelSidecar(base, 'org/repo')).toBeNull();
+  expect(await readModelSidecar(dirSite(base), 'org/repo')).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -194,52 +195,54 @@ test('upsertFileMeta inserts then merges entries, serialized under concurrency',
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
   await Promise.all([
     upsertFileMeta(
-      base,
+      dirSite(base),
       'org/repo',
       'org/repo',
       entry({path: 'a.gguf', computedSize: 1}),
     ),
     upsertFileMeta(
-      base,
+      dirSite(base),
       'org/repo',
       'org/repo',
       entry({path: 'b.gguf', computedSize: 2}),
     ),
   ]);
-  const model = await readModelSidecar(base, 'org/repo');
+  const model = await readModelSidecar(dirSite(base), 'org/repo');
   expect(model?.files.map((f) => f.path).sort()).toEqual(['a.gguf', 'b.gguf']);
   expect(model?.modelUrl).toBe('https://huggingface.co/org/repo');
 
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'a.gguf', computedSize: 1, computedSha256: 'h'}),
   );
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'a.gguf', computedSize: 1, computedSha256: ''}),
   );
-  expect((await readFileMeta(base, 'org/repo', 'a.gguf'))?.computedSha256).toBe(
-    'h',
-  );
+  expect(
+    (await readFileMeta(dirSite(base), 'org/repo', 'a.gguf'))?.computedSha256,
+  ).toBe('h');
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('readFileMeta returns the entry as a TjMeta with modelUrl, or null', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'a.gguf', sourceCommit: 'c'}),
   );
-  const meta = await readFileMeta(base, 'org/repo', 'a.gguf');
+  const meta = await readFileMeta(dirSite(base), 'org/repo', 'a.gguf');
   expect(meta?.modelUrl).toBe('https://huggingface.co/org/repo');
   expect(meta?.sourceCommit).toBe('c');
-  expect(await readFileMeta(base, 'org/repo', 'missing.gguf')).toBeNull();
+  expect(
+    await readFileMeta(dirSite(base), 'org/repo', 'missing.gguf'),
+  ).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -267,12 +270,12 @@ test('metaToEntry drops modelUrl and sets the path key', () => {
 test('readFileMetaByPath finds a flat file via its model dir, walking up', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'sub/a.gguf', sourceCommit: 'c'}),
   );
-  const meta = await readFileMetaByPath(base, 'org/repo/sub/a.gguf');
+  const meta = await readFileMetaByPath(dirSite(base), 'org/repo/sub/a.gguf');
   expect(meta?.sourceCommit).toBe('c');
   expect(meta?.modelUrl).toBe('https://huggingface.co/org/repo');
   await fsp.rm(base, {recursive: true, force: true});
@@ -281,42 +284,62 @@ test('readFileMetaByPath finds a flat file via its model dir, walking up', async
 test('readFileMetaByPath finds a hub-cache file by its in-repo key', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'models--org--repo',
     'org/repo',
     entry({path: 'a.gguf', sourceCommit: 'r'}),
   );
   const rel = 'models--org--repo/snapshots/abc/a.gguf';
-  expect((await readFileMetaByPath(base, rel))?.sourceCommit).toBe('r');
+  expect((await readFileMetaByPath(dirSite(base), rel))?.sourceCommit).toBe(
+    'r',
+  );
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('readFileMetaByPath returns null when no model sidecar is found', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
-  expect(await readFileMetaByPath(base, 'org/repo/a.gguf')).toBeNull();
+  expect(await readFileMetaByPath(dirSite(base), 'org/repo/a.gguf')).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('removeFileMeta drops one entry, deleting the sidecar when it empties', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
-  await upsertFileMeta(base, 'org/repo', 'org/repo', entry({path: 'a.gguf'}));
-  await upsertFileMeta(base, 'org/repo', 'org/repo', entry({path: 'b.gguf'}));
-  await removeFileMeta(base, 'org/repo', 'a.gguf');
+  await upsertFileMeta(
+    dirSite(base),
+    'org/repo',
+    'org/repo',
+    entry({path: 'a.gguf'}),
+  );
+  await upsertFileMeta(
+    dirSite(base),
+    'org/repo',
+    'org/repo',
+    entry({path: 'b.gguf'}),
+  );
+  await removeFileMeta(dirSite(base), 'org/repo', 'a.gguf');
   expect(
-    (await readModelSidecar(base, 'org/repo'))?.files.map((f) => f.path),
+    (await readModelSidecar(dirSite(base), 'org/repo'))?.files.map(
+      (f) => f.path,
+    ),
   ).toEqual(['b.gguf']);
-  await removeFileMeta(base, 'org/repo', 'b.gguf');
-  expect(await readModelSidecar(base, 'org/repo')).toBeNull();
+  await removeFileMeta(dirSite(base), 'org/repo', 'b.gguf');
+  expect(await readModelSidecar(dirSite(base), 'org/repo')).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('upsertFileMeta records a model-level repoCommit/date when repoHead is given', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
-  await upsertFileMeta(base, 'org/repo', 'org/repo', entry({path: 'a.gguf'}), {
-    id: '047e0663',
-    date: '2026-01-04T15:37:54.000Z',
-  });
-  const model = await readModelSidecar(base, 'org/repo');
+  await upsertFileMeta(
+    dirSite(base),
+    'org/repo',
+    'org/repo',
+    entry({path: 'a.gguf'}),
+    {
+      id: '047e0663',
+      date: '2026-01-04T15:37:54.000Z',
+    },
+  );
+  const model = await readModelSidecar(dirSite(base), 'org/repo');
   expect(model?.repoCommit).toBe('047e0663');
   expect(model?.repoCommitDate).toBe('2026-01-04T15:37:54.000Z');
   await fsp.rm(base, {recursive: true, force: true});
@@ -324,12 +347,23 @@ test('upsertFileMeta records a model-level repoCommit/date when repoHead is give
 
 test('upsertFileMeta preserves an existing repoCommit when later upserts omit repoHead', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
-  await upsertFileMeta(base, 'org/repo', 'org/repo', entry({path: 'a.gguf'}), {
-    id: '047e0663',
-  });
+  await upsertFileMeta(
+    dirSite(base),
+    'org/repo',
+    'org/repo',
+    entry({path: 'a.gguf'}),
+    {
+      id: '047e0663',
+    },
+  );
   // A later write with no repoHead (a move or legacy migration) must not wipe it.
-  await upsertFileMeta(base, 'org/repo', 'org/repo', entry({path: 'b.gguf'}));
-  const model = await readModelSidecar(base, 'org/repo');
+  await upsertFileMeta(
+    dirSite(base),
+    'org/repo',
+    'org/repo',
+    entry({path: 'b.gguf'}),
+  );
+  const model = await readModelSidecar(dirSite(base), 'org/repo');
   expect(model?.repoCommit).toBe('047e0663');
   expect(model?.files.map((f) => f.path)).toEqual(['a.gguf', 'b.gguf']);
   await fsp.rm(base, {recursive: true, force: true});
@@ -371,21 +405,23 @@ test('deriveModelCommit is undefined when no file has a commit', () => {
 test('upsertFileMeta derives the model sourceCommit from its files', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-ms-'));
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'a', sourceCommit: 'abc'}),
   );
-  expect((await readModelSidecar(base, 'org/repo'))?.sourceCommit).toBe('abc');
+  expect(
+    (await readModelSidecar(dirSite(base), 'org/repo'))?.sourceCommit,
+  ).toBe('abc');
   await upsertFileMeta(
-    base,
+    dirSite(base),
     'org/repo',
     'org/repo',
     entry({path: 'b', sourceCommit: 'def'}),
   );
-  expect((await readModelSidecar(base, 'org/repo'))?.sourceCommit).toBe(
-    MIXED_COMMIT,
-  );
+  expect(
+    (await readModelSidecar(dirSite(base), 'org/repo'))?.sourceCommit,
+  ).toBe(MIXED_COMMIT);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -393,17 +429,21 @@ test('modelRevision defaults to main and setModelRevision round-trips a pin', as
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
   const repoId = 'FastFlowLM/Gemma3-1B-NPU2';
   // No sidecar yet: main.
-  expect(await modelRevision(base, repoId)).toBe('main');
+  expect(await modelRevision(dirSite(base), repoId)).toBe('main');
 
   // Setting a pin creates the sidecar and round-trips.
-  await setModelRevision(base, repoId, repoId, 'v0.9.20-faster-q4-1');
-  expect(await modelRevision(base, repoId)).toBe('v0.9.20-faster-q4-1');
-  expect((await readModelSidecar(base, repoId))?.repoId).toBe(repoId);
+  await setModelRevision(dirSite(base), repoId, repoId, 'v0.9.20-faster-q4-1');
+  expect(await modelRevision(dirSite(base), repoId)).toBe(
+    'v0.9.20-faster-q4-1',
+  );
+  expect((await readModelSidecar(dirSite(base), repoId))?.repoId).toBe(repoId);
 
   // Re-downloading from main clears the pin (absent = main), keeping the file.
-  await setModelRevision(base, repoId, repoId, 'main');
-  expect(await modelRevision(base, repoId)).toBe('main');
-  expect((await readModelSidecar(base, repoId))?.revision).toBeUndefined();
+  await setModelRevision(dirSite(base), repoId, repoId, 'main');
+  expect(await modelRevision(dirSite(base), repoId)).toBe('main');
+  expect(
+    (await readModelSidecar(dirSite(base), repoId))?.revision,
+  ).toBeUndefined();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -416,33 +456,36 @@ test('modelRevision refuses a revision unsafe for URL interpolation', async () =
     revision: 'evil?x=1#frag',
     files: [],
   };
-  await writeModelSidecar(base, repoId, model);
-  expect(await modelRevision(base, repoId)).toBe('main');
+  await writeModelSidecar(dirSite(base), repoId, model);
+  expect(await modelRevision(dirSite(base), repoId)).toBe('main');
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('setModelRevision records a file scope and clears it when absent', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
   const repoId = 'FastFlowLM/scoped';
-  await setModelRevision(base, repoId, repoId, 'v1-tag', [
+  await setModelRevision(dirSite(base), repoId, repoId, 'v1-tag', [
     'config.json',
     'model.q4nx',
   ]);
-  expect(await modelFileScope(base, repoId)).toEqual(
+  expect(await modelFileScope(dirSite(base), repoId)).toEqual(
     new Set(['config.json', 'model.q4nx']),
   );
   // A later unscoped download clears the scope.
-  await setModelRevision(base, repoId, repoId, 'main');
-  expect(await modelFileScope(base, repoId)).toBeNull();
+  await setModelRevision(dirSite(base), repoId, repoId, 'main');
+  expect(await modelFileScope(dirSite(base), repoId)).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('removing the last file entry keeps a pinned/scoped sidecar alive', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
   const repoId = 'FastFlowLM/pinned';
-  await setModelRevision(base, repoId, repoId, 'v1-tag', ['a.q4nx', 'b.json']);
+  await setModelRevision(dirSite(base), repoId, repoId, 'v1-tag', [
+    'a.q4nx',
+    'b.json',
+  ]);
   await upsertFileMeta(
-    base,
+    dirSite(base),
     repoId,
     repoId,
     entry({
@@ -450,31 +493,34 @@ test('removing the last file entry keeps a pinned/scoped sidecar alive', async (
       originUrl: 'https://huggingface.co/x/blob/v1-tag/b.json',
     }),
   );
-  await removeFileMeta(base, repoId, 'b.json');
+  await removeFileMeta(dirSite(base), repoId, 'b.json');
   // No file entries remain, but the pin and scope survive.
-  const sidecar = await readModelSidecar(base, repoId);
+  const sidecar = await readModelSidecar(dirSite(base), repoId);
   expect(sidecar?.files).toEqual([]);
   expect(sidecar?.revision).toBe('v1-tag');
-  expect(await modelFileScope(base, repoId)).toEqual(
+  expect(await modelFileScope(dirSite(base), repoId)).toEqual(
     new Set(['a.q4nx', 'b.json']),
   );
 
   // An unpinned sidecar still disappears with its last entry.
   const plain = 'org/plain';
-  await upsertFileMeta(base, plain, plain, entry({path: 'x.gguf'}));
-  await removeFileMeta(base, plain, 'x.gguf');
-  expect(await readModelSidecar(base, plain)).toBeNull();
+  await upsertFileMeta(dirSite(base), plain, plain, entry({path: 'x.gguf'}));
+  await removeFileMeta(dirSite(base), plain, 'x.gguf');
+  expect(await readModelSidecar(dirSite(base), plain)).toBeNull();
   await fsp.rm(base, {recursive: true, force: true});
 });
 
 test('a pinned partial re-download keeps the recorded file scope', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-sidecar-'));
   const repoId = 'FastFlowLM/keep-scope';
-  await setModelRevision(base, repoId, repoId, 'v1-tag', ['a.q4nx', 'b.json']);
+  await setModelRevision(dirSite(base), repoId, repoId, 'v1-tag', [
+    'a.q4nx',
+    'b.json',
+  ]);
   // A later pinned download without an explicit scope (the audit's partial
   // "Download missing files") must not widen the model to the whole tree.
-  await setModelRevision(base, repoId, repoId, 'v1-tag');
-  expect(await modelFileScope(base, repoId)).toEqual(
+  await setModelRevision(dirSite(base), repoId, repoId, 'v1-tag');
+  expect(await modelFileScope(dirSite(base), repoId)).toEqual(
     new Set(['a.q4nx', 'b.json']),
   );
   await fsp.rm(base, {recursive: true, force: true});
@@ -493,7 +539,9 @@ test('the sidecar helpers accept a storage site in place of a base path', async 
   await upsertFileMeta(site, 'org/repo', 'org/repo', entry({path: 'a.gguf'}));
   // Written through the site, readable through either arm.
   expect((await readModelSidecar(site, 'org/repo'))?.files.length).toBe(1);
-  expect((await readModelSidecar(base, 'org/repo'))?.files.length).toBe(1);
+  expect(
+    (await readModelSidecar(dirSite(base), 'org/repo'))?.files.length,
+  ).toBe(1);
 
   await removeFileMeta(site, 'org/repo', 'a.gguf');
   expect(await readModelSidecar(site, 'org/repo')).toBeNull();
@@ -508,9 +556,9 @@ test('findModelSidecarDirs through a site keeps the no-nesting rule', async () =
     storage: createLocalStorage({models: base}),
     root: 'models',
   } as const;
-  await writeModelSidecar(base, 'org/outer', model({}));
-  await writeModelSidecar(base, 'org/outer/inner', model({}));
-  await writeModelSidecar(base, 'other/solo', model({}));
+  await writeModelSidecar(dirSite(base), 'org/outer', model({}));
+  await writeModelSidecar(dirSite(base), 'org/outer/inner', model({}));
+  await writeModelSidecar(dirSite(base), 'other/solo', model({}));
 
   const dirs = await findModelSidecarDirs(site);
   // A model dir doesn't nest another: the inner sidecar is not reported.

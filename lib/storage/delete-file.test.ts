@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {existsSync, promises as fsp} from 'fs';
 import os from 'os';
@@ -61,7 +62,7 @@ test('deletes the file and drops its sidecar entry, keeping the rest', async () 
   );
   // The other file and the sidecar (now only listing b) survive.
   expect(existsSync(path.join(base, 'org/repo/b.gguf'))).toBe(true);
-  const sidecar = await readModelSidecar(base, 'org/repo');
+  const sidecar = await readModelSidecar(dirSite(base), 'org/repo');
   expect(sidecar?.files.map((f) => f.path)).toEqual(['b.gguf']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -110,7 +111,7 @@ test('a nested file prunes emptied subdirectories but not shared ones', async ()
   // sub/dir and sub are emptied and pruned; the model dir keeps top.gguf.
   expect(existsSync(path.join(base, 'org/nested/sub'))).toBe(false);
   expect(existsSync(path.join(base, 'org/nested/top.gguf'))).toBe(true);
-  const sidecar = await readModelSidecar(base, 'org/nested');
+  const sidecar = await readModelSidecar(dirSite(base), 'org/nested');
   expect(sidecar?.files.map((f) => f.path)).toEqual(['top.gguf']);
   await fsp.rm(base, {recursive: true, force: true});
 });

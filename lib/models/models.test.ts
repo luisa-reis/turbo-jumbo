@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -86,7 +87,7 @@ test('scanModels groups a file by its sidecar org/repo when present', async () =
     computedSha256: 's',
   });
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual([
     'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
   ]);
@@ -98,7 +99,7 @@ test('scanModels tracks a FastFlowLM .q4nx weight, labeled by its format', async
   await writeFile(base, 'FastFlowLM/Gemma3-1B-NPU2/model.q4nx');
   await writeFile(base, 'FastFlowLM/Gemma3-1B-NPU2/config.json', '{}');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['FastFlowLM/Gemma3-1B-NPU2']);
   const f = models[0].files[0];
   expect(f.isSplit).toBe(false);
@@ -120,7 +121,7 @@ test('scanModels names a model from its dir tjmodel.json, over the path repo', a
     }),
   );
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Cool-Model']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -131,11 +132,17 @@ test('scanModels skips the configured lemonade directory', async () => {
   await writeFile(base, 'lemonade/Hidden-Q4_K_M.gguf');
 
   const lemonadePath = path.join(base, 'lemonade');
-  const names = (await scanModels(base, lemonadePath)).map((m) => m.name);
+  const names = (await scanModels(dirSite(base), lemonadePath)).map(
+    (m) => m.name,
+  );
   expect(names).toEqual(['Keep-Me']);
 
   // Without the lemonade path the directory is scanned as usual.
-  const allNames = await (await scanModels(base)).map((m) => m.name).sort();
+  const allNames = await (
+    await scanModels(dirSite(base))
+  )
+    .map((m) => m.name)
+    .sort();
   expect(allNames).toEqual(['Hidden', 'Keep-Me']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -144,7 +151,7 @@ test('scanModels falls back to the filename-derived name without a sidecar', asy
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-scan-'));
   await writeFile(base, 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['Qwen3.6-35B-A3B']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -165,7 +172,11 @@ test('scanModels splits same-filename variants by their sidecar repos', async ()
     });
   }
 
-  const names = await (await scanModels(base)).map((m) => m.name).sort();
+  const names = await (
+    await scanModels(dirSite(base))
+  )
+    .map((m) => m.name)
+    .sort();
   expect(names).toEqual([
     'unsloth/Qwen3.6-35B-A3B-GGUF',
     'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
@@ -184,7 +195,7 @@ test('duplicateBasenames ignores same-named files in different cache repos', asy
     'models--org-b--Other-GGUF/snapshots/r2/model.safetensors',
   );
 
-  const dups = duplicateBasenames(await scanModels(base));
+  const dups = duplicateBasenames(await scanModels(dirSite(base)));
   expect([...dups.keys()]).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -201,7 +212,7 @@ test('duplicateBasenames does not flag diffusers components that share a basenam
     base,
     'stabilityai/sdxl-turbo/vae/diffusion_pytorch_model.fp16.safetensors',
   );
-  expect(duplicateBasenames(await scanModels(base)).size).toBe(0);
+  expect(duplicateBasenames(await scanModels(dirSite(base))).size).toBe(0);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -213,7 +224,7 @@ test('duplicateBasenames does not flag mmproj projectors shared across repos', a
   await writeFile(base, 'unsloth/Model-A-GGUF/weight-Q4_K_M.gguf');
   await writeFile(base, 'sub/weight-Q4_K_M.gguf');
 
-  const dups = duplicateBasenames(await scanModels(base));
+  const dups = duplicateBasenames(await scanModels(dirSite(base)));
   expect([...dups.keys()]).toEqual(['weight-Q4_K_M.gguf']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -225,7 +236,7 @@ test('scanModels names a cache-layout file by its decoded repo id', async () => 
     'models--unsloth--Qwen3-0.6B-GGUF/snapshots/abc123/Qwen3-0.6B-Q4_0.gguf',
   );
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Qwen3-0.6B-GGUF']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -237,7 +248,7 @@ test('scanModels names a sidecar-less flat-layout mmproj by its path repo', asyn
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-scan-'));
   await writeFile(base, 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F16.gguf');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual([
     'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
   ]);
@@ -254,7 +265,7 @@ test('scanModels names a sidecar-less GGUF under <org>/<repo>/ by its path repo'
     'ggml-org/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf',
   );
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['ggml-org/gemma-3-4b-it-GGUF']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -263,7 +274,7 @@ test('scanModels still uses the filename for a loose GGUF (no repo dir)', async 
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-scan-'));
   await writeFile(base, 'gemma-3-4b-it-Q4_K_M.gguf');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['gemma-3-4b-it']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -278,7 +289,7 @@ test('scanModels ignores the cache blobs and refs entries', async () => {
   // A blob file: no model extension, so it must not become its own model.
   await writeFile(base, 'models--unsloth--Qwen3-0.6B-GGUF/blobs/deadbeef');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Qwen3-0.6B-GGUF']);
   expect(models[0].files).toHaveLength(1);
   await fsp.rm(base, {recursive: true, force: true});
@@ -292,7 +303,7 @@ test('scanModels groups sharded safetensors into one split group', async () => {
     await writeFile(base, `${repo}/model-${n}-of-00004.safetensors`);
   }
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Big-Model']);
   const file = models[0].files[0];
   expect(file.isSplit).toBe(true);
@@ -314,7 +325,7 @@ test('scanModels reports a missing safetensors shard', async () => {
     await writeFile(base, `${repo}/model-${n}-of-00004.safetensors`);
   }
 
-  const file = (await scanModels(base))[0].files[0];
+  const file = (await scanModels(dirSite(base)))[0].files[0];
   expect(file.isSplit).toBe(true);
   if (file.isSplit) {
     expect(file.presentShards).toBe(3);
@@ -342,7 +353,7 @@ test('scanModels labels a generic safetensors by its header dtype', async () => 
   await fsp.mkdir(path.dirname(full), {recursive: true});
   await fsp.writeFile(full, safetensorsBytes('BF16'));
 
-  const file = (await scanModels(base))[0].files[0];
+  const file = (await scanModels(dirSite(base)))[0].files[0];
   expect(file.quant).toBe('BF16');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -359,7 +370,7 @@ test('scanModels labels sharded safetensors by the first shard dtype', async () 
     );
   }
 
-  const file = (await scanModels(base))[0].files[0];
+  const file = (await scanModels(dirSite(base)))[0].files[0];
   expect(file.quant).toBe('F16');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -372,7 +383,7 @@ test('scanModels keeps a filename quant token over the header', async () => {
   );
   await fsp.mkdir(path.dirname(full), {recursive: true});
   await fsp.writeFile(full, safetensorsBytes('F32')); // header differs from token
-  const file = (await scanModels(base))[0].files[0];
+  const file = (await scanModels(dirSite(base)))[0].files[0];
   expect(file.quant).toBe('Q4_K_M');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -384,7 +395,7 @@ test('duplicateBasenames flags a root copy and a nested copy of the same file', 
   await writeFile(base, `unsloth/gemma-4-26B-A4B-it-GGUF/${fname}`);
   await writeFile(base, 'unsloth/other-GGUF/other-Q8_0.gguf');
 
-  const dups = duplicateBasenames(await scanModels(base));
+  const dups = duplicateBasenames(await scanModels(dirSite(base)));
   expect([...dups.keys()]).toEqual([fname]);
   expect(dups.get(fname)!.sort()).toEqual([
     fname,
@@ -400,7 +411,7 @@ test('duplicateBasenames lists all three copies of a thrice-duplicated file', as
   await writeFile(base, `a/${fname}`);
   await writeFile(base, `b/c/${fname}`);
 
-  const dups = duplicateBasenames(await scanModels(base));
+  const dups = duplicateBasenames(await scanModels(dirSite(base)));
   expect(dups.get(fname)!.sort()).toEqual([
     fname,
     `a/${fname}`,
@@ -438,7 +449,7 @@ test('duplicateBasenames does not flag same-named files from different repos wit
 
   // Same filename, but different recorded source hashes → different builds from
   // different repos, not duplicates of each other.
-  expect(duplicateBasenames(await scanModels(base)).size).toBe(0);
+  expect(duplicateBasenames(await scanModels(dirSite(base))).size).toBe(0);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -471,7 +482,7 @@ test('duplicateBasenames still flags same-named files that share a source hash',
   await writeRepo('b/Repo-GGUF');
 
   expect(
-    duplicateBasenames(await scanModels(base))
+    duplicateBasenames(await scanModels(dirSite(base)))
       .get(fname)!
       .sort(),
   ).toEqual([`a/Repo-GGUF/${fname}`, `b/Repo-GGUF/${fname}`]);
@@ -483,7 +494,7 @@ test('duplicateBasenames is empty when every filename is unique', async () => {
   await writeFile(base, 'A-Q4_K_M.gguf');
   await writeFile(base, 'sub/B-Q4_K_M.gguf');
 
-  expect(duplicateBasenames(await scanModels(base)).size).toBe(0);
+  expect(duplicateBasenames(await scanModels(dirSite(base))).size).toBe(0);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -493,7 +504,7 @@ test('duplicateBasenames detects colliding split shards but not a lone split gro
   await writeFile(base, 'M-Q4_K_M-00002-of-00002.gguf');
   await writeFile(base, 'sub/M-Q4_K_M-00001-of-00002.gguf');
 
-  const dups = duplicateBasenames(await scanModels(base));
+  const dups = duplicateBasenames(await scanModels(dirSite(base)));
   expect([...dups.keys()]).toEqual(['M-Q4_K_M-00001-of-00002.gguf']);
   expect(dups.get('M-Q4_K_M-00001-of-00002.gguf')!.sort()).toEqual([
     'M-Q4_K_M-00001-of-00002.gguf',
@@ -509,7 +520,7 @@ test('scanModels labels whisper.cpp ggml .bin files as distinct variants', async
   await writeFile(base, 'ggerganov/whisper.cpp/ggml-tiny.bin', 'a');
   await writeFile(base, 'ggerganov/whisper.cpp/ggml-large-v3-turbo.bin', 'bb');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models).toHaveLength(1);
   expect(models[0].name).toBe('ggerganov/whisper.cpp');
   expect(models[0].files.map((f) => f.quant).sort()).toEqual([
@@ -524,7 +535,7 @@ test('scanModels names a flat-layout safetensors by its repo directory', async (
   // Generic filename, no sidecar — the repo lives in the directory.
   await writeFile(base, 'unsloth/Some-Model/model.safetensors');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Some-Model']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -536,7 +547,7 @@ test('scanModels names flat sharded safetensors by repo and groups them', async 
     await writeFile(base, `org/repo/model-${n}-of-00002.safetensors`);
   }
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['org/repo']);
   expect(models[0].files[0].isSplit).toBe(true);
   await fsp.rm(base, {recursive: true, force: true});
@@ -549,7 +560,7 @@ test('scanModels names a flat sidecar-less mmproj by its repo directory', async 
   // a phantom "mmproj" model by the filename fallback.
   await writeFile(base, 'unsloth/Qwen3.6-27B-MTP-GGUF/mmproj-F16.gguf');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name)).toEqual(['unsloth/Qwen3.6-27B-MTP-GGUF']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -559,7 +570,7 @@ test('scanModels keeps sidecar-less mmproj files in separate repos apart', async
   await writeFile(base, 'unsloth/Model-A-GGUF/mmproj-F16.gguf');
   await writeFile(base, 'unsloth/Model-B-GGUF/mmproj-F16.gguf');
 
-  const models = await scanModels(base);
+  const models = await scanModels(dirSite(base));
   expect(models.map((m) => m.name).sort()).toEqual([
     'unsloth/Model-A-GGUF',
     'unsloth/Model-B-GGUF',
@@ -743,7 +754,7 @@ test('scanModels attaches the sidecar summary to a model', async () => {
   );
   await fsp.writeFile(path.join(dir, 'model.gguf'), Buffer.alloc(500));
 
-  const models = await scanModels(root);
+  const models = await scanModels(dirSite(root));
   const m = models.find((x) => x.name === 'org/repo');
   expect(m).toBeDefined();
   expect(m!.sidecar).toBeDefined();
@@ -780,7 +791,9 @@ test('scanModels attaches the raw sidecar files to a model', async () => {
   );
   await fsp.writeFile(path.join(dir, 'model.gguf'), Buffer.alloc(500));
 
-  const m = (await scanModels(root)).find((x) => x.name === 'org/repo');
+  const m = (await scanModels(dirSite(root))).find(
+    (x) => x.name === 'org/repo',
+  );
   expect(m!.sidecarFiles).toBeDefined();
   expect(m!.sidecarFiles!.map((f) => f.path)).toEqual(['model.gguf']);
   expect(m!.sidecarFiles![0].sourceCommit).toBe('abc123');
@@ -796,7 +809,7 @@ test('scanModels leaves sidecar undefined when there is none', async () => {
     Buffer.alloc(10),
   );
 
-  const models = await scanModels(root);
+  const models = await scanModels(dirSite(root));
   expect(models.length).toBeGreaterThan(0);
   expect(models.every((m) => m.sidecar === undefined)).toBe(true);
 
@@ -889,7 +902,7 @@ test('duplicateBasenames does not flag the generic model.q4nx every FLM model ca
     path.join(base, 'FastFlowLM/Qwen3.6-35B-A3B-NPU2', MODEL_SIDECAR_NAME),
     JSON.stringify(sidecar),
   );
-  expect(duplicateBasenames(await scanModels(base)).size).toBe(0);
+  expect(duplicateBasenames(await scanModels(dirSite(base))).size).toBe(0);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -906,7 +919,7 @@ test('scanModels sizes a symlinked weight by its target and flags a dangling one
     path.join(extra, 'Model/Other-Q8_0.gguf'),
   );
 
-  const files = (await scanModels(extra)).flatMap(
+  const files = (await scanModels(dirSite(extra))).flatMap(
     (m) => m.files,
   ) as SingleFile[];
   expect(files.find((f) => f.filename === 'Model-Q4_K_M.gguf')).toMatchObject({
@@ -929,7 +942,10 @@ test('annotateColdStorage flags the files with no copy in the archive', async ()
   await writeFile(local, 'org/repo/B-Q8_0.gguf');
   await writeFile(cold, 'org/repo/A-Q4_K_M.gguf');
 
-  const models = await annotateColdStorage(await scanModels(local), cold);
+  const models = await annotateColdStorage(
+    await scanModels(dirSite(local)),
+    dirSite(cold),
+  );
   const byName = new Map(
     models
       .flatMap((m) => m.files)

@@ -77,7 +77,7 @@ export interface SyncTarget {
 
 const localTarget: SyncTarget = {
   storage,
-  models: localModelsDir ?? '',
+  models: {storage, root: 'models'},
   hasModels: localModelsDir !== undefined,
   hasLemonade:
     lemonadeDir !== undefined && !!(lemonadeBuiltinDir && lemonadeExtraDir),

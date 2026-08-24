@@ -1,6 +1,5 @@
+import {coldStorageSite, localModelsSite} from '@/lib/storage/storage-instance';
 import {
-  localModelsDir,
-  coldStorageDir,
   lemonadeDir,
   hasColdStorage,
   localModelsPeer,
@@ -14,8 +13,8 @@ import {HomeClient} from '@/components/home/home-client';
 // page and the hard-navigation Lemonade pages (which render it under the
 // already-open download modal).
 export async function HomeView({location}: {location: string}) {
-  const coldModels = await scanModels(coldStorageDir);
-  const localModels = await scanModels(localModelsDir, lemonadeDir);
+  const coldModels = await scanModels(coldStorageSite);
+  const localModels = await scanModels(localModelsSite, lemonadeDir);
   const modelsTableData = getModelsTableData(localModels, coldModels);
   return (
     <HomeClient

@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -53,9 +54,13 @@ async function tmpBases(): Promise<{root: string; src: string; dst: string}> {
 
 test('propagateFileMeta merges into the destination sidecar, keeping dest-only entries', async () => {
   const {root, src, dst} = await tmpBases();
-  await writeModelSidecar(src, 'org/repo', model({files: [entry({})]}));
   await writeModelSidecar(
-    dst,
+    dirSite(src),
+    'org/repo',
+    model({files: [entry({})]}),
+  );
+  await writeModelSidecar(
+    dirSite(dst),
     'org/repo',
     model({
       files: [
@@ -67,9 +72,9 @@ test('propagateFileMeta merges into the destination sidecar, keeping dest-only e
     }),
   );
 
-  await propagateFileMeta(src, dst, 'org/repo/a.gguf');
+  await propagateFileMeta(dirSite(src), dirSite(dst), 'org/repo/a.gguf');
 
-  const after = await readModelSidecar(dst, 'org/repo');
+  const after = await readModelSidecar(dirSite(dst), 'org/repo');
   expect(after?.files.map((f) => f.path).sort()).toEqual(['a.gguf', 'b.gguf']);
   expect(after?.files.find((f) => f.path === 'a.gguf')?.sourceSha256).toBe(
     'aaa',
@@ -86,30 +91,33 @@ test('propagateFileMeta falls back to a legacy sidecar for a stray file', async 
     meta({originUrl: 'https://huggingface.co/org/repo/blob/main/stray.gguf'}),
   );
 
-  await propagateFileMeta(src, dst, 'stray.gguf');
+  await propagateFileMeta(dirSite(src), dirSite(dst), 'stray.gguf');
 
   const after = await readMeta(path.join(dst, 'stray.gguf'));
   expect(after?.sourceSha256).toBe('aaa');
-  expect(await readModelSidecar(dst, 'org/repo')).toBeNull();
+  expect(await readModelSidecar(dirSite(dst), 'org/repo')).toBeNull();
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('propagateFileMeta is a no-op when the source has no provenance', async () => {
   const {root, src, dst} = await tmpBases();
-  await propagateFileMeta(src, dst, 'org/repo/a.gguf');
-  expect(await readModelSidecar(dst, 'org/repo')).toBeNull();
+  await propagateFileMeta(dirSite(src), dirSite(dst), 'org/repo/a.gguf');
+  expect(await readModelSidecar(dirSite(dst), 'org/repo')).toBeNull();
   await fsp.rm(root, {recursive: true, force: true});
 });
 
 test('readFileMetaWithRepoHead carries the source model repoCommit', async () => {
   const {root, src} = await tmpBases();
   await writeModelSidecar(
-    src,
+    dirSite(src),
     'org/repo',
     model({files: [entry({})], repoCommit: 'head1', repoCommitDate: 'd1'}),
   );
 
-  const payload = await readFileMetaWithRepoHead(src, 'org/repo/a.gguf');
+  const payload = await readFileMetaWithRepoHead(
+    dirSite(src),
+    'org/repo/a.gguf',
+  );
   expect(payload?.meta.sourceSha256).toBe('aaa');
   expect(payload?.repoHead).toEqual({id: 'head1', date: 'd1'});
   await fsp.rm(root, {recursive: true, force: true});
@@ -118,18 +126,22 @@ test('readFileMetaWithRepoHead carries the source model repoCommit', async () =>
 test('applyFileMeta sets repoCommit only when the destination has none', async () => {
   const {root, dst} = await tmpBases();
   // Fresh destination: the forwarded head lands.
-  await applyFileMeta(dst, 'org/repo/a.gguf', meta(), {id: 'srchead'});
-  expect((await readModelSidecar(dst, 'org/repo'))?.repoCommit).toBe('srchead');
+  await applyFileMeta(dirSite(dst), 'org/repo/a.gguf', meta(), {id: 'srchead'});
+  expect((await readModelSidecar(dirSite(dst), 'org/repo'))?.repoCommit).toBe(
+    'srchead',
+  );
 
   // Destination already has an observation: a copy must not clobber it.
   const dst2 = path.join(root, 'dst2');
   await writeModelSidecar(
-    dst2,
+    dirSite(dst2),
     'org/repo',
     model({files: [], repoCommit: 'desthead'}),
   );
-  await applyFileMeta(dst2, 'org/repo/a.gguf', meta(), {id: 'srchead'});
-  expect((await readModelSidecar(dst2, 'org/repo'))?.repoCommit).toBe(
+  await applyFileMeta(dirSite(dst2), 'org/repo/a.gguf', meta(), {
+    id: 'srchead',
+  });
+  expect((await readModelSidecar(dirSite(dst2), 'org/repo'))?.repoCommit).toBe(
     'desthead',
   );
   await fsp.rm(root, {recursive: true, force: true});

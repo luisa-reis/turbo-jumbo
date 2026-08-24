@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp, readFileSync} from 'fs';
 import crypto from 'crypto';
@@ -494,13 +495,13 @@ test('moveFileWithMeta relocates the file and carries its provenance, creating d
   await fsp.writeFile(path.join(base, 'M.Q4.gguf'), 'data');
   await writeMeta(path.join(base, 'M.Q4.gguf'), meta); // legacy source sidecar
 
-  await moveFileWithMeta(base, 'M.Q4.gguf', 'o/r/M.Q4.gguf');
+  await moveFileWithMeta(dirSite(base), 'M.Q4.gguf', 'o/r/M.Q4.gguf');
 
   expect(await fsp.readFile(path.join(base, 'o/r/M.Q4.gguf'), 'utf8')).toBe(
     'data',
   );
   // Provenance now lives in the destination model sidecar, read via resolve.
-  expect(await readMetaResolved(base, 'o/r/M.Q4.gguf')).toEqual(meta);
+  expect(await readMetaResolved(dirSite(base), 'o/r/M.Q4.gguf')).toEqual(meta);
   expect(await exists(path.join(base, 'M.Q4.gguf'))).toBe(false);
   // The legacy per-file sidecar at the source is removed, not renamed.
   expect(await readMeta(path.join(base, 'M.Q4.gguf'))).toBeNull();
@@ -515,7 +516,7 @@ test('moveFileWithMeta refuses to overwrite an existing destination', async () =
   await fsp.writeFile(path.join(base, 'o/r/M.Q4.gguf'), 'b');
 
   await expect(
-    moveFileWithMeta(base, 'M.Q4.gguf', 'o/r/M.Q4.gguf'),
+    moveFileWithMeta(dirSite(base), 'M.Q4.gguf', 'o/r/M.Q4.gguf'),
   ).rejects.toThrow();
   // source is left untouched on refusal
   expect(await fsp.readFile(path.join(base, 'M.Q4.gguf'), 'utf8')).toBe('a');
@@ -527,7 +528,7 @@ test('moveFileWithMeta works when there is no sidecar', async () => {
   const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-move-'));
   await fsp.writeFile(path.join(base, 'M.Q4.gguf'), 'data');
 
-  await moveFileWithMeta(base, 'M.Q4.gguf', 'sub/M.Q4.gguf');
+  await moveFileWithMeta(dirSite(base), 'M.Q4.gguf', 'sub/M.Q4.gguf');
 
   expect(await fsp.readFile(path.join(base, 'sub/M.Q4.gguf'), 'utf8')).toBe(
     'data',
@@ -540,7 +541,7 @@ test('moveFileWithMeta rejects a target that escapes the storage root', async ()
   await fsp.writeFile(path.join(base, 'M.Q4.gguf'), 'data');
 
   await expect(
-    moveFileWithMeta(base, 'M.Q4.gguf', '../escape.gguf'),
+    moveFileWithMeta(dirSite(base), 'M.Q4.gguf', '../escape.gguf'),
   ).rejects.toThrow();
 
   await fsp.rm(base, {recursive: true, force: true});
@@ -603,7 +604,7 @@ test('resolveSource resolves a placed file from its repo directory, without sear
 
   try {
     const hf = await resolveSource(
-      base,
+      dirSite(base),
       rel,
       'LFM2-1.2B',
       'LFM2-1.2B-Q4_K_M.gguf',
@@ -653,7 +654,7 @@ test('resolveSource falls back to search when the path-implied repo misses', asy
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(base, rel, 'm2', 'm2.gguf');
+    const hf = await resolveSource(dirSite(base), rel, 'm2', 'm2.gguf');
     expect(hf?.repoId).toBe('found/by-search');
   } finally {
     globalThis.fetch = realFetch;
@@ -697,7 +698,7 @@ test('resolveSource resolves a cache-layout file from its decoded repo', async (
 
   try {
     const out = await resolveSource(
-      base,
+      dirSite(base),
       rel,
       'Qwen3-0.6B',
       'Qwen3-0.6B-Q4_0.gguf',
@@ -748,7 +749,12 @@ test('resolveSource falls back to the sidecar source when inference fails', asyn
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(base, 'GPT.gguf', 'GPT', 'GPT.gguf');
+    const hf = await resolveSource(
+      dirSite(base),
+      'GPT.gguf',
+      'GPT',
+      'GPT.gguf',
+    );
     expect(hf).toEqual({
       repoId: 'Hauhau/Repo',
       branch: 'main',
@@ -823,7 +829,7 @@ test('resolveSource resolves a commit-pinned sidecar source at the branch head',
 
   try {
     const hf = await resolveSource(
-      base,
+      dirSite(base),
       'Pinned.gguf',
       'Pinned',
       'Pinned.gguf',
@@ -858,7 +864,7 @@ test('refreshMetaSource backfills size/sha from the source, keeping the computed
     computedSha256: 'computed',
   });
 
-  await refreshMetaSource(dir, 'm.gguf', {
+  await refreshMetaSource(dirSite(dir), 'm.gguf', {
     repoId: 'o/r',
     branch: 'main',
     repoPath: 'm.gguf',
@@ -889,7 +895,7 @@ test('refreshMetaSource hashes the file when no prior computed sha exists', asyn
   const sha = crypto.createHash('sha256').update(content).digest('hex');
 
   // No sidecar at all: the computed sha must be recomputed from disk.
-  await refreshMetaSource(dir, 'm.gguf', {
+  await refreshMetaSource(dirSite(dir), 'm.gguf', {
     repoId: 'o/r',
     branch: 'main',
     repoPath: 'm.gguf',
@@ -1039,7 +1045,12 @@ test('auditFile still writes a sidecar when the file is unverifiable (no source)
   }) as typeof fetch;
   clearHfCache();
   try {
-    const result = await auditFile(base, rel, 'mystery', 'mystery.gguf');
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      'mystery',
+      'mystery.gguf',
+    );
     expect(result.status).toBe('unverifiable');
     expect(result.hf).toBeUndefined();
     const meta = await readMeta(full);
@@ -1078,7 +1089,14 @@ test('auditFile writes a sidecar for a size-mismatched (incomplete) file', async
   globalThis.fetch = (async () =>
     new Response('nf', {status: 404})) as typeof fetch;
   try {
-    const result = await auditFile(base, rel, '', 'm.gguf', undefined, source);
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      '',
+      'm.gguf',
+      undefined,
+      source,
+    );
     expect(result.status).toBe('incomplete');
     // The failure carries the local file's observed values for the
     // checked-revisions view — hashed despite the size mismatch.
@@ -1158,7 +1176,14 @@ test('auditFile passes a size-mismatched file that matches an earlier revision',
     },
   );
   try {
-    const result = await auditFile(base, rel, '', 'm.gguf', undefined, source);
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      '',
+      'm.gguf',
+      undefined,
+      source,
+    );
     expect(result.status).toBe('pass');
     expect(result.message).toBe('matches earlier revision c1, not the latest');
     expect(result.hf?.commit).toBe('c1');
@@ -1214,7 +1239,14 @@ test('auditFile passes a checksum-mismatched file that matches an earlier revisi
     },
   );
   try {
-    const result = await auditFile(base, rel, '', 'm.gguf', undefined, source);
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      '',
+      'm.gguf',
+      undefined,
+      source,
+    );
     expect(result.status).toBe('pass');
     expect(result.message).toBe('matches earlier revision c1, not the latest');
     expect(result.hf?.commit).toBe('c1');
@@ -1260,7 +1292,14 @@ test('auditFile stays incomplete when no earlier revision matches', async () => 
     },
   );
   try {
-    const result = await auditFile(base, rel, '', 'm.gguf', undefined, source);
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      '',
+      'm.gguf',
+      undefined,
+      source,
+    );
     expect(result.status).toBe('incomplete');
     expect(result.message).toBe('size 12 != expected 100');
     // Every revision that was ruled out is reported, the latest first.
@@ -1371,7 +1410,7 @@ test('auditFile passes an older on-disk version whose sidecar pins an old commit
     {c2: latestEntry, c1: oldEntry},
   );
   try {
-    const result = await auditFile(base, rel, 'm', 'm.gguf');
+    const result = await auditFile(dirSite(base), rel, 'm', 'm.gguf');
     // It matches an older revision — that's a pass, found by walking the
     // branch history from the head, not by trusting the pin as "latest".
     expect(result.status).toBe('pass');
@@ -1428,7 +1467,7 @@ test('auditFile passes a current file whose sidecar pins an outdated commit', as
   const realFetch = globalThis.fetch;
   globalThis.fetch = mockPinnedRepo('h/r5', pin, latestEntry, oldEntry, [], {});
   try {
-    const result = await auditFile(base, rel, 'm', 'm.gguf');
+    const result = await auditFile(dirSite(base), rel, 'm', 'm.gguf');
     // The file IS the current revision: a clean pass against the head, no
     // historical-match note.
     expect(result.status).toBe('pass');
@@ -1467,7 +1506,7 @@ test('auditFile reports SHA256 progress while hashing', async () => {
 
   const events: Array<[number, number]> = [];
   const result = await auditFile(
-    base,
+    dirSite(base),
     rel,
     '',
     'm.gguf',
@@ -1521,7 +1560,7 @@ test('auditFile reports SHA256 progress for the history-walk hash too', async ()
   const events: Array<[number, number]> = [];
   try {
     const result = await auditFile(
-      base,
+      dirSite(base),
       rel,
       '',
       'm.gguf',
@@ -1567,7 +1606,7 @@ test('auditFile persists the resolved source before hashing begins', async () =>
   // can't lose it.
   let duringHash: TjMeta | null = null;
   const result = await auditFile(
-    base,
+    dirSite(base),
     rel,
     '',
     'm.gguf',
@@ -1613,7 +1652,7 @@ test('auditFile preserves a prior hand-set source when resolution fails', async 
     return new Response('nf', {status: 404});
   }) as typeof fetch;
   try {
-    const result = await auditFile(base, rel, 'GPT', 'GPT.gguf');
+    const result = await auditFile(dirSite(base), rel, 'GPT', 'GPT.gguf');
     expect(result.status).toBe('unverifiable');
     // The sidecar still carries everything the failed run couldn't re-derive:
     // the hand-set source and the still-valid computed hash.
@@ -1659,7 +1698,14 @@ test('auditFile verifies against an explicit source without any inference', asyn
     throw new Error('auditFile should not fetch when given a source');
   }) as typeof fetch;
   try {
-    const result = await auditFile(base, rel, '', 'm.gguf', undefined, source);
+    const result = await auditFile(
+      dirSite(base),
+      rel,
+      '',
+      'm.gguf',
+      undefined,
+      source,
+    );
     expect(result.status).toBe('pass');
     const meta = await readMeta(full);
     expect(meta?.sourceCommit).toBe('srccommit');
@@ -1727,7 +1773,7 @@ test('auditFileUpdate: update when the head commit differs from the recorded one
   }) as typeof fetch;
 
   try {
-    const r = await auditFileUpdate(base, rel);
+    const r = await auditFileUpdate(dirSite(base), rel);
     expect(r).toEqual({
       file: rel,
       status: 'update',
@@ -1782,7 +1828,7 @@ test('auditFileUpdate: update omits localCommitDate when the sidecar has none', 
   }) as typeof fetch;
 
   try {
-    const r = await auditFileUpdate(base, rel);
+    const r = await auditFileUpdate(dirSite(base), rel);
     expect(r).toEqual({
       file: rel,
       status: 'update',
@@ -1831,7 +1877,7 @@ test('auditFileUpdate: current when the head commit matches the recorded one', a
     )) as typeof fetch;
 
   try {
-    const r = await auditFileUpdate(base, rel);
+    const r = await auditFileUpdate(dirSite(base), rel);
     expect(r).toEqual({file: rel, status: 'current'});
   } finally {
     globalThis.fetch = realFetch;
@@ -1862,7 +1908,7 @@ test('auditFileUpdate: unknown when HF cannot be reached', async () => {
     new Response('nf', {status: 404})) as typeof fetch;
 
   try {
-    const r = await auditFileUpdate(base, rel);
+    const r = await auditFileUpdate(dirSite(base), rel);
     expect(r).toEqual({file: rel, status: 'unknown'});
   } finally {
     globalThis.fetch = realFetch;
@@ -1880,7 +1926,7 @@ test('auditFileUpdate: null (not checkable) without a sidecar or recorded commit
   await fsp.writeFile(full, 'data');
 
   // No sidecar at all.
-  expect(await auditFileUpdate(base, rel)).toBeNull();
+  expect(await auditFileUpdate(dirSite(base), rel)).toBeNull();
 
   // Sidecar present but no sourceCommit recorded.
   await writeMeta(full, {
@@ -1891,7 +1937,7 @@ test('auditFileUpdate: null (not checkable) without a sidecar or recorded commit
     sourceSha256: 'sha',
     computedSha256: 'sha',
   });
-  expect(await auditFileUpdate(base, rel)).toBeNull();
+  expect(await auditFileUpdate(dirSite(base), rel)).toBeNull();
 
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -1925,7 +1971,7 @@ test('resolveSource pins a hub-cache file to its snapshot revision', async () =>
   }) as typeof fetch;
 
   try {
-    const hf = await resolveSource(base, rel, 'org/repo', 'm.gguf');
+    const hf = await resolveSource(dirSite(base), rel, 'org/repo', 'm.gguf');
     expect(hf?.commit).toBe('abc123');
     expect(hf?.branch).toBe('main');
     expect(hf?.sha256).toBe('beef');
@@ -1953,10 +1999,10 @@ test('readMetaResolved migrates a legacy per-file sidecar into the model sidecar
   };
   await writeMeta(full, meta); // legacy per-file sidecar
 
-  expect(await readMetaResolved(base, rel)).toEqual(meta);
+  expect(await readMetaResolved(dirSite(base), rel)).toEqual(meta);
   // The legacy sidecar is folded into the model sidecar and removed.
   expect(await readMeta(full)).toBeNull();
-  expect(await readMetaResolved(base, rel)).toEqual(meta);
+  expect(await readMetaResolved(dirSite(base), rel)).toEqual(meta);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -2000,7 +2046,7 @@ test('auditFile records the repo HEAD as model-level repoCommit, keeping file-le
 
   try {
     const result = await auditFile(
-      base,
+      dirSite(base),
       rel,
       'o/r',
       'm.gguf',
@@ -2009,7 +2055,7 @@ test('auditFile records the repo HEAD as model-level repoCommit, keeping file-le
     );
     expect(result.status).toBe('pass');
 
-    const model = await readModelSidecar(base, 'o/r');
+    const model = await readModelSidecar(dirSite(base), 'o/r');
     // Model-level: the repo HEAD, matching the HF cache snapshot revision.
     expect(model?.repoCommit).toBe('repohead0663');
     expect(model?.repoCommitDate).toBe('2026-01-04T15:37:54.000Z');

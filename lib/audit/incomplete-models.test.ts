@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect, afterEach} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -44,7 +45,7 @@ test('flags a whole-repo model that has a wrong-size file', async () => {
     {path: 'index.json', size: 96},
   ]);
 
-  expect(await findReposWithInvalidFiles(base)).toEqual([repoId]);
+  expect(await findReposWithInvalidFiles(dirSite(base))).toEqual([repoId]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -55,7 +56,7 @@ test('does not flag a whole-repo model whose files are all valid', async () => {
   mockTree(repoId, [{path: 'model.safetensors', size: 20}]);
   // No sidecar entry → judged on size alone, which matches → present.
 
-  expect(await findReposWithInvalidFiles(base)).toEqual([]);
+  expect(await findReposWithInvalidFiles(dirSite(base))).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -65,7 +66,7 @@ test('skips a self-contained GGUF repo even if a file looks off', async () => {
   // A pure-GGUF repo is excluded before any tree fetch (per-quant audited).
   await writeSized(path.join(base, repoId, 'model-Q4_K_M.gguf'), 10);
 
-  expect(await findReposWithInvalidFiles(base)).toEqual([]);
+  expect(await findReposWithInvalidFiles(dirSite(base))).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -81,7 +82,7 @@ test('does not flag a pick-one ggml .bin repo (whisper.cpp) as incomplete', asyn
     {path: 'README.md', size: 1},
   ]);
   // Like GGUF, the other variants aren't "missing" — it's not incomplete.
-  expect(await findIncompleteRepos(base)).toEqual([]);
+  expect(await findIncompleteRepos(dirSite(base))).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -102,7 +103,7 @@ test('does not flag a Comfy split_files safetensors bundle as incomplete', async
       size: 400,
     },
   ]);
-  expect(await findIncompleteRepos(base)).toEqual([]);
+  expect(await findIncompleteRepos(dirSite(base))).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -120,7 +121,7 @@ test('does not flag a diffusers pipeline with a partial download as incomplete',
     {path: 'unet/diffusion_pytorch_model.safetensors', size: 100},
     {path: 'vae/diffusion_pytorch_model.fp16.safetensors', size: 16},
   ]);
-  expect(await findIncompleteRepos(base)).toEqual([]);
+  expect(await findIncompleteRepos(dirSite(base))).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -133,7 +134,7 @@ test('still flags a whole-repo (onnx) model missing a file as incomplete', async
     {path: 'kokoro-v1.0.onnx', size: 99}, // missing locally
     {path: 'index.json', size: 5}, // missing locally
   ]);
-  expect(await findIncompleteRepos(base)).toEqual([repoId]);
+  expect(await findIncompleteRepos(dirSite(base))).toEqual([repoId]);
   await fsp.rm(base, {recursive: true, force: true});
 });
 
@@ -207,7 +208,7 @@ test('detectMissingExpectedFiles clears stale flags and flags nothing for a diff
     {path: 'model_index.json', size: 6},
   ]);
 
-  const out = await detectMissingExpectedFiles([repoId], base, 'main');
+  const out = await detectMissingExpectedFiles([repoId], dirSite(base), 'main');
   // Nothing flagged — its other packagings/components aren't "missing".
   expect(out).toEqual([]);
   // The stale flag was cleared from the sidecar.
@@ -241,6 +242,6 @@ test('sees nested expected files via a recursive tree and flags a missing one', 
     return new Response('nf', {status: 404});
   }) as typeof fetch;
 
-  expect(await findIncompleteRepos(base)).toEqual([repoId]);
+  expect(await findIncompleteRepos(dirSite(base))).toEqual([repoId]);
   await fsp.rm(base, {recursive: true, force: true});
 });

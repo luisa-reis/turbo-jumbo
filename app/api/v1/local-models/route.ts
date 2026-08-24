@@ -1,6 +1,7 @@
+import {coldStorageSite, localModelsSite} from '@/lib/storage/storage-instance';
 import {NextResponse} from 'next/server';
 import nodePath from 'path';
-import {localModelsDir, coldStorageDir, lemonadeDir} from '@/lib/config';
+import {localModelsDir, lemonadeDir} from '@/lib/config';
 import {
   cleanupWeightlessModelDirs,
   deleteFileWithMeta,
@@ -12,10 +13,10 @@ import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 
 export async function GET(req: Request) {
   logger.trace('[models] list requested');
-  let models = await scanModels(localModelsDir, lemonadeDir);
+  let models = await scanModels(localModelsSite, lemonadeDir);
   const url = new URL(req.url);
-  if (url.searchParams.get('checkColdStorage') === 'true' && coldStorageDir)
-    models = await annotateColdStorage(models, coldStorageDir);
+  if (url.searchParams.get('checkColdStorage') === 'true' && coldStorageSite)
+    models = await annotateColdStorage(models, coldStorageSite);
   logger.trace(`[models] list received: ${models.length} model(s)`);
   return NextResponse.json(models);
 }

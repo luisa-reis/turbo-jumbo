@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -42,47 +43,52 @@ async function fixture(
 
 test('returns the recorded hash when the file matches its sidecar', async () => {
   const base = await fixture();
-  expect(await recordedSha256(base, REL)).toBe(SHA);
+  expect(await recordedSha256(dirSite(base), REL)).toBe(SHA);
 });
 
 test('returns null when the recorded size disagrees with the file on disk', async () => {
   const base = await fixture({recordedSize: 999999});
-  expect(await recordedSha256(base, REL)).toBeNull();
+  expect(await recordedSha256(dirSite(base), REL)).toBeNull();
 });
 
 test('returns null when the file was modified after its sidecar', async () => {
   const base = await fixture();
   const future = new Date(Date.now() + 60_000);
   await fsp.utimes(path.join(base, REL), future, future);
-  expect(await recordedSha256(base, REL)).toBeNull();
+  expect(await recordedSha256(dirSite(base), REL)).toBeNull();
 });
 
 test('returns null when the sidecar recorded no hash', async () => {
   const base = await fixture({sha: ''});
-  expect(await recordedSha256(base, REL)).toBeNull();
+  expect(await recordedSha256(dirSite(base), REL)).toBeNull();
 });
 
 test('returns null when the model has no sidecar', async () => {
   const base = await fixture();
   await fsp.rm(path.join(base, 'org/repo', MODEL_SIDECAR_NAME));
-  expect(await recordedSha256(base, REL)).toBeNull();
+  expect(await recordedSha256(dirSite(base), REL)).toBeNull();
 });
 
 test('returns null when the file is missing', async () => {
   const base = await fixture();
   await fsp.rm(path.join(base, REL));
-  expect(await recordedSha256(base, REL)).toBeNull();
+  expect(await recordedSha256(dirSite(base), REL)).toBeNull();
 });
 
 test('returns null for a path escaping the base directory', async () => {
   const base = await fixture();
-  expect(await recordedSha256(base, '../outside.safetensors')).toBeNull();
+  expect(
+    await recordedSha256(dirSite(base), '../outside.safetensors'),
+  ).toBeNull();
 });
 
 test('recordedSha256 accepts a storage site in place of a base path', async () => {
   const {createLocalStorage} = await import('@/lib/storage/local-storage');
   const base = await fixture();
-  const site = {storage: createLocalStorage({cold: base}), root: 'cold'} as const;
+  const site = {
+    storage: createLocalStorage({cold: base}),
+    root: 'cold',
+  } as const;
   expect(await recordedSha256(site, REL)).toBe(SHA);
   // The same narrow trust: a size mismatch refuses to answer.
   const stale = await fixture({recordedSize: 999});
@@ -91,5 +97,6 @@ test('recordedSha256 accepts a storage site in place of a base path', async () =
     root: 'cold',
   } as const;
   expect(await recordedSha256(staleSite, REL)).toBeNull();
-  for (const b of [base, stale]) await fsp.rm(b, {recursive: true, force: true});
+  for (const b of [base, stale])
+    await fsp.rm(b, {recursive: true, force: true});
 });

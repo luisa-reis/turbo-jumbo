@@ -374,14 +374,13 @@ Done:
 
 Remaining call sites:
 
-None. Steps 1–3 are complete, the Rust agent included. What remains is
-step 4 — cutting peers over to thin agents one at a time
-(`agent_address` in their peer entries), which needs the host to answer
-a peer's models table, downloads and audits through `HttpStorage`
-where today it asks the peer's app, plus the lifetime-bearing
-inventory cache in the agent that makes those remote walks usable —
-and retiring `lib/storage/site.ts`'s transitional string arm when the
-last caller passes a real site. `lib/config` stays on the host.
+None. Steps 1–3 are complete, the Rust agent included, and step 4's
+code is too: every peer view runs over `HttpStorage` for an
+`agent_address` peer, the agent caches full-root inventories, and the
+string arm of `site.ts` is retired. What remains is operational —
+build and deploy `tj-agent` on each storage box and flip its peer
+entry's `agent_address`/`agent_token`, one machine at a time.
+`lib/config` stays on the host.
 
 ### Where step 3 has got to
 
@@ -518,6 +517,15 @@ last caller passes a real site. `lib/config` stays on the host.
   download's progress poll wants the disk. This is what makes the
   host's remote scans — the models table, the monitor's transition
   scan — cheap enough to live on.
+
+- `site.ts`'s string arm is gone. `Site` is just `{storage, root}`;
+  production callers take the real sites storage-instance now exports
+  (localModelsSite / coldStorageSite / lemonadeSite — undefined where
+  a tier isn't configured, so scanning an absent tier still answers
+  empty), and the one legitimate scan-an-arbitrary-directory need —
+  the Lemonade cache's two halves, and tests over temp dirs — goes
+  through an explicit `dirSite()` wrapping a memoized throwaway
+  LocalStorage. `siteStorage()` survives as an identity seam.
 
 ## Decided
 

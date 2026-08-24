@@ -1,4 +1,5 @@
-import {config, localPeer, localModelsDir, lemonadeDir} from '@/lib/config';
+import {localModelsSite} from '@/lib/storage/storage-instance';
+import {config, localPeer, lemonadeDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {findReposWithInvalidFiles} from '@/lib/audit/incomplete-models';
@@ -16,9 +17,9 @@ export async function GET(
   if (!peer) return new Response('Unknown peer', {status: 404});
 
   if (peer === localPeer) {
-    if (!localModelsDir) return Response.json({invalid: []});
+    if (!localModelsSite) return Response.json({invalid: []});
     const invalid = await findReposWithInvalidFiles(
-      localModelsDir,
+      localModelsSite,
       lemonadeDir,
     );
     return Response.json({invalid});

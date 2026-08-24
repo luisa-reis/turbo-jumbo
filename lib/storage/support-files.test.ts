@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -26,7 +27,7 @@ test('expands a whole-repo model with its non-weight support files', async () =>
     'Qwen/Qwen3.6-35B-A3B/config.json': '{}',
     'Qwen/Qwen3.6-35B-A3B/tokenizer.json': '{"a":1}',
   });
-  const extra = await expandSupportFiles(base, [
+  const extra = await expandSupportFiles(dirSite(base), [
     'Qwen/Qwen3.6-35B-A3B/model-00001-of-00002.safetensors',
     'Qwen/Qwen3.6-35B-A3B/model-00002-of-00002.safetensors',
   ]);
@@ -47,7 +48,7 @@ test('never drags along other quants, sidecars, or dot-clutter', async () => {
     'unsloth/repo-GGUF/.cache/huggingface/x': 'c',
     'unsloth/repo-GGUF/notes.txt': 'n',
   });
-  const extra = await expandSupportFiles(base, [
+  const extra = await expandSupportFiles(dirSite(base), [
     'unsloth/repo-GGUF/model-Q4_K_M.gguf',
   ]);
   // The other quant (a weight file), both sidecars (they ride the meta
@@ -60,7 +61,7 @@ test('includes support files in nested subdirectories', async () => {
     'org/onnx-repo/model.safetensors': 'ww',
     'org/onnx-repo/assets/vocab.txt': 'vv',
   });
-  const extra = await expandSupportFiles(base, [
+  const extra = await expandSupportFiles(dirSite(base), [
     'org/onnx-repo/model.safetensors',
   ]);
   expect(extra.map((f) => f.path)).toEqual(['org/onnx-repo/assets/vocab.txt']);
@@ -68,7 +69,7 @@ test('includes support files in nested subdirectories', async () => {
 
 test('ignores paths that escape the base or point at missing dirs', async () => {
   const base = await makeRepo({'org/repo/a.gguf': 'w'});
-  const extra = await expandSupportFiles(base, [
+  const extra = await expandSupportFiles(dirSite(base), [
     '../outside/evil.gguf',
     'org/gone/x.gguf',
   ]);

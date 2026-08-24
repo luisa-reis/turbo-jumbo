@@ -1,4 +1,5 @@
-import {config, localPeer, localModelsDir} from '@/lib/config';
+import {localModelsSite} from '@/lib/storage/storage-instance';
+import {config, localPeer} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {repoFileStatuses} from '@/lib/models/repo-files';
@@ -20,9 +21,10 @@ export async function GET(
     return new Response('Invalid repoId', {status: 400});
 
   if (peer === localPeer) {
-    if (!localModelsDir) return new Response('No local storage', {status: 400});
+    if (!localModelsSite)
+      return new Response('No local storage', {status: 400});
     try {
-      const files = await repoFileStatuses(localModelsDir, repoId);
+      const files = await repoFileStatuses(localModelsSite, repoId);
       return Response.json({files});
     } catch (e) {
       return new Response(e instanceof Error ? e.message : String(e), {

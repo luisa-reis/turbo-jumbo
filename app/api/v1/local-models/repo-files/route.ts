@@ -1,5 +1,5 @@
+import {localModelsSite} from '@/lib/storage/storage-instance';
 import {NextResponse} from 'next/server';
-import {localModelsDir} from '@/lib/config';
 import {repoFileStatuses} from '@/lib/models/repo-files';
 
 const REPO_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -10,9 +10,9 @@ export async function GET(req: Request) {
   const repoId = new URL(req.url).searchParams.get('repoId') ?? '';
   if (!REPO_ID_RE.test(repoId))
     return new Response('Invalid repoId', {status: 400});
-  if (!localModelsDir) return new Response('No local storage', {status: 400});
+  if (!localModelsSite) return new Response('No local storage', {status: 400});
   try {
-    const files = await repoFileStatuses(localModelsDir, repoId);
+    const files = await repoFileStatuses(localModelsSite, repoId);
     return NextResponse.json({files});
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

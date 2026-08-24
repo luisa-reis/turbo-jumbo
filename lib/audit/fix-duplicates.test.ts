@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {promises as fsp} from 'fs';
 import crypto from 'crypto';
@@ -96,7 +97,7 @@ test('discards the invalid copy and moves the valid survivor to the expected pat
   });
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'sub/m.gguf'],
       'm',
       'm.gguf',
@@ -111,7 +112,7 @@ test('discards the invalid copy and moves the valid survivor to the expected pat
     expect(await exists(metaPath(path.join(base, 'sub/m.gguf')))).toBe(false);
     expect(await exists(path.join(base, 'o/r/m.gguf'))).toBe(true);
     // The survivor's sidecar pins the verified revision and computed hash.
-    const meta = await readMetaResolved(base, 'o/r/m.gguf');
+    const meta = await readMetaResolved(dirSite(base), 'o/r/m.gguf');
     expect(meta?.sourceCommit).toBe('c1');
     expect(meta?.sourceSha256).toBe(sha('good bytes'));
     expect(meta?.computedSha256).toBe(sha('good bytes'));
@@ -148,7 +149,7 @@ test('keeps the newer of two valid revisions and deletes the older', async () =>
   });
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'o/r/m.gguf'],
       'm',
       'm.gguf',
@@ -176,7 +177,7 @@ test('identical copies: keeps the one already at the expected path', async () =>
   });
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'o/r/m.gguf'],
       'm',
       'm.gguf',
@@ -205,7 +206,7 @@ test('identical copies with none placed: moves one to the expected path, deletes
   });
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'a/m.gguf', 'b/m.gguf'],
       'm',
       'm.gguf',
@@ -242,7 +243,7 @@ test('no valid copy: skips the group and touches nothing', async () => {
   });
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'sub/m.gguf'],
       'm',
       'm.gguf',
@@ -270,7 +271,7 @@ test('unresolvable source: skips the group and touches nothing', async () => {
     new Response('nf', {status: 404})) as typeof fetch;
   try {
     const results = await fixDuplicateGroup(
-      base,
+      dirSite(base),
       ['m.gguf', 'sub/m.gguf'],
       'm',
       'm.gguf',

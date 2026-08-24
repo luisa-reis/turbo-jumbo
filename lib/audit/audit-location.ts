@@ -1,17 +1,11 @@
-import {
-  config,
-  localPeer,
-  localModelsDir,
-  coldStorageDir,
-  type Peer,
-} from '@/lib/config';
+import {coldStorageSite, localModelsSite} from '@/lib/storage/storage-instance';
+import {config, localPeer, type Peer} from '@/lib/config';
 import {storageForPeer} from '@/lib/storage/peer-storage';
 import type {Site} from '@/lib/storage/site';
 import {logger} from '@/lib/util/logger';
 
 export type AuditTarget =
-  | {kind: 'site'; site: Site}
-  | {kind: 'peer'; peer: Peer};
+  {kind: 'site'; site: Site} | {kind: 'peer'; peer: Peer};
 
 /**
  * Resolve an audit location to its target: 'local' and 'cold-storage' are
@@ -24,10 +18,10 @@ export function resolveAuditLocation(
   location: string | undefined,
 ): AuditTarget | null {
   if (location === 'cold-storage') {
-    return coldStorageDir ? {kind: 'site', site: coldStorageDir} : null;
+    return coldStorageSite ? {kind: 'site', site: coldStorageSite} : null;
   }
   if (location === 'local') {
-    return localModelsDir ? {kind: 'site', site: localModelsDir} : null;
+    return localModelsSite ? {kind: 'site', site: localModelsSite} : null;
   }
   const peer = config.peers.find((p) => p.address === location);
   if (!peer || peer === localPeer) return null;

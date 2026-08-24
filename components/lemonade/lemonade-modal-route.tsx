@@ -1,6 +1,5 @@
+import {coldStorageSite, localModelsSite} from '@/lib/storage/storage-instance';
 import {
-  localModelsDir,
-  coldStorageDir,
   lemonadeDir,
   lemonadeBuiltinDir,
   lemonadeExtraDir,
@@ -16,8 +15,8 @@ import {LemonadeModal} from '@/components/lemonade/lemonade-modal';
 // needs and renders it. Shared by the intercepted (soft-nav) pages in the
 // @modal slot and the real (hard-nav) pages, so the route files stay thin.
 export async function LemonadeModalRoute({location}: {location: string}) {
-  const coldModels = await scanModels(coldStorageDir);
-  const localModels = await scanModels(localModelsDir, lemonadeDir);
+  const coldModels = await scanModels(coldStorageSite);
+  const localModels = await scanModels(localModelsSite, lemonadeDir);
   // Lemonade's own model cache lives outside the managed storage; scan both
   // halves so the Lemonade browser can flag catalog entries already present
   // there, whichever side they sit on.

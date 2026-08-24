@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect} from 'bun:test';
 import {existsSync, promises as fsp} from 'fs';
 import os from 'os';
@@ -85,7 +86,7 @@ test('syncs a Lemonade-only model: moves files into TJ, symlinks them back', asy
   expect(await fsp.readFile(lemFile, 'utf8')).toBe('WEIGHTS'); // reads through the link
 
   // The sidecar records the moved files and the snapshot rev as repoCommit.
-  const sidecar = await readModelSidecar(tj, 'LiquidAI/LFM2.5-GGUF');
+  const sidecar = await readModelSidecar(dirSite(tj), 'LiquidAI/LFM2.5-GGUF');
   expect(sidecar?.repoCommit).toBe(rev);
   expect(sidecar?.files.map((f) => f.path).sort()).toEqual([
     'config/index.json',

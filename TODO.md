@@ -5,23 +5,18 @@ next thing to pick up. Each states what it is, why it's worth doing, and
 where the detail lives. Finished items are deleted, not checked off —
 history belongs to `docs/plans/` and `docs/specs/`.
 
-## Storage interface migration (in flight)
+## Storage interface migration: cut the peers over
 
-Split TJ into one UI host plus thin per-machine agents. Steps 1–3 are
-done: the interface, `LocalStorage`, every `lib/` call site, and the
-wire — the agent protocol served by the full app at
-`/api/v1/storage/[op]`, `HttpStorage`, the `send` job, the peer-to-peer
-copy and check routes driven entirely through sites and jobs. The spec
-records the decisions and progress:
-[docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
-"Where step 3 has got to". The Rust agent is complete and the TS
-reference retired; deployment is a release binary plus a systemd
-user unit (deploy/tj-agent.service), no container. Step 4 is under
-way: the peer views (models, cold, disk usage, deletes, monitor,
-version), downloads and audits already run over `HttpStorage` for a peer
-with an `agent_address` — and the agent caches full-root inventories
-(list_ttl_ms) so those remote scans stay cheap — leaving `site.ts`'s
-transitional string arm once the last caller passes a real site.
+The code is done — the interface, `LocalStorage`, the wire, the Rust
+agent (conformance-gated, cached inventories), and every peer view,
+download, audit and Lemonade sync running over `HttpStorage` for a
+peer with an `agent_address`; `site.ts`'s string arm is retired.
+What's left is operational: build `tj-agent` (`cargo build --release`
+in `agent/`), deploy it per storage box (`deploy/tj-agent.service`,
+`agent.yaml.sample`), set `agent_address`/`agent_token` on the peer's
+entry, and retire the full app there — one machine at a time; the
+fleet mixes freely meanwhile. Decisions and history:
+[docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md).
 
 ## Keep the standalone build from tracing the repo root
 

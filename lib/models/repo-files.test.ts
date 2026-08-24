@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect, afterEach} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -57,7 +58,7 @@ test('a checksum-less file with an unknown source size is valid when its size ma
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.find((f) => f.path === 'index.json')?.state).toBe('present');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -72,7 +73,7 @@ test('clutter like .gitattributes is never reported as a required file', async (
   ]);
   await writeFileOfSize(path.join(base, repoId, 'model.onnx'), 100);
   // .gitattributes and README.md are absent locally but must not be flagged.
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.map((f) => f.path)).toEqual(['model.onnx']);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -94,7 +95,7 @@ test('a split_files bundle reports only present files, not un-downloaded variant
     path.join(base, repoId, 'split_files/vae/flux2-vae.safetensors'),
     200,
   );
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.map((f) => f.path)).toEqual([
     'split_files/vae/flux2-vae.safetensors',
   ]);
@@ -121,7 +122,7 @@ test('a diffusers pipeline reports only present component files', async () => {
     path.join(base, repoId, 'vae/diffusion_pytorch_model.fp16.safetensors'),
     160,
   );
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.map((f) => f.path).sort()).toEqual([
     'unet/diffusion_pytorch_model.fp16.safetensors',
     'vae/diffusion_pytorch_model.fp16.safetensors',
@@ -156,7 +157,7 @@ test('a checksum-less file whose size differs from HF is invalid', async () => {
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.find((f) => f.path === 'index.json')?.state).toBe('invalid');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -186,7 +187,7 @@ test('a fully-attested sidecar (known matching size) stays present', async () =>
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.find((f) => f.path === 'model.bin')?.state).toBe('present');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -199,7 +200,7 @@ test('a file with no sidecar entry stays present when its size matches HF', asyn
   // No tjmodel.json at all — the unknown-size rule is scoped to recorded
   // metadata, so an unrecorded file is judged on size alone.
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.find((f) => f.path === 'tokenizer.json')?.state).toBe('present');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -210,7 +211,7 @@ test('a size mismatch against HF is invalid regardless of any sidecar', async ()
   mockTree(repoId, [{path: 'partial.bin', size: 1000}]);
   await writeFileOfSize(path.join(base, repoId, 'partial.bin'), 400); // truncated
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.find((f) => f.path === 'partial.bin')?.state).toBe('invalid');
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -226,7 +227,7 @@ test('a pick-one ggml .bin repo reports only present files, never missing varian
   ]);
   await writeFileOfSize(path.join(base, repoId, 'ggml-base.bin'), 20);
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   // Like GGUF: just the present variant, no "missing" rows for the others.
   expect(out).toEqual([
     {path: 'ggml-base.bin', state: 'present', size: 20, expectedSize: 20},
@@ -260,7 +261,7 @@ test('repoFileStatuses attaches sidecar provenance to a present file', async () 
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   const f = out.find((x) => x.path === 'model.safetensors');
   expect(f!.provenance!.sourceCommit).toBe('c1');
   expect(f!.provenance!.sourceSize).toBe(200);
@@ -310,7 +311,7 @@ test('a revision-pinned model is judged against its pinned tree, not main', asyn
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.map((f) => `${f.state}:${f.path}`).sort()).toEqual([
     'present:config.json',
     'present:model.q4nx',
@@ -352,7 +353,7 @@ test('a file-scoped model is judged only against its scope', async () => {
     JSON.stringify(model),
   );
 
-  const out = await repoFileStatuses(base, repoId);
+  const out = await repoFileStatuses(dirSite(base), repoId);
   expect(out.map((f) => `${f.state}:${f.path}`).sort()).toEqual([
     'present:config.json',
     'present:model.q4nx',

@@ -1,3 +1,4 @@
+import {dirSite} from '@/lib/storage/site';
 import {test, expect, afterEach} from 'bun:test';
 import {promises as fsp} from 'fs';
 import os from 'os';
@@ -56,9 +57,9 @@ test('flags every shard a split is missing, with its Hugging Face source', async
   mockTree('main');
 
   const out = await detectMissingShards(
-    await scanModels(base),
+    await scanModels(dirSite(base)),
     new Set([localPath(1)]),
-    base,
+    dirSite(base),
     'main',
   );
 
@@ -79,9 +80,9 @@ test('flags nothing for a split whose shards are all present', async () => {
 
   expect(
     await detectMissingShards(
-      await scanModels(base),
+      await scanModels(dirSite(base)),
       new Set([1, 2, 3, 4].map(localPath)),
-      base,
+      dirSite(base),
       'main',
     ),
   ).toEqual([]);
@@ -93,7 +94,12 @@ test('flags nothing for a split none of whose shards were audited', async () => 
   mockTree('main');
 
   expect(
-    await detectMissingShards(await scanModels(base), new Set(), base, 'main'),
+    await detectMissingShards(
+      await scanModels(dirSite(base)),
+      new Set(),
+      base,
+      'main',
+    ),
   ).toEqual([]);
   await fsp.rm(base, {recursive: true, force: true});
 });
@@ -105,9 +111,9 @@ test('flags nothing when the repo listing cannot be fetched', async () => {
 
   expect(
     await detectMissingShards(
-      await scanModels(base),
+      await scanModels(dirSite(base)),
       new Set([localPath(1)]),
-      base,
+      dirSite(base),
       'main',
     ),
   ).toEqual([]);
@@ -129,9 +135,9 @@ test('flags nothing when the repo no longer lists the shard set', async () => {
 
   expect(
     await detectMissingShards(
-      await scanModels(base),
+      await scanModels(dirSite(base)),
       new Set([localPath(1)]),
-      base,
+      dirSite(base),
       'main',
     ),
   ).toEqual([]);
@@ -154,9 +160,9 @@ test('resolves the shards at the revision the model is pinned to', async () => {
   mockTree('v2.0');
 
   const out = await detectMissingShards(
-    await scanModels(base),
+    await scanModels(dirSite(base)),
     new Set([localPath(1)]),
-    base,
+    dirSite(base),
     'main',
   );
 

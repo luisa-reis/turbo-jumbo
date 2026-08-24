@@ -8,6 +8,7 @@
 
 import {localModelsDir, coldStorageDir, lemonadeDir} from '@/lib/config';
 import {createLocalStorage, type Roots} from '@/lib/storage/local-storage';
+import type {Site} from '@/lib/storage/site';
 import type {Storage} from '@/lib/storage/storage';
 
 /** The directories behind this server's roots — also what the agent handlers
@@ -20,3 +21,16 @@ export const storageRoots: Roots = {
 };
 
 export const storage: Storage = createLocalStorage(storageRoots);
+
+/** This host's tiers as sites — undefined where a tier isn't configured, so
+ *  `scanModels(localModelsSite)`-style callers keep their empty answer on a
+ *  machine without one. */
+export const localModelsSite: Site | undefined = localModelsDir
+  ? {storage, root: 'models'}
+  : undefined;
+export const coldStorageSite: Site | undefined = coldStorageDir
+  ? {storage, root: 'cold'}
+  : undefined;
+export const lemonadeSite: Site | undefined = lemonadeDir
+  ? {storage, root: 'lemonade'}
+  : undefined;

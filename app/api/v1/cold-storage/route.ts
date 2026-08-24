@@ -1,3 +1,4 @@
+import {coldStorageSite} from '@/lib/storage/storage-instance';
 import {NextResponse} from 'next/server';
 import nodePath from 'path';
 import {coldStorageDir} from '@/lib/config';
@@ -12,7 +13,7 @@ import {hasStringFiles, readJsonBody} from '@/lib/util/request';
 
 export async function GET() {
   if (!coldStorageDir) return new Response('No cold storage', {status: 400});
-  return NextResponse.json(await scanModels(coldStorageDir));
+  return NextResponse.json(await scanModels(coldStorageSite));
 }
 
 export async function DELETE(req: Request) {
