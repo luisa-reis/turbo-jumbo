@@ -497,6 +497,17 @@ last caller passes a real site. `lib/config` stays on the host.
   missing-flagged entries) became an inventory question, and
   detectMissingShards took a site like the rest.
 
+- The Lemonade sync, over the agent. previewSync/runSync take a
+  SyncTarget — this machine's config by default, an agent peer's
+  storage from the per-peer route — and every pass (placement, the
+  consolidation, the extra-models links, the flm store) already took
+  a storage, so the moves and links land on the agent's disks while
+  the catalog and registry reads stay the host's own. The flm
+  refresh talks to the peer's Lemonade server from the host, exactly
+  as the FLM browser and pull always did — which is why those needed
+  no agent branch at all. What remains asks nothing of a peer's app
+  any more: an agent_address peer is fully driven from the host.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

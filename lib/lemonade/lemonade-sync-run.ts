@@ -5,6 +5,7 @@ import {
   lemonadeDir,
   lemonadeBuiltinDir,
   lemonadeExtraDir,
+  type Peer,
 } from '@/lib/config';
 import {
   catalogRepoIds,
@@ -43,7 +44,9 @@ import {
   type FlmSource,
 } from '@/lib/lemonade/flm';
 import {scanModels} from '@/lib/models/models';
+import type {Site} from '@/lib/storage/site';
 import {storage} from '@/lib/storage/storage-instance';
+import type {Storage} from '@/lib/storage/storage';
 import {
   previewLemonadeSync,
   syncLemonadeToTurboJumbo,
@@ -52,10 +55,44 @@ import {
   type SyncModelResult,
 } from '@/lib/lemonade/lemonade-sync';
 
-// Shared Lemonade↔Turbo Jumbo consolidation handlers. The work always runs on
-// the machine whose config is loaded here, so both the local route and the
-// per-peer route (its local branch) call these against their own config —
-// a remote peer consolidates its own Lemonade cache into its own store.
+// Shared Lemonade↔Turbo Jumbo consolidation handlers. The moves and links run
+// wherever the target's storage is — this machine's by default, an agent
+// peer's when the per-peer route hands a target over; a full-app peer still
+// consolidates itself through its own copy of this module. The catalog and
+// registry reads are the host's own either way.
+
+/** Whose Lemonade is being consolidated. */
+export interface SyncTarget {
+  storage: Storage;
+  /** The models root as a scan site. */
+  models: Site;
+  hasModels: boolean;
+  hasLemonade: boolean;
+  /** Skip entries under this directory name during the models scan — the
+   *  local setup's nested-lemonade guard; an agent's roots are disjoint. */
+  lemonadeScanSkip?: string;
+  /** The peer whose Lemonade server to tell about new flm links. */
+  peer?: Peer;
+}
+
+const localTarget: SyncTarget = {
+  storage,
+  models: localModelsDir ?? '',
+  hasModels: localModelsDir !== undefined,
+  hasLemonade:
+    lemonadeDir !== undefined && !!(lemonadeBuiltinDir && lemonadeExtraDir),
+  ...(lemonadeDir !== undefined ? {lemonadeScanSkip: lemonadeDir} : {}),
+  ...(localPeer ? {peer: localPeer} : {}),
+};
+
+/** The halves of the cache as the `lemonade` root holds them — the same
+ *  root-relative names on every machine. */
+const SIDES: LemonadeSides = {
+  builtin: 'builtin',
+  extra: 'extra',
+  // Entries an older version left at the root are still part of the cache.
+  root: '',
+};
 
 // The HuggingFace repos Lemonade's catalog references — best-effort, since the
 // materialize pass is a bonus on top of cache consolidation. An unreachable
@@ -112,11 +149,14 @@ async function lemonadeKnowledge(): Promise<{
  * Lemonade could open but shouldn't — serving a model off the slow tier
  * without saying so.
  */
-async function extraPlans(listed: Set<string>): Promise<ExtraModelPlan[]> {
-  if (!localModelsDir) return [];
-  const unlisted = (await scanModels(localModelsDir, lemonadeDir)).filter(
-    (m) => !listed.has(m.name),
-  );
+async function extraPlans(
+  target: SyncTarget,
+  listed: Set<string>,
+): Promise<ExtraModelPlan[]> {
+  if (!target.hasModels) return [];
+  const unlisted = (
+    await scanModels(target.models, target.lemonadeScanSkip)
+  ).filter((m) => !listed.has(m.name));
   return planExtraModels(unlisted);
 }
 
@@ -126,26 +166,15 @@ async function extraPlans(listed: Set<string>): Promise<ExtraModelPlan[]> {
  * link into the archive would have the NPU serving off the slow tier.
  */
 async function flmPlans(
+  target: SyncTarget,
   registry: Map<string, FlmSource>,
 ): Promise<FlmStorePlan[]> {
-  if (!localModelsDir || registry.size === 0) return [];
+  if (!target.hasModels || registry.size === 0) return [];
   return planFlmStore(
-    storage,
-    await scanModels(localModelsDir, lemonadeDir),
+    target.storage,
+    await scanModels(target.models, target.lemonadeScanSkip),
     registry,
   );
-}
-
-// The halves of the cache as the `lemonade` root holds them. Lemonade is
-// configured when the config names both.
-function sides(): LemonadeSides | null {
-  if (!lemonadeBuiltinDir || !lemonadeExtraDir) return null;
-  return {
-    builtin: 'builtin',
-    extra: 'extra',
-    // Entries an older version left at the root are still part of the cache.
-    root: '',
-  };
 }
 
 export interface SyncPreview {
@@ -161,17 +190,22 @@ export interface SyncPreview {
 }
 
 // Preview the changes a sync would make (read-only). Returns an empty preview
-// when Lemonade is not configured on this machine.
-export async function previewSync(): Promise<SyncPreview> {
-  const s = sides();
-  if (!localModelsDir || !lemonadeDir || !s)
+// when Lemonade is not configured on the target machine.
+export async function previewSync(
+  target: SyncTarget = localTarget,
+): Promise<SyncPreview> {
+  if (!target.hasModels || !target.hasLemonade)
     return {preview: [], placement: [], extra: [], flm: []};
   const {catalog, listed, registry} = await lemonadeKnowledge();
   const [placement, preview, extra, flm] = await Promise.all([
-    planPlacement(storage, listed),
-    previewLemonadeSync(storage, s, catalog, listed),
-    extraPlans(listed).then((plans) => previewExtraModels(storage, plans)),
-    flmPlans(registry).then((plans) => previewFlmStore(storage, plans)),
+    planPlacement(target.storage, listed),
+    previewLemonadeSync(target.storage, SIDES, catalog, listed),
+    extraPlans(target, listed).then((plans) =>
+      previewExtraModels(target.storage, plans),
+    ),
+    flmPlans(target, registry).then((plans) =>
+      previewFlmStore(target.storage, plans),
+    ),
   ]);
   return {
     preview,
@@ -190,11 +224,12 @@ export async function previewSync(): Promise<SyncPreview> {
  * still right — Lemonade picks them up on its next restart.
  */
 async function refreshFlm(
+  peer: Peer | undefined,
   plans: FlmStorePlan[],
   linked: FlmStoreChange[],
 ): Promise<FlmRefresh | undefined> {
   if (linked.length === 0) return undefined;
-  if (!localPeer?.lemonade_url)
+  if (!peer?.lemonade_url)
     return {
       ok: false,
       message:
@@ -206,15 +241,15 @@ async function refreshFlm(
   const tag = plan?.tags[0];
   if (!tag) return undefined;
   return refreshLemonadeFlm(
-    lemonadeApiBase(localPeer.lemonade_url),
-    lemonadeHeaders(lemonadeApiKey(localPeer)),
+    lemonadeApiBase(peer.lemonade_url),
+    lemonadeHeaders(lemonadeApiKey(peer)),
     lemonadeFlmId(tag),
   );
 }
 
 // Execute the sync. Returns null when Lemonade is not configured so callers can
 // surface the right error.
-export async function runSync(): Promise<{
+export async function runSync(target: SyncTarget = localTarget): Promise<{
   results: SyncModelResult[];
   placement: Placement[];
   extra: ExtraChange[];
@@ -223,19 +258,26 @@ export async function runSync(): Promise<{
    *  made. */
   flmRefresh?: FlmRefresh;
 } | null> {
-  const s = sides();
-  if (!localModelsDir || !lemonadeDir || !s) return null;
+  if (!target.hasModels || !target.hasLemonade) return null;
   const {catalog, listed, registry} = await lemonadeKnowledge();
   // Sort the cache before consolidating it, so the passes below see every entry
   // on the side it belongs on rather than wherever it happened to be.
-  const placement = await placeRepos(storage, listed);
-  const results = await syncLemonadeToTurboJumbo(storage, s, catalog);
-  // Last, because they reflect what local storage holds once the passes above
-  // have finished moving things into it.
-  const extra = await syncExtraModels(storage, await extraPlans(listed));
-  const plans = await flmPlans(registry);
-  const flm = await syncFlmStore(storage, plans);
+  const placement = await placeRepos(target.storage, listed);
+  const results = await syncLemonadeToTurboJumbo(
+    target.storage,
+    SIDES,
+    catalog,
+  );
+  // Last, because they reflect what the fast storage holds once the passes
+  // above have finished moving things into it.
+  const extra = await syncExtraModels(
+    target.storage,
+    await extraPlans(target, listed),
+  );
+  const plans = await flmPlans(target, registry);
+  const flm = await syncFlmStore(target.storage, plans);
   const flmRefresh = await refreshFlm(
+    target.peer,
     plans,
     flm.filter((f) => f.status === 'link'),
   );
