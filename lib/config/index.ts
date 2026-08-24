@@ -24,6 +24,10 @@ export interface Peer {
   // API base URL of the Lemonade server tied to this peer, for browsing and
   // downloading the models only that server can fetch (FLM/NPU).
   lemonade_url?: string;
+  // host:port of a standalone storage agent serving this peer's disks. When
+  // set, storage operations and transfers go to the agent instead of the full
+  // app at `address` (see lib/storage/peer-storage.ts).
+  agent_address?: string;
   // Set by the /api/v1/peers response for the peer that is this machine.
   isLocal?: boolean;
 }
@@ -33,6 +37,8 @@ export interface Peer {
 export interface RawPeer extends Peer {
   // The Lemonade server's API key, when it was started with LEMONADE_API_KEY.
   lemonade_api_key?: string;
+  // The bearer token the peer's standalone agent requires, if any.
+  agent_token?: string;
 }
 
 export interface Config {
@@ -80,20 +86,30 @@ function configPath(): string {
 export function withoutSecrets(raw: RawPeer[]): {
   peers: Peer[];
   lemonadeKeys: WeakMap<Peer, string>;
+  agentTokens: WeakMap<Peer, string>;
 } {
   const lemonadeKeys = new WeakMap<Peer, string>();
-  const peers = raw.map(({lemonade_api_key, ...peer}) => {
+  const agentTokens = new WeakMap<Peer, string>();
+  const peers = raw.map(({lemonade_api_key, agent_token, ...peer}) => {
     if (lemonade_api_key) lemonadeKeys.set(peer, lemonade_api_key);
+    if (agent_token) agentTokens.set(peer, agent_token);
     return peer;
   });
-  return {peers, lemonadeKeys};
+  return {peers, lemonadeKeys, agentTokens};
 }
 
 let lemonadeKeys = new WeakMap<Peer, string>();
+let agentTokens = new WeakMap<Peer, string>();
 
 /** The API key for a peer's Lemonade server, when config.yaml gives one. */
 export function lemonadeApiKey(peer: Peer): string | undefined {
   return lemonadeKeys.get(peer);
+}
+
+/** The bearer token for a peer's standalone agent, when config.yaml gives
+ *  one. Only lib/storage/peer-storage.ts should need it. */
+export function agentToken(peer: Peer): string | undefined {
+  return agentTokens.get(peer);
 }
 
 function loadConfig(): Config {
@@ -104,6 +120,7 @@ function loadConfig(): Config {
   const raw = loaded as RawConfig;
   const split = withoutSecrets(raw.peers);
   lemonadeKeys = split.lemonadeKeys;
+  agentTokens = split.agentTokens;
   return {...raw, peers: split.peers};
 }
 

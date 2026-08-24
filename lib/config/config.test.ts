@@ -69,6 +69,8 @@ test('accepts all documented options', () => {
           lemonade_subdir: 'lmnd',
           lemonade_url: 'http://192.0.2.10:13305/api/v1',
           lemonade_api_key: 'secret',
+          agent_address: '192.0.2.5:3900',
+          agent_token: 'secret-too',
         },
       ],
     }),
@@ -169,17 +171,23 @@ test('accepts a lemonade_api_key alongside lemonade_url', () => {
 test('withoutSecrets keeps the Lemonade API key off the Peer object', () => {
   // Peers are serialized into pages and API responses in several places;
   // rather than stripping the key at each exit, it never gets onto the object.
-  const {peers, lemonadeKeys} = withoutSecrets([
+  const {peers, lemonadeKeys, agentTokens} = withoutSecrets([
     {
       ...validPeer,
       lemonade_url: 'http://192.0.2.10:13305/api/v1',
       lemonade_api_key: 'secret',
+      agent_address: '192.0.2.5:3900',
+      agent_token: 'secret-too',
     },
     {name: 'B', address: '192.0.2.2:3000'},
   ]);
   expect(peers.map((p) => 'lemonade_api_key' in p)).toEqual([false, false]);
   expect(lemonadeKeys.get(peers[0])).toBe('secret');
   expect(lemonadeKeys.get(peers[1])).toBeUndefined();
+  // The agent token is a secret in the same way; the address is not.
+  expect(peers.map((p) => 'agent_token' in p)).toEqual([false, false]);
+  expect(agentTokens.get(peers[0])).toBe('secret-too');
+  expect(peers[0].agent_address).toBe('192.0.2.5:3900');
 });
 
 test('accepts a local peer with neither base_path nor cold_storage_path', () => {

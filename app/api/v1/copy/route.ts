@@ -5,7 +5,7 @@ import {
   deleteFileWithMeta,
 } from '@/lib/storage/delete-file';
 import {
-  agentUrlFor,
+  agentTargetFor,
   siteForName,
   storageForPeer,
 } from '@/lib/storage/peer-storage';
@@ -83,12 +83,17 @@ function legFor(
       dstSite: {storage: peerStorage, root: 'cold'},
     };
   }
+  const target = agentTargetFor(dest);
   return {
     runOn: from,
     spec: {
       kind: 'send',
       from: {root: 'models', path: file},
-      to: {agent: agentUrlFor(dest), ref: {root: 'models', path: file}},
+      to: {
+        agent: target.url,
+        ...(target.token !== undefined ? {token: target.token} : {}),
+        ref: {root: 'models', path: file},
+      },
     },
     srcSite: {storage: storageForPeer(from), root: 'models'},
     dstSite: {storage: storageForPeer(dest), root: 'models'},

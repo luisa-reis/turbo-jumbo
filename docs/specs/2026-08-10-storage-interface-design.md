@@ -374,12 +374,13 @@ Done:
 
 Remaining call sites:
 
-1. The standalone agent — the tail of step 3. `HttpStorage`, `send` and
-   the `copy`/`copy/check` routes are done (below); what remains is the
-   thin process itself (the same handlers behind a Bun server, a token,
-   its own roots config) and the peer config that points
-   `storageForPeer` at it, so step 4 can cut peers over one at a time.
-   `lib/config` stays on the host.
+None. Step 3 is complete. What remains of the migration is step 4 —
+cutting peers over to thin agents one at a time (`agent_address` in
+their peer entries), which needs the host to answer a peer's models
+table, downloads and audits through `HttpStorage` where today it asks
+the peer's app — and retiring `lib/storage/site.ts`'s transitional
+string arm when the last caller passes a real site. `lib/config` stays
+on the host.
 
 ### Where step 3 has got to
 
@@ -434,6 +435,17 @@ Remaining call sites:
   (`x-tj-error-code`), so a remote ENOENT stays an ENOENT to the
   sidecar readers' tolerance checks.
 
+- The standalone agent. `agent/server.ts` is the same handlers behind a
+  bare `Bun.serve` — no Next, no UI build, no fleet knowledge — guarded
+  by one bearer token from its own config (`agent/index.ts`,
+  `agent.yaml.sample`), run as `bun run agent`. On the control host a
+  peer entry's `agent_address`/`agent_token` point `storageForPeer` —
+  and the send specs it builds — at the agent instead of the full app;
+  the token is a secret like the Lemonade key, held off the `Peer`
+  object. Exercised over real sockets in tests: the verbs, 401s for a
+  missing or wrong token, streamed hashes, and an agent-to-agent send
+  with resume — the design's end state in miniature.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.
@@ -452,8 +464,9 @@ Remaining call sites:
 
 ## Open questions
 
-- **Authorization.** A shared token per agent is the floor. Worth deciding
-  whether agents authenticate each other for `send`, or trust a token minted by
-  the control host.
-- **Lemonade's mounts.** If Lemonade runs on the host and the agent in LXC, the
-  container needs its cache and extra-models directories bind-mounted.
+- **Lemonade's mounts.** If Lemonade runs on the host and the agent in
+  LXC, the container needs its cache and extra-models directories
+  bind-mounted.
+
+(Authorization is decided above: one bearer token per agent, carried
+by the control host.)

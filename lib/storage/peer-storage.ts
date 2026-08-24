@@ -8,15 +8,38 @@
  * machine a byte lives on.
  */
 
-import {localPeer, hasColdStorage, hasModelStorage} from '@/lib/config';
+import {
+  agentToken,
+  config,
+  hasColdStorage,
+  hasModelStorage,
+  localPeer,
+} from '@/lib/config';
 import {createHttpStorage} from '@/lib/storage/http-storage';
 import type {Site} from '@/lib/storage/site';
 import {storage} from '@/lib/storage/storage-instance';
 import type {Storage} from '@/lib/storage/storage';
 
-/** The agent-protocol root a peer answers at. */
-export function agentUrlFor(peerAddr: string): string {
-  return `http://${peerAddr}/api/v1/storage`;
+/**
+ * Where a peer's storage answers, and the token it wants: the standalone
+ * agent named by the peer's `agent_address` when one is configured, else the
+ * full app at the peer's own address — the same protocol either way. This is
+ * also what a `send` spec carries as its destination, so the token an agent
+ * requires travels from this host's config, never between agents.
+ */
+export function agentTargetFor(peerAddr: string): {
+  url: string;
+  token?: string;
+} {
+  const peer = config.peers.find((p) => p.address === peerAddr);
+  if (peer?.agent_address) {
+    const token = agentToken(peer);
+    return {
+      url: `http://${peer.agent_address}/api/v1/storage`,
+      ...(token !== undefined ? {token} : {}),
+    };
+  }
+  return {url: `http://${peerAddr}/api/v1/storage`};
 }
 
 // One client per address: callers get the same memo behavior LocalStorage
@@ -35,7 +58,7 @@ export function storageForPeer(peerAddr: string): Storage {
   let s = remotes.get(peerAddr);
   if (!s) {
     s = createHttpStorage({
-      url: agentUrlFor(peerAddr),
+      ...agentTargetFor(peerAddr),
       timeoutMs: PEER_TIMEOUT_MS,
     });
     remotes.set(peerAddr, s);

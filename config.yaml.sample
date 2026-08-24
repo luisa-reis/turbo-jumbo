@@ -69,6 +69,14 @@ peers:
   - name: my-server
     address: 192.168.1.11:3000
 
+  # A peer served by a standalone storage agent (bun run agent on that
+  # machine) instead of the full app: storage operations and transfers
+  # go to the agent, authenticated with its token (agent.yaml.sample).
+  # - name: shelf
+  #   address: 192.168.1.13:3000
+  #   agent_address: 192.168.1.13:3900
+  #   agent_token: change-me
+
   # A peer whose name needs a slug spelled out, since one derived from it
   # would be unusable.
   - name: Zürich

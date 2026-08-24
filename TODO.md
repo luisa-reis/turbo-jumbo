@@ -7,20 +7,21 @@ history belongs to `docs/plans/` and `docs/specs/`.
 
 ## Storage interface migration (in flight)
 
-Route the rest of `lib/`'s filesystem calls through the `Storage` interface,
-ahead of splitting TJ into one UI host plus thin per-machine agents. The spec
-is the source of truth for the remaining call sites (ordered, easiest first),
-the decisions already settled, and the open questions — agent authorization,
-and Lemonade's bind mounts when the agent runs in LXC:
+Split TJ into one UI host plus thin per-machine agents. Steps 1–3 are
+done: the interface, `LocalStorage`, every `lib/` call site, and now
+the wire — the agent protocol served by the full app at
+`/api/v1/storage/[op]`, `HttpStorage`, the `send` job, the peer-to-peer
+copy and check routes driven entirely through sites and jobs, and the
+standalone agent (`bun run agent`) with `agent_address`/`agent_token`
+peer config. The spec records the decisions and progress:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
-"Where step 2 has got to". Done so far: the interface, `LocalStorage` (with
-its header memo and shared walks), `storage-instance.ts`, disk usage, delete,
-the sidecars, support files, the Lemonade link and place passes, the models
-scan, the audit helpers with duplicate fixing, the Lemonade sync, and the job
-API with the download and copy jobs behind `hf-download-stream.ts`, and the
-presence checks in `incomplete-models.ts`/`repo-files.ts`, and the
-cold-storage transfer routes on the copy job. Next: step 3 — `HttpStorage`
-and the agent, which is where `send` and the peer-to-peer copy route land.
+"Where step 3 has got to". Next: step 4 — cut peers over one at a
+time. A peer that runs only an agent still needs the host to answer
+its models table, downloads and audits through `HttpStorage` (today
+those ask the peer's app), and `site.ts`'s transitional string arm
+goes when the last caller passes a real site. On the way: Lemonade's
+bind mounts when the agent runs in LXC (see the spec's open
+questions).
 
 ## Keep the standalone build from tracing the repo root
 

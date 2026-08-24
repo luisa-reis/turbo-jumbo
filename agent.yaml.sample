@@ -1,0 +1,23 @@
+# Configuration for the standalone storage agent (bun run agent). Copy to
+# agent.yaml next to where the agent runs, or point TJ_AGENT_CONFIG at it.
+#
+# The agent serves the storage protocol for this machine's model disks and
+# knows nothing else — no peer list, no UI. On the control host, point the
+# matching peer entry at it with agent_address/agent_token in config.yaml.
+
+# Port to listen on.
+port: 3900
+
+# Bearer token every request must present. Optional, but run without one only
+# on a loopback experiment — anyone who can reach the port can move files.
+token: change-me
+
+# The directories behind the storage roots. Each optional; at least one.
+# These are the same directories the full app derived from base_path:
+# models   = <base_path>/turbo-jumbo
+# cold     = <cold_storage_path>
+# lemonade = <base_path>/lemonade
+roots:
+  models: /mnt/models/turbo-jumbo
+  cold: /mnt/cold-storage
+  lemonade: /mnt/models/lemonade

@@ -14,7 +14,8 @@
     "typecheck:watch": "node_modules/@typescript/native/bin/tsc --noEmit --watch",
     "test": "bun test",
     "docker:build": "bin/docker-build.sh",
-    "tj": "bun run cli/index.ts"
+    "tj": "bun run cli/index.ts",
+    "agent": "bun run agent/index.ts"
   },
   "dependencies": {
     "@astryxdesign/cli": "0.3.0",

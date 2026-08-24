@@ -76,6 +76,16 @@
           "type": "string",
           "minLength": 1,
           "description": "API key for that Lemonade server, sent as a Bearer token. Required when the server was started with LEMONADE_API_KEY set; it rejects every request without the matching key. Optional."
+        },
+        "agent_address": {
+          "type": "string",
+          "pattern": "^.+:[0-9]+$",
+          "description": "host:port of a standalone Turbo Jumbo storage agent serving this peer's disks. When set, storage operations and transfers for this peer go to the agent instead of the full app at the peer's address. Optional."
+        },
+        "agent_token": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Bearer token that agent requires (its agent.yaml `token`). Sent on every agent request and never shown to browsers. Optional."
         }
       }
     }
