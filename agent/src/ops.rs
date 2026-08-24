@@ -341,3 +341,30 @@ pub async fn receive(
     file.flush().await.map_err(AgentError::from)?;
     Ok(ok_json())
 }
+
+pub async fn job(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, AgentError> {
+    let value = parse_json(&body)?;
+    let spec: crate::wire::JobSpec = serde_json::from_value(value).map_err(|_| bad("job spec"))?;
+    let (tx, response) = crate::ndjson::ndjson_response();
+    match spec {
+        crate::wire::JobSpec::Copy { from, to, mv } => {
+            tokio::task::spawn_blocking(move || {
+                crate::jobs::run_copy_job(&storage, &from, &to, mv, &tx);
+            });
+        }
+        crate::wire::JobSpec::Send { from, to } => {
+            tokio::spawn(crate::jobs::run_send_job(storage, from, to, tx));
+        }
+        crate::wire::JobSpec::Download {
+            repo_id,
+            revision,
+            files,
+            into,
+        } => {
+            tokio::spawn(crate::jobs::run_download_job(
+                storage, repo_id, revision, files, into, tx,
+            ));
+        }
+    }
+    Ok(response)
+}

@@ -75,3 +75,64 @@ pub const OFFSET_HEADER: &str = "x-tj-offset";
 /// How often the hash stream reports a cumulative byte count. A final
 /// frame always closes the count.
 pub const HASH_EMIT_BYTES: u64 = 8 * 1024 * 1024;
+
+use crate::refs::Ref;
+use serde::Deserialize;
+
+/// A job as the wire carries it. Extra fields are ignored, matching the TS
+/// handler's rebuild-and-drop.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum JobSpec {
+    Download {
+        #[serde(rename = "repoId")]
+        repo_id: String,
+        revision: Option<String>,
+        files: Vec<String>,
+        into: Ref,
+    },
+    Copy {
+        from: Ref,
+        to: Ref,
+        #[serde(rename = "move", default)]
+        mv: bool,
+    },
+    Send {
+        from: Ref,
+        to: SendTarget,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SendTarget {
+    /// The target agent's protocol root URL.
+    pub agent: String,
+    pub token: Option<String>,
+    #[serde(rename = "ref")]
+    pub target: Ref,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum JobEvent {
+    Progress { done: u64, total: u64 },
+    Verify { done: u64, total: u64 },
+    Log { line: String },
+    Done { result: serde_json::Value },
+    Error { message: String },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyResult {
+    pub resumed_from: u64,
+    pub size: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadResult {
+    pub exit_code: Option<i32>,
+    pub signal: Option<String>,
+    pub output: String,
+}

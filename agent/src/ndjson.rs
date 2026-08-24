@@ -41,3 +41,23 @@ pub fn ndjson_response() -> (NdjsonSender, Response) {
         .expect("static response parts");
     (NdjsonSender { tx }, response)
 }
+
+impl Clone for NdjsonSender {
+    fn clone(&self) -> Self {
+        NdjsonSender {
+            tx: self.tx.clone(),
+        }
+    }
+}
+
+impl NdjsonSender {
+    /// Send one frame from async context; false when the client is gone.
+    pub async fn json(&self, frame: &impl Serialize) -> bool {
+        let mut line = match serde_json::to_vec(frame) {
+            Ok(line) => line,
+            Err(_) => return false,
+        };
+        line.push(b'\n');
+        self.tx.send(Ok(Bytes::from(line))).await.is_ok()
+    }
+}

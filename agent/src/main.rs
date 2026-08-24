@@ -5,6 +5,7 @@
 mod config;
 mod error;
 mod hashing;
+mod jobs;
 mod ndjson;
 mod ops;
 mod prune;

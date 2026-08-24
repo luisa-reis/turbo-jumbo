@@ -49,11 +49,11 @@ async fn liveness() -> &'static str {
     "turbo-jumbo agent\n"
 }
 
-/// Ops that exist in the protocol but are not implemented here yet — each
-/// answers 501 rather than 404, so a probe can tell "too new for this
-/// agent" from "no such op". They graduate one at a time, gated by the TS
-/// conformance suites.
-const UNIMPLEMENTED: &[&str] = &["job"];
+/// Ops the protocol may grow that this build doesn't know yet answer 501
+/// rather than 404, so a probe can tell "too new for this agent" from "no
+/// such op". Empty now that every op is in; kept for the next protocol
+/// addition.
+const UNIMPLEMENTED: &[&str] = &[];
 
 async fn dispatch(
     State(state): State<Arc<AppState>>,
@@ -79,7 +79,8 @@ async fn dispatch(
             let (parts, body) = req.into_parts();
             ops::receive(storage, &parts.headers, body).await
         }
-        "list" | "read" | "mkdir" | "usage" | "remove" | "move" | "copy" | "link" | "hash" => {
+        "list" | "read" | "mkdir" | "usage" | "remove" | "move" | "copy" | "link" | "hash"
+        | "job" => {
             let body = match buffer_json_body(req.into_body()).await {
                 Ok(b) => b,
                 Err(e) => return e.into_response(),
@@ -93,6 +94,7 @@ async fn dispatch(
                 "copy" => ops::move_or_copy(storage, body, false).await,
                 "link" => ops::link(storage, body).await,
                 "hash" => ops::hash(storage, body).await,
+                "job" => ops::job(storage, body).await,
                 _ => ops::usage(storage, body).await,
             }
         }
