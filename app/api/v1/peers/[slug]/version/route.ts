@@ -18,8 +18,12 @@ export async function GET(
     return Response.json(appVersion());
   }
 
+  // An agent-only peer answers from the agent's own version endpoint; a
+  // full-app peer from the app's. Same shape either way.
+  const versionHost = peer.agent_address ?? peer.address;
+
   try {
-    const res = await fetch(`http://${peer.address}/api/v1/version`);
+    const res = await fetch(`http://${versionHost}/api/v1/version`);
     if (!res.ok)
       return new Response(`Peer returned ${res.status}`, {status: 502});
     return Response.json(await res.json());

@@ -665,3 +665,63 @@ conf('a download job refuses a spec it cannot make safe', async () => {
     expect(events.map((e) => e.kind)).toEqual(['error']);
   }
 });
+
+conf('the agent answers a version identity', async () => {
+  const {url} = await rustAgent('secret');
+  const res = await fetch(url.replace('/api/v1/storage', '/api/v1/version'));
+  expect(res.status).toBe(200);
+  const v = (await res.json()) as {
+    version: string;
+    dev: boolean;
+    commit: string | null;
+  };
+  expect(typeof v.version).toBe('string');
+  expect(v.dev).toBe(false);
+  expect(v.commit).toBeNull();
+});
+
+conf('the host policy modules run whole over the agent', async () => {
+  // Step 4's substance in miniature: scanModels and deleteFileWithMeta —
+  // policy modules hundreds of lines deep — over the agent's storage,
+  // answering exactly what they answer on local disk.
+  const {scanModels} = await import('@/lib/models/models');
+  const {deleteFileWithMeta} = await import('@/lib/storage/delete-file');
+  const {remote, local, models} = await rustAgent('secret');
+  await fsp.mkdir(nodePath.join(models, 'org/repo-GGUF'), {recursive: true});
+  await fsp.writeFile(
+    nodePath.join(models, 'org/repo-GGUF/model-Q4_K_M.gguf'),
+    'wwww',
+  );
+  await fsp.writeFile(
+    nodePath.join(models, 'org/repo-GGUF/tjmodel.json'),
+    JSON.stringify({
+      modelUrl: 'https://huggingface.co/org/repo-GGUF',
+      repoId: 'org/repo-GGUF',
+      files: [
+        {
+          path: 'model-Q4_K_M.gguf',
+          originUrl:
+            'https://huggingface.co/org/repo-GGUF/blob/main/model-Q4_K_M.gguf',
+          sourceSize: 4,
+          computedSize: 4,
+          sourceSha256: 's',
+          computedSha256: 'c',
+        },
+      ],
+    }),
+  );
+
+  const viaAgent = await scanModels({storage: remote, root: 'models'});
+  const viaLocal = await scanModels({storage: local, root: 'models'});
+  expect(viaAgent).toEqual(viaLocal);
+  expect(viaAgent.length).toBe(1);
+
+  // Deleting through the agent removes the file, its sidecar entry, and
+  // the directory husk — the whole cleanup, driven from the host.
+  await deleteFileWithMeta(
+    remote,
+    'models',
+    'org/repo-GGUF/model-Q4_K_M.gguf',
+  );
+  expect(await local.list('models')).toEqual([]);
+});

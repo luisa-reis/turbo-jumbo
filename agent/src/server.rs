@@ -37,6 +37,7 @@ impl AppState {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(liveness))
+        .route("/api/v1/version", get(version))
         .route("/api/v1/storage/{op}", post(dispatch))
         // The byte ops carry whole chunks; axum's 2 MB default would refuse
         // them. The caps that matter are the protocol's own.
@@ -47,6 +48,19 @@ pub fn router(state: Arc<AppState>) -> Router {
 async fn liveness() -> &'static str {
     // Deliberately content-free.
     "turbo-jumbo agent\n"
+}
+
+/// The agent's version identity, shaped like the app's /api/v1/version so
+/// the host's peer chip reads either. A binary carries no git checkout and
+/// is never "dev" in the app's tag-pinned sense; the crate version is the
+/// identity. Unauthenticated like liveness — it moves no bytes.
+async fn version() -> Response {
+    axum::Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "dev": false,
+        "commit": serde_json::Value::Null,
+    }))
+    .into_response()
 }
 
 /// Ops the protocol may grow that this build doesn't know yet answer 501

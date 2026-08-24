@@ -460,6 +460,23 @@ last caller passes a real site. `lib/config` stays on the host.
   Deployment is bare metal by decision: a release binary and a
   systemd user unit (`deploy/tj-agent.service`), no container.
 
+### Where step 4 has got to
+
+- The peer views, over the agent. Every `peers/[slug]` route that
+  asked the peer's app grew an agent branch, taken when the peer has
+  an `agent_address`: the models scan (cold annotation included, when
+  the agent has a cold root), deletes with the full sidecar-and-husk
+  cleanup, incomplete/invalid and repo-files (their Hugging Face
+  reads were always the host's own), and disk usage, which probes
+  each root and reads "not configured" as absence. The peer monitor
+  polls an agent's liveness — nearly free — and runs the scan only on
+  the transition to up, when the peer-up event needs it; the version
+  chip reads the agent's own /api/v1/version (the crate version,
+  never "dev"). Conformance-tested by running scanModels and
+  deleteFileWithMeta whole over the agent's storage, equal to their
+  local answers. Still asking the peer's app: downloads, audits and
+  Lemonade — the next slices.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

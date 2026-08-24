@@ -82,3 +82,11 @@ export function siteForName(name: string): Site | null {
   }
   return {storage: storageForPeer(name), root: 'models'};
 }
+
+/** Whether an error is a root the far machine simply doesn't have — the
+ *  storage's "No <root> directory is configured", local or over the wire.
+ *  The tolerant callers (cold annotation, disk-usage probes) skip these;
+ *  anything else is a real failure. */
+export function isUnconfiguredRoot(e: unknown): boolean {
+  return e instanceof Error && / directory is configured/.test(e.message);
+}

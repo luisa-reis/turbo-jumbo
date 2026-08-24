@@ -2,6 +2,7 @@ import {config, localPeer, localModelsDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {repoFileStatuses} from '@/lib/models/repo-files';
+import {storageForPeer} from '@/lib/storage/peer-storage';
 
 const REPO_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -27,6 +28,20 @@ export async function GET(
       return new Response(e instanceof Error ? e.message : String(e), {
         status: 502,
       });
+    }
+  }
+
+  if (peer.agent_address) {
+    try {
+      const files = await repoFileStatuses(
+        {storage: storageForPeer(peer.address), root: 'models'},
+        repoId,
+      );
+      return Response.json({files});
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[peers] agent repo-files for ${peer.name} failed: ${msg}`);
+      return new Response(msg, {status: 502});
     }
   }
 

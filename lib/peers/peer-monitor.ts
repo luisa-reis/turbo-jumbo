@@ -1,24 +1,42 @@
-import {config, localPeer} from '@/lib/config';
-import type {Model} from '@/lib/models/models';
+import {config, localPeer, type Peer} from '@/lib/config';
+import {scanModels, type Model} from '@/lib/models/models';
+import {storageForPeer} from '@/lib/storage/peer-storage';
 import {publishPeerEvent} from './peer-event-hub';
 import {logger} from '@/lib/util/logger';
 
 const peerStatus = new Map<string, 'up' | 'down'>();
 
-async function checkPeer(address: string): Promise<void> {
+async function checkPeer(peer: Peer): Promise<void> {
+  const address = peer.address;
   try {
-    const res = await fetch(`http://${address}/api/v1/local-models`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const models: Model[] = await res.json();
+    let models: Model[] | null = null;
+    if (peer.agent_address) {
+      // An agent answers liveness for almost nothing; the scan — a remote
+      // walk — runs only on the transition to up, when the event needs it.
+      const res = await fetch(`http://${peer.agent_address}/`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (peerStatus.get(address) !== 'up') {
+        models = await scanModels({
+          storage: storageForPeer(address),
+          root: 'models',
+        });
+      }
+    } else {
+      const res = await fetch(`http://${address}/api/v1/local-models`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      models = await res.json();
+    }
 
     const prev = peerStatus.get(address);
     peerStatus.set(address, 'up');
 
     if (prev !== 'up') {
       logger.info(`[monitor] peer up: ${address}`);
-      publishPeerEvent({type: 'peer-up', address, models});
+      publishPeerEvent({type: 'peer-up', address, models: models ?? []});
     }
   } catch {
     const prev = peerStatus.get(address);
@@ -47,7 +65,7 @@ export function startPeerMonitor(): void {
   g[STARTED_KEY] = true;
 
   const poll = () => {
-    for (const peer of remotePeers) void checkPeer(peer.address);
+    for (const peer of remotePeers) void checkPeer(peer);
   };
 
   poll();

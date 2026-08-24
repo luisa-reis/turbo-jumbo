@@ -2,6 +2,7 @@ import {config, localPeer, localModelsDir, lemonadeDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {findIncompleteRepos} from '@/lib/audit/incomplete-models';
+import {storageForPeer} from '@/lib/storage/peer-storage';
 
 // Repo ids with an incomplete local copy on the given peer. The local peer is
 // computed directly; a remote peer is proxied to its own endpoint (peers run
@@ -18,6 +19,22 @@ export async function GET(
     if (!localModelsDir) return Response.json({incomplete: []});
     const incomplete = await findIncompleteRepos(localModelsDir, lemonadeDir);
     return Response.json({incomplete});
+  }
+
+  if (peer.agent_address) {
+    // Agent-only peer: the presence checks run here, over its storage; the
+    // Hugging Face reads were always the host's own.
+    try {
+      const incomplete = await findIncompleteRepos({
+        storage: storageForPeer(peer.address),
+        root: 'models',
+      });
+      return Response.json({incomplete});
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[peers] agent incomplete for ${peer.name} failed: ${msg}`);
+      return new Response(msg, {status: 502});
+    }
   }
 
   try {

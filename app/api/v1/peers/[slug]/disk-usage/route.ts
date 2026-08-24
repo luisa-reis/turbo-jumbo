@@ -2,6 +2,10 @@ import {config, localPeer, hasColdStorage, hasModelStorage} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {downloadDiskUsage} from '@/lib/storage/disk-usage';
+import {
+  isUnconfiguredRoot,
+  storageForPeer,
+} from '@/lib/storage/peer-storage';
 import {storage} from '@/lib/storage/storage-instance';
 
 // Free/total bytes of a specific peer's models filesystem. The local peer reads
@@ -30,6 +34,41 @@ export async function GET(
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(`[disk-usage] statfs on ${peer.name} failed: ${msg}`);
       return new Response(msg, {status: 500});
+    }
+  }
+
+  if (peer.agent_address) {
+    // The host can't be told which roots an agent has, so it asks each and
+    // treats "not configured" as absence — the same answer shape either way.
+    try {
+      const agent = storageForPeer(peer.address);
+      const probe = async (root: 'models' | 'cold') => {
+        try {
+          return await agent.usage(root);
+        } catch (e) {
+          if (isUnconfiguredRoot(e)) return null;
+          throw e;
+        }
+      };
+      const [models, cold] = await Promise.all([
+        probe('models'),
+        probe('cold'),
+      ]);
+      if (!models && !cold)
+        return new Response('No storage configured', {status: 400});
+      const plain = (u: {free: number; total: number}) => ({
+        free: u.free,
+        total: u.total,
+      });
+      return Response.json({
+        models: models && plain(models),
+        cold: cold && plain(cold),
+        sameDevice: !!models && !!cold && models.device === cold.device,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[disk-usage] agent probe for ${peer.name} failed: ${msg}`);
+      return new Response(msg, {status: 502});
     }
   }
 

@@ -2,6 +2,10 @@ import {config, localPeer, coldStorageDir} from '@/lib/config';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {scanModels} from '@/lib/models/models';
+import {
+  isUnconfiguredRoot,
+  storageForPeer,
+} from '@/lib/storage/peer-storage';
 
 // Proxy a peer's cold storage through the local server: scan locally for the
 // local peer, or forward to the named remote peer. The download picker uses
@@ -21,6 +25,23 @@ export async function GET(
     logger.debug(`[peers] fetch cold storage from ${peer.name} (local)`);
     if (!coldStorageDir) return new Response('No cold storage', {status: 400});
     return Response.json(await scanModels(coldStorageDir));
+  }
+
+  if (peer.agent_address) {
+    logger.debug(`[peers] scan cold storage from ${peer.name} (agent)`);
+    try {
+      const models = await scanModels({
+        storage: storageForPeer(peer.address),
+        root: 'cold',
+      });
+      return Response.json(models);
+    } catch (e) {
+      if (isUnconfiguredRoot(e))
+        return new Response('No cold storage', {status: 400});
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[peers] agent cold scan for ${peer.name} failed: ${msg}`);
+      return new Response(msg, {status: 502});
+    }
   }
 
   logger.debug(
