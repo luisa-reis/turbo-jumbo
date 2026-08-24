@@ -13,11 +13,14 @@
 
 import {
   HASH_EMIT_BYTES,
+  OFFSET_HEADER,
   REF_PATH_HEADER,
   REF_ROOT_HEADER,
   type HashFrame,
 } from '@/lib/storage/agent-protocol';
 import type {Roots} from '@/lib/storage/local-storage';
+import {receiveChunk} from '@/lib/storage/receive';
+import {resolveRef} from '@/lib/storage/resolve-ref';
 import {
   MAX_SMALL_FILE,
   type JobHandle,
@@ -117,6 +120,15 @@ function isJobSpec(v: unknown): v is JobSpec {
       (v.move === undefined || typeof v.move === 'boolean')
     );
   }
+  if (v.kind === 'send') {
+    return (
+      isRef(v.from) &&
+      isObject(v.to) &&
+      typeof v.to.agent === 'string' &&
+      (v.to.token === undefined || typeof v.to.token === 'string') &&
+      isRef(v.to.ref)
+    );
+  }
   return false;
 }
 
@@ -131,11 +143,22 @@ function jobSpec(v: JobSpec): JobSpec {
       into: ref(v.into),
     };
   }
+  if (v.kind === 'copy') {
+    return {
+      kind: 'copy',
+      from: ref(v.from),
+      to: ref(v.to),
+      ...(v.move !== undefined ? {move: v.move} : {}),
+    };
+  }
   return {
-    kind: 'copy',
+    kind: 'send',
     from: ref(v.from),
-    to: ref(v.to),
-    ...(v.move !== undefined ? {move: v.move} : {}),
+    to: {
+      agent: v.to.agent,
+      ...(v.to.token !== undefined ? {token: v.to.token} : {}),
+      ref: ref(v.to.ref),
+    },
   };
 }
 
@@ -335,6 +358,43 @@ export async function handleAgentRequest(
           },
         });
         return new Response(stream, {headers: NDJSON_HEADERS});
+      }
+
+      case 'receive': {
+        const root = req.headers.get(REF_ROOT_HEADER);
+        const rawPath = req.headers.get(REF_PATH_HEADER);
+        if (!isRoot(root) || rawPath === null) return bad('ref headers');
+        let path: string;
+        try {
+          path = decodeURIComponent(rawPath);
+        } catch {
+          return bad('ref headers');
+        }
+        const offset = parseInt(req.headers.get(OFFSET_HEADER) ?? '0', 10);
+        if (!Number.isInteger(offset) || offset < 0) return bad('offset');
+        // The one byte endpoint: an append past the small-file cap, so it
+        // goes to the filesystem beside the storage rather than through the
+        // interface — confined by the same resolveRef either way.
+        const dir = ctx.roots[root];
+        if (!dir) {
+          return new Response(`No ${root} directory is configured`, {
+            status: 400,
+          });
+        }
+        let full: string;
+        try {
+          full = resolveRef(dir, path);
+        } catch (e) {
+          return new Response(message(e), {status: 400});
+        }
+        const outcome = await receiveChunk(full, offset, req.body);
+        if (!outcome.ok) {
+          return new Response(
+            `Offset ${offset} does not match the ${outcome.heldBytes ?? 'missing'} byte(s) already here`,
+            {status: 409},
+          );
+        }
+        return Response.json({ok: true});
       }
 
       default:

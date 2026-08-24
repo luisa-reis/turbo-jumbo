@@ -11,6 +11,7 @@
  */
 
 import {
+  OFFSET_HEADER,
   REF_PATH_HEADER,
   REF_ROOT_HEADER,
   type HashFrame,
@@ -193,4 +194,40 @@ export function createHttpStorage(target: AgentTarget): Storage {
       return jobHandle(channel, () => ctl.abort());
     },
   };
+}
+
+/**
+ * One chunk of a `send` job, POSTed to the target agent's `receive` endpoint.
+ * Sits beside `createHttpStorage` because it is the same wire — but it is the
+ * send job's tool, not a `Storage` verb: weights cross machines only inside
+ * jobs, which is what keeps the small-file cap honest.
+ */
+export async function postReceiveChunk(
+  target: AgentTarget,
+  ref: Ref,
+  offset: number,
+  body: BodyInit | null,
+  signal?: AbortSignal,
+): Promise<void> {
+  const fetchImpl = target.fetchImpl ?? fetch;
+  const base = target.url.replace(/\/+$/, '');
+  const init: RequestInit = {
+    method: 'POST',
+    headers: {
+      ...(target.token ? {authorization: `Bearer ${target.token}`} : {}),
+      'Content-Type': 'application/octet-stream',
+      [REF_ROOT_HEADER]: ref.root,
+      [REF_PATH_HEADER]: encodeURIComponent(ref.path),
+      [OFFSET_HEADER]: String(offset),
+    },
+    body,
+    ...(signal ? {signal} : {}),
+  };
+  // Streaming request bodies need half-duplex declared; harmless otherwise.
+  (init as RequestInit & {duplex: 'half'}).duplex = 'half';
+  const res = await fetchImpl(`${base}/receive`, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `receive: HTTP ${res.status}`);
+  }
 }

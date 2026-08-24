@@ -397,6 +397,22 @@ Remaining call sites:
   local walk, link dry runs, hash progress and abort, and copy jobs
   with their resume.
 
+- The `send` job and its `receive` endpoint. The third job kind is run
+  by the machine holding the file: it proves the far side's partial
+  with the same hash-compare a local resume uses — the target's `hash`
+  verb over the wire against its own matching region — then streams
+  8 MiB chunks to the target agent's `receive`, whose offset check
+  refuses to splice into a file that changed since. Two deviations from
+  the sketch above: `to` is `{agent, token?, ref}` — the protocol URL
+  and bearer token handed along by whoever built the spec, the control
+  host trusting its own config — and there is no caller-supplied
+  `offset`, because a resume point is verified, never asserted. Jobs
+  also grew a `verify` event for the hash-compare stretch, which the
+  copy job now reports too, so a driving route can label the wait.
+  Tested with two in-process agents: fresh sends, proven and refused
+  resumes, an already-complete destination sending nothing, and a
+  control host driving A→B while holding none of the bytes.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

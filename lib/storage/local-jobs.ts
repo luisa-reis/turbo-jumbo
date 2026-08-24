@@ -6,15 +6,23 @@
  */
 
 import {spawn} from 'child_process';
-import {promises as fsp} from 'fs';
+import {createReadStream, promises as fsp} from 'fs';
 import nodePath from 'path';
+import {Readable} from 'stream';
 import {
   isValidFilePath,
   isValidRepoId,
   isValidRevision,
 } from '@/lib/hf/download-request';
-import {JobChannel, jobHandle} from '@/lib/storage/job-channel';
+import {fileSize} from '@/lib/storage/entries';
 import {streamCopyResumable} from '@/lib/storage/file-transfer';
+import {
+  createHttpStorage,
+  postReceiveChunk,
+  type AgentTarget,
+} from '@/lib/storage/http-storage';
+import {JobChannel, jobHandle} from '@/lib/storage/job-channel';
+import {peerResumeOffset} from '@/lib/storage/peer-resume';
 import {pruneEmptyDirs} from '@/lib/storage/prune';
 import type {
   CopyResult,
@@ -23,6 +31,7 @@ import type {
   JobSpec,
   Ref,
   Root,
+  SendResult,
 } from '@/lib/storage/storage';
 
 const ANSI_RE = /\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g;
@@ -136,8 +145,17 @@ export function startCopyJob(
         lastAt = now;
         channel.push({kind: 'progress', done, total: size});
       };
+      let lastVerify = 0;
       const resumedFrom = await streamCopyResumable(src, dst, {
         signal: ctl.signal,
+        // Hash-comparing a partial destination is the slow, silent stretch of
+        // a resume; report it so a caller can label the wait honestly.
+        onVerify: (done, total) => {
+          const now = Date.now();
+          if (now - lastVerify < PROGRESS_INTERVAL_MS && done < total) return;
+          lastVerify = now;
+          channel.push({kind: 'verify', done, total});
+        },
         onResume: (offset) => {
           done = offset;
           report(true);
@@ -153,6 +171,102 @@ export function startCopyJob(
         await pruneEmptyDirs(src, rootDir(spec.from.root));
       }
       const result: CopyResult = {resumedFrom, size};
+      channel.push({kind: 'done', result});
+    } catch (e) {
+      channel.push({
+        kind: 'error',
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  })();
+  return jobHandle(channel, () => {
+    ctl.abort();
+  });
+}
+
+// A send travels in bounded chunks, one request each: an interrupted transfer
+// loses at most a chunk, and the receiver's offset check guards every seam.
+const SEND_CHUNK_SIZE = 8 * 1024 * 1024;
+
+/**
+ * Stream a file to another agent's `receive` endpoint — the cross-machine
+ * copy, run by the machine that holds the file so the bytes never traverse
+ * whoever asked for the transfer.
+ *
+ * Resume is decided here, never asserted: the far side's partial counts only
+ * when its own hash of those bytes (the `hash` verb, over the wire) matches
+ * the source's same-length region — the peer-upload resume, aimed at an
+ * agent. `verify` events cover that stretch; `progress` starts at the proven
+ * offset and the skipped prefix counts as done, so the bar still sums to the
+ * file's size.
+ */
+export function startSendJob(
+  spec: Extract<JobSpec, {kind: 'send'}>,
+  resolve: Resolve,
+  agentFetch?: typeof fetch,
+): JobHandle {
+  const channel = new JobChannel();
+  const ctl = new AbortController();
+  void (async () => {
+    try {
+      const src = resolve(spec.from);
+      const target: AgentTarget = {
+        url: spec.to.agent,
+        ...(spec.to.token !== undefined ? {token: spec.to.token} : {}),
+        ...(agentFetch ? {fetchImpl: agentFetch} : {}),
+      };
+      const remote = createHttpStorage(target);
+      const size = (await fsp.stat(src)).size;
+
+      let lastVerify = 0;
+      const offset = await peerResumeOffset({
+        peer: spec.to.agent,
+        file: spec.to.ref.path,
+        srcFull: src,
+        srcSize: size,
+        signal: ctl.signal,
+        onVerify: (done, total) => {
+          const now = Date.now();
+          if (now - lastVerify < PROGRESS_INTERVAL_MS && done < total) return;
+          lastVerify = now;
+          channel.push({kind: 'verify', done, total});
+        },
+        reader: {
+          size: () => fileSize(remote, spec.to.ref.root, spec.to.ref.path),
+          sha256: () => remote.hash(spec.to.ref),
+        },
+      });
+
+      let done = offset;
+      let lastAt = 0;
+      const report = (force: boolean) => {
+        const now = Date.now();
+        if (!force && now - lastAt < PROGRESS_INTERVAL_MS) return;
+        lastAt = now;
+        channel.push({kind: 'progress', done, total: size});
+      };
+      report(true);
+
+      if (size === 0) {
+        // An empty file still has to exist at the far end.
+        await postReceiveChunk(target, spec.to.ref, 0, null, ctl.signal);
+      }
+      for (let at = offset; at < size; at += SEND_CHUNK_SIZE) {
+        ctl.signal.throwIfAborted();
+        const chunkEnd = Math.min(at + SEND_CHUNK_SIZE, size);
+        const rs = createReadStream(src, {start: at, end: chunkEnd - 1});
+        await postReceiveChunk(
+          target,
+          spec.to.ref,
+          at,
+          Readable.toWeb(rs) as unknown as BodyInit,
+          ctl.signal,
+        );
+        done = chunkEnd;
+        report(false);
+      }
+      report(true);
+      const result: SendResult = {resumedFrom: offset, size};
       channel.push({kind: 'done', result});
     } catch (e) {
       channel.push({

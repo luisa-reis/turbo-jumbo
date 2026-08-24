@@ -13,6 +13,10 @@
  *   with the terminal event. Cancelling is closing the connection: jobs are
  *   connection-scoped over the wire just as they are in-process, where the
  *   handle that started one is the only thing that can cancel it.
+ * - `receive`: raw bytes as the body, ref and offset in the headers below —
+ *   one chunk of a `send` job landing on the receiving agent. A non-zero
+ *   offset must name exactly the bytes already there; 409 otherwise, and the
+ *   sender starts over rather than splice into a file that changed.
  *
  * Errors are non-2xx with the message as a text body. Dependency-free on
  * purpose: both sides import shapes from here, neither imports the other.
@@ -21,10 +25,13 @@
 /** Cumulative bytes hashed so far, then the digest — or the failure. */
 export type HashFrame = {bytes: number} | {sha256: string} | {error: string};
 
-/** The `write` ref headers: the root by name, the path URI-encoded (a header
- *  value can't carry every byte a filename can). */
+/** The `write`/`receive` ref headers: the root by name, the path URI-encoded
+ *  (a header value can't carry every byte a filename can). */
 export const REF_ROOT_HEADER = 'x-tj-root';
 export const REF_PATH_HEADER = 'x-tj-path';
+
+/** `receive` only: the byte offset this chunk starts at. */
+export const OFFSET_HEADER = 'x-tj-offset';
 
 /** How often the hash stream reports progress — the byte-progress cadence the
  *  transfer routes already emit at. A final frame always closes the count. */

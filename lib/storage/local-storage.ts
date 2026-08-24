@@ -11,7 +11,11 @@ import {statfs} from 'fs/promises';
 import nodePath from 'path';
 import {readSafetensorsDtype} from '@/lib/models/safetensors';
 import {localSha256} from '@/lib/storage/file-transfer';
-import {startCopyJob, startDownloadJob} from '@/lib/storage/local-jobs';
+import {
+  startCopyJob,
+  startDownloadJob,
+  startSendJob,
+} from '@/lib/storage/local-jobs';
 import {pruneEmptyDirs} from '@/lib/storage/prune';
 import {resolveRef} from '@/lib/storage/resolve-ref';
 import {
@@ -34,7 +38,14 @@ export type Roots = Partial<Record<Root, string>>;
 
 const SAFETENSORS = /\.safetensors$/i;
 
-export function createLocalStorage(roots: Roots): Storage {
+export function createLocalStorage(
+  roots: Roots,
+  opts: {
+    /** How `send` jobs reach their target agent. A test seam; defaults to
+     *  global `fetch`. */
+    agentFetch?: typeof fetch;
+  } = {},
+): Storage {
   // The inventory cache, in the two forms that can't go stale.
   //
   // Reading a safetensors header is the one expensive thing a walk does, and
@@ -332,6 +343,9 @@ export function createLocalStorage(roots: Roots): Storage {
           forgetInFlight(spec.to.root);
           if (spec.move) forgetInFlight(spec.from.root);
           return startCopyJob(spec, resolve, rootDir);
+        case 'send':
+          // Reads only, locally: the write happens on the receiving agent.
+          return startSendJob(spec, resolve, opts.agentFetch);
       }
     },
 

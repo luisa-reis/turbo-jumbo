@@ -99,13 +99,14 @@ export interface RemoveOptions {
 }
 
 /**
- * Anything that runs long enough to need progress or cancelling. Two kinds so
- * far, both of an agent's own machine: a download (the agent runs `hf`
- * through this one named verb, validating every argument — never a shell) and
- * a copy between roots, which resumes a partial destination and can be a move.
- * A cross-agent `send` is the third kind the design names; it lands with the
- * agent that receives it. Hashing is the `hash` verb — its callbacks already
- * are the progress and cancellation a job gives.
+ * Anything that runs long enough to need progress or cancelling. Three kinds:
+ * a download (the agent runs `hf` through this one named verb, validating
+ * every argument — never a shell), a copy between roots, which resumes a
+ * partial destination and can be a move, and a cross-agent `send` — the
+ * machine holding the file streams it to another agent's `receive` endpoint,
+ * resuming from whatever verified prefix the far side already holds. Hashing
+ * is the `hash` verb — its callbacks already are the progress and
+ * cancellation a job gives.
  */
 export type JobSpec =
   | {
@@ -131,11 +132,28 @@ export type JobSpec =
        * hf's `.cache` bookkeeping behind.
        */
       move?: boolean;
+    }
+  | {
+      kind: 'send';
+      from: Ref;
+      /**
+       * Where the file goes: the target agent's protocol root (e.g.
+       * `http://host:3000/api/v1/storage`), the bearer token it requires (if
+       * any), and the ref to land at. There is no caller-asserted resume
+       * point — the job verifies the far side's partial itself, the same
+       * hash-compare a local copy does, and appends only past a prefix it
+       * proved.
+       */
+      to: {agent: string; token?: string; ref: Ref};
     };
 
 export type JobEvent =
   /** Bytes so far; `total` when the job knows it. Throttled, never per chunk. */
   | {kind: 'progress'; done: number; total: number | null}
+  /** Resume verification: hash-comparing a partial destination against the
+   *  source before any byte moves — the stretch a caller labels "verifying".
+   *  `done`/`total` count hashed bytes. */
+  | {kind: 'verify'; done: number; total: number}
   /** Output as it arrives — a tool's stderr, verbatim. */
   | {kind: 'log'; line: string}
   /** The job ran to its end; `result` is the kind's own record. */
@@ -159,6 +177,9 @@ export interface CopyResult {
   resumedFrom: number;
   size: number;
 }
+
+/** What a finished `send` job reports — a copy's record, across machines. */
+export type SendResult = CopyResult;
 
 export interface JobHandle {
   id: string;
