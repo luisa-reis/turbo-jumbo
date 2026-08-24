@@ -7,11 +7,16 @@
  */
 
 import {localModelsDir, coldStorageDir, lemonadeDir} from '@/lib/config';
-import {createLocalStorage} from '@/lib/storage/local-storage';
+import {createLocalStorage, type Roots} from '@/lib/storage/local-storage';
 import type {Storage} from '@/lib/storage/storage';
 
-export const storage: Storage = createLocalStorage({
+/** The directories behind this server's roots — also what the agent handlers
+ *  need for their byte endpoints, which work past the small-file cap that
+ *  keeps weights out of `read`/`write`. */
+export const storageRoots: Roots = {
   models: localModelsDir,
   cold: coldStorageDir,
   lemonade: lemonadeDir,
-});
+};
+
+export const storage: Storage = createLocalStorage(storageRoots);

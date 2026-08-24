@@ -13,6 +13,7 @@ import {readSafetensorsDtype} from '@/lib/models/safetensors';
 import {localSha256} from '@/lib/storage/file-transfer';
 import {startCopyJob, startDownloadJob} from '@/lib/storage/local-jobs';
 import {pruneEmptyDirs} from '@/lib/storage/prune';
+import {resolveRef} from '@/lib/storage/resolve-ref';
 import {
   MAX_SMALL_FILE,
   type FileEntry,
@@ -66,27 +67,10 @@ export function createLocalStorage(roots: Roots): Storage {
     return dir;
   }
 
-  /**
-   * A `Ref` as an absolute path.
-   *
-   * Two checks, deliberately belt and braces: the segment rules reject the
-   * paths that could escape, and the prefix check catches anything the rules
-   * missed. A traversal bug here is the whole confinement story.
-   */
+  /** A `Ref` as an absolute path, confined to its root (see resolve-ref.ts,
+   *  which the agent's byte endpoints share). */
   function resolve(ref: Ref): string {
-    const dir = rootDir(ref.root);
-    if (nodePath.isAbsolute(ref.path)) {
-      throw new Error(`Path must be relative to its root: ${ref.path}`);
-    }
-    if (ref.path.split('/').some((seg) => seg === '..')) {
-      throw new Error(`Path must not climb out of its root: ${ref.path}`);
-    }
-    const full = nodePath.resolve(dir, ref.path);
-    const base = nodePath.resolve(dir);
-    if (full !== base && !full.startsWith(base + nodePath.sep)) {
-      throw new Error(`Path resolves outside its root: ${ref.path}`);
-    }
-    return full;
+    return resolveRef(rootDir(ref.root), ref.path);
   }
 
   // Vanished-mid-walk is fine in any mode: a gone entry holds nothing. Every

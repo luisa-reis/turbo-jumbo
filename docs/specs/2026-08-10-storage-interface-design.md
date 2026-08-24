@@ -381,6 +381,22 @@ Remaining call sites:
    `copyFileWithMeta` in `storage/copy-meta.ts` goes with them.
    `lib/config` stays.
 
+### Where step 3 has got to
+
+- The wire, in three pieces. `agent-protocol.ts` fixes the encodings
+  (JSON for the verbs; raw bytes for `read`/`write`; NDJSON for hash
+  frames and job events, cancelled by closing the connection — which is
+  what abandoning a local handle already meant). `agent-handlers.ts`
+  serves every verb and job kind as plain Request → Response with no
+  framework in it, and `HttpStorage` (`http-storage.ts`) speaks it back
+  as a `Storage`. The full app mounts the handlers at
+  `/api/v1/storage/[op]`, so a peer running all of Turbo Jumbo already
+  answers as an agent — the sameness the mixed fleet of step 4 rests
+  on. Conformance-tested over an in-process fetch: confinement, the
+  small-file cap at both ends, dtype inventories byte-identical to the
+  local walk, link dry runs, hash progress and abort, and copy jobs
+  with their resume.
+
 ## Decided
 
 - **Live with `hf`.** The agent image carries Python and `huggingface_hub`.

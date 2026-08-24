@@ -13,60 +13,17 @@ import {
   isValidRepoId,
   isValidRevision,
 } from '@/lib/hf/download-request';
+import {JobChannel, jobHandle} from '@/lib/storage/job-channel';
 import {streamCopyResumable} from '@/lib/storage/file-transfer';
 import {pruneEmptyDirs} from '@/lib/storage/prune';
 import type {
   CopyResult,
   DownloadResult,
-  JobEvent,
   JobHandle,
   JobSpec,
   Ref,
   Root,
 } from '@/lib/storage/storage';
-
-/** Events pushed by the job, pulled by one consumer. Closes itself on a
- *  terminal event; anything pushed after is dropped. */
-class JobChannel implements AsyncIterable<JobEvent> {
-  private queue: JobEvent[] = [];
-  private wake: (() => void) | null = null;
-  private closed = false;
-
-  push(event: JobEvent): void {
-    if (this.closed) return;
-    this.queue.push(event);
-    if (event.kind === 'done' || event.kind === 'error') this.closed = true;
-    this.wake?.();
-    this.wake = null;
-  }
-
-  async *[Symbol.asyncIterator](): AsyncIterator<JobEvent> {
-    for (;;) {
-      const next = this.queue.shift();
-      if (next) {
-        yield next;
-        continue;
-      }
-      if (this.closed) return;
-      await new Promise<void>((resolve) => {
-        this.wake = resolve;
-      });
-    }
-  }
-}
-
-function handle(
-  channel: JobChannel,
-  cancel: () => Promise<void> | void,
-): JobHandle {
-  return {
-    id: crypto.randomUUID(),
-    events: () => channel,
-    cancel: async () => {
-      await cancel();
-    },
-  };
-}
 
 const ANSI_RE = /\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g;
 const stripAnsi = (s: string) => s.replace(ANSI_RE, '');
@@ -96,14 +53,14 @@ export function startDownloadJob(
         : null;
   if (invalid) {
     channel.push({kind: 'error', message: invalid});
-    return handle(channel, () => {});
+    return jobHandle(channel, () => {});
   }
   let dir: string;
   try {
     dir = resolve(spec.into);
   } catch (e) {
     channel.push({kind: 'error', message: (e as Error).message});
-    return handle(channel, () => {});
+    return jobHandle(channel, () => {});
   }
 
   const args = ['download', spec.repoId];
@@ -129,7 +86,7 @@ export function startDownloadJob(
     const result: DownloadResult = {exitCode: code, signal, output};
     channel.push({kind: 'done', result});
   });
-  return handle(channel, () => {
+  return jobHandle(channel, () => {
     proc.kill('SIGTERM');
   });
 }
@@ -204,7 +161,7 @@ export function startCopyJob(
       });
     }
   })();
-  return handle(channel, () => {
+  return jobHandle(channel, () => {
     ctl.abort();
   });
 }
