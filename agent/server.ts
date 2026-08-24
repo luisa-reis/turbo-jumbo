@@ -12,6 +12,11 @@
  * stores it beside the peer entry (`agent_token`) and presents it on every
  * request — including inside the `send` specs it hands other agents, so
  * tokens travel from config, never from agent to agent.
+ *
+ * This TS agent is the reference implementation: the production agent is
+ * the Rust crate beside this file (see the storage-interface spec's
+ * Decided section). It stays until the Rust agent passes the same
+ * conformance suites, then retires.
  */
 
 import {

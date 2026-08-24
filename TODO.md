@@ -8,18 +8,21 @@ history belongs to `docs/plans/` and `docs/specs/`.
 ## Storage interface migration (in flight)
 
 Split TJ into one UI host plus thin per-machine agents. Steps 1–3 are
-done: the interface, `LocalStorage`, every `lib/` call site, and now
-the wire — the agent protocol served by the full app at
+done: the interface, `LocalStorage`, every `lib/` call site, and the
+wire — the agent protocol served by the full app at
 `/api/v1/storage/[op]`, `HttpStorage`, the `send` job, the peer-to-peer
-copy and check routes driven entirely through sites and jobs, and the
-standalone agent (`bun run agent`) with `agent_address`/`agent_token`
-peer config. The spec records the decisions and progress:
+copy and check routes driven entirely through sites and jobs. The spec
+records the decisions and progress:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md),
-"Where step 3 has got to". Next: step 4 — cut peers over one at a
-time. A peer that runs only an agent still needs the host to answer
-its models table, downloads and audits through `HttpStorage` (today
-those ask the peer's app), and `site.ts`'s transitional string arm
-goes when the last caller passes a real site.
+"Where step 3 has got to". Next: the production agent in Rust
+(tokio/axum, crate scaffolded in `agent/`; the TS agent stands as the
+reference implementation until the Rust one passes the conformance
+suites, which are the protocol's contract). Then step 4 — cut peers
+over one at a time: a peer that runs only an agent still needs the
+host to answer its models table, downloads and audits through
+`HttpStorage` (today those ask the peer's app) plus the agent-side
+inventory cache that makes remote walks usable, and `site.ts`'s
+transitional string arm goes when the last caller passes a real site.
 
 ## Keep the standalone build from tracing the repo root
 

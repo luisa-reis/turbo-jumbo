@@ -374,13 +374,16 @@ Done:
 
 Remaining call sites:
 
-None. Step 3 is complete. What remains of the migration is step 4 —
-cutting peers over to thin agents one at a time (`agent_address` in
-their peer entries), which needs the host to answer a peer's models
-table, downloads and audits through `HttpStorage` where today it asks
-the peer's app — and retiring `lib/storage/site.ts`'s transitional
-string arm when the last caller passes a real site. `lib/config` stays
-on the host.
+None. Step 3 is complete. What remains of the migration: the
+production agent in Rust (see Decided — the TS agent stands as
+reference until parity), and step 4 — cutting peers over to thin
+agents one at a time (`agent_address` in their peer entries), which
+needs the host to answer a peer's models table, downloads and audits
+through `HttpStorage` where today it asks the peer's app, plus the
+lifetime-bearing inventory cache in the agent that makes those remote
+walks usable — and retiring `lib/storage/site.ts`'s transitional
+string arm when the last caller passes a real site. `lib/config`
+stays on the host.
 
 ### Where step 3 has got to
 
@@ -445,6 +448,8 @@ on the host.
   object. Exercised over real sockets in tests: the verbs, 401s for a
   missing or wrong token, streamed hashes, and an agent-to-agent send
   with resume — the design's end state in miniature.
+  (That TS agent now stands as the reference implementation; the
+  production agent is Rust — see Decided.)
 
 ## Decided
 
@@ -467,6 +472,27 @@ on the host.
   its containers — how the fleet runs today — so an agent in LXC and a
   Lemonade on the host see the same cache and extra-models directories
   with nothing extra to bind-mount.
+
+- **The production agent is Rust on Tokio.** Bun proved the protocol
+  but is the wrong weight for a scanty container, so the agent is
+  being rewritten as a single static binary: axum over tokio for the
+  server, serde for the wire, sha2 for digests, reqwest for a send's
+  outbound legs, tokio::process for the `hf` spawn, rustix for
+  statfs. The TS agent (`agent/*.ts`) stays as the reference
+  implementation until the Rust one passes the same conformance
+  suites, which become the protocol's contract — the wire is the
+  seam, so the host (HttpStorage, the copy route, the full app still
+  serving /api/v1/storage for mixed fleets) does not change at all.
+  Two consequences accepted: storage semantics live twice (TS for
+  the app, Rust for the agent), refereed by the conformance tests;
+  and Python still rides along for `hf` downloads — "no JS" is not
+  "no Python" — with Rust-native xet-core noted as a possible later
+  retirement of that too.
+- **`list` order is unspecified.** With one implementation, both ends
+  of a compare shared a single walk; with two, byte-order equality
+  would pin readdir order across languages for no caller's benefit —
+  the policy modules already tolerate any order. Callers must not
+  depend on it, and conformance assertions compare sorted.
 
 ## Open questions
 

@@ -62,3 +62,6 @@ next-env.d.ts
 
 .envrc
 
+
+# rust agent build artifacts (agent/Cargo.toml)
+/agent/target

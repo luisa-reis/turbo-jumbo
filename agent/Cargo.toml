@@ -1,0 +1,23 @@
+[package]
+name = "tj-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Turbo Jumbo's thin storage agent: the storage protocol over this machine's model disks."
+publish = false
+
+[dependencies]
+axum = "0.8"
+rustix = { version = "1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Archived upstream but stable; swap for a maintained fork (serde_yaml_ng /
+# saphyr) once one is picked deliberately rather than by guess.
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Wired in as the verbs land (see the storage-interface spec, Decided):
+# sha2      — the hash verb and resume verification
+# reqwest   — a send job's outbound legs (rustls)
+# notify    — inotify-backed inventory-cache invalidation (step 4)

@@ -21,3 +21,6 @@ roots:
   models: /mnt/models/turbo-jumbo
   cold: /mnt/cold-storage
   lemonade: /mnt/models/lemonade
+
+# Both agents read this same file: the Rust binary (tj-agent, the production
+# one — cargo build --release in agent/) and the TS reference (bun run agent).

@@ -3,7 +3,10 @@
  * one, at `/api/v1/storage/[op]`. Every operation is a POST to `<base>/<op>`:
  *
  * - `list`, `mkdir`, `remove`, `move`, `copy`, `link`, `usage`: a JSON body
- *   (the verb's arguments, refs as `{root, path}`), a JSON reply.
+ *   (the verb's arguments, refs as `{root, path}`), a JSON reply. `list`'s
+ *   entry order is unspecified: with two implementations of the walk (the
+ *   app's and the Rust agent's), byte-order equality would pin readdir
+ *   order across languages for no caller's benefit. Compare sorted.
  * - `read`: a JSON ref; the reply is the raw bytes.
  * - `write`: raw bytes as the body with the ref in the headers below — a
  *   JSON wrapping would base64 every sidecar for nothing.
