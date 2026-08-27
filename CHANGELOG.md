@@ -38,6 +38,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   only an agent, no app) is still to come: the models table and
   downloads still ask the peer's app.
 
+- **A download on a storage agent warns when that box has no `HF_TOKEN`.**
+  When a download runs on an agent and the agent's own environment has no
+  token, the download dialog now shows the same _"HF_TOKEN is not set — gated
+  or private repositories may fail to download."_ notice a local download
+  shows — reported by the machine actually running `hf`, so a missing token on
+  the agent no longer turns a gated or private download into an unexplained
+  failure.
+
 - **Deploy without a container.** `bin/deploy.sh` builds Next's standalone
   bundle, ships it over rsync as a new release under `~/tj/releases/` on the
   machine named in `.env`, installs the systemd user unit in

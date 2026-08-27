@@ -502,6 +502,21 @@ pub async fn run_download_job(
     };
     storage.invalidate_root(into.root);
 
+    // hf reads HF_TOKEN from the environment, which the child inherits (the unit
+    // loads it from agent.env). If this box has none, gated or private repos
+    // 401 — say so up front, flush-left, so the app lifts it into the download
+    // dialog's notices the same way it lifts hf's own stderr warnings.
+    if std::env::var("HF_TOKEN")
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true)
+    {
+        tx.json(&JobEvent::Log {
+            line: "HF_TOKEN is not set — gated or private repositories may fail to download.\n"
+                .to_string(),
+        })
+        .await;
+    }
+
     let mut cmd = tokio::process::Command::new("hf");
     cmd.arg("download").arg(&repo_id);
     for f in &files {
