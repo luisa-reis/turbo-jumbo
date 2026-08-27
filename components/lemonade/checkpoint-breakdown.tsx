@@ -5,6 +5,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import type {CheckpointStatusRow, Presence} from '@/lib/lemonade/lemonade';
+import type {RecoverySource} from '@/components/lemonade/use-checkpoint-recovery';
 
 const PRESENCE_BADGE: Record<
   Presence,
@@ -44,22 +45,25 @@ export function CheckpointBreakdown({
   rows,
   copyingLabel,
   copyError,
-  onCopyFromCold,
+  recoverySourcesFor,
+  onCopyFrom,
 }: {
   rows: CheckpointStatusRow[];
   copyingLabel?: string | null;
   copyError?: string | null;
-  onCopyFromCold?: (row: CheckpointStatusRow) => void;
+  // For a missing checkpoint, the locations a complete copy can be pulled from
+  // (cold storage, a peer) — one remedy button each. `onCopyFrom` starts the
+  // copy from the chosen source. Absent on tabs where recovery doesn't apply.
+  recoverySourcesFor?: (row: CheckpointStatusRow) => RecoverySource[];
+  onCopyFrom?: (row: CheckpointStatusRow, key: string) => void;
 }) {
   return (
     <VStack gap={3}>
       {rows.map((row) => {
         const badge = PRESENCE_BADGE[row.local];
-        const canCopy =
-          onCopyFromCold != null &&
-          row.local === 'none' &&
-          row.cold === 'complete';
         const copying = copyingLabel === row.label;
+        const sources =
+          onCopyFrom != null ? (recoverySourcesFor?.(row) ?? []) : [];
         return (
           <VStack key={row.label} gap={1}>
             <HStack gap={2} vAlign="center">
@@ -67,17 +71,17 @@ export function CheckpointBreakdown({
               <Text type="body">{row.label}</Text>
             </HStack>
             <Text type="supporting">{whereabouts(row)}</Text>
-            {canCopy && (
-              <HStack>
+            {sources.map((source) => (
+              <HStack key={source.key}>
                 <Button
-                  label={copying ? 'Copying…' : 'Copy from cold storage'}
+                  label={copying ? 'Copying…' : `Copy from ${source.label}`}
                   variant="ghost"
                   size="sm"
-                  onClick={() => onCopyFromCold(row)}
+                  onClick={() => onCopyFrom?.(row, source.key)}
                   isDisabled={copyingLabel != null}
                 />
               </HStack>
-            )}
+            ))}
           </VStack>
         );
       })}

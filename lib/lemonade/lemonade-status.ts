@@ -138,7 +138,7 @@ export function matchCheckpointFiles(
 }
 
 // One checkpoint's presence within a single location's scan.
-function checkpointPresence(cp: Checkpoint, models: Model[]): Presence {
+export function checkpointPresence(cp: Checkpoint, models: Model[]): Presence {
   const {variant} = cp;
   if (variant == null) {
     // A whole-repo checkpoint can't be matched file-by-file (the weight scan may

@@ -20,7 +20,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   it over from that peer or cold storage instead of the internet. Previously
   this check ran only when a machine audited its own storage, so a projector
   deleted from a peer went unflagged and, once peers became agents, unflagged
-  everywhere.
+  everywhere. The Lemonade browser's checkpoint breakdown gained the same
+  copy-from-a-peer recovery — it could previously only pull a missing
+  checkpoint from cold storage.
 
 - **A thin storage agent, in Rust.** A machine can serve its model
   disks with `tj-agent` — a single small binary speaking just the

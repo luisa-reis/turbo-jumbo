@@ -58,6 +58,7 @@ import {
   modelEndContent,
 } from '@/components/lemonade/catalog-rows';
 import {CheckpointBreakdown} from '@/components/lemonade/checkpoint-breakdown';
+import type {RecoverySource} from '@/components/lemonade/use-checkpoint-recovery';
 import {ModelLabelIcon} from '@/components/lemonade/model-label-icon';
 import {useLemonadeDownload} from '@/components/lemonade/use-lemonade-download';
 import {useFlmDownload} from '@/components/lemonade/use-flm-download';
@@ -116,7 +117,8 @@ export function LemonadeBrowser({
   incompleteRepos,
   canDownload,
   onDownloaded,
-  onCopyFromCold,
+  recoverySourcesFor,
+  onCopyFrom,
   copyingLabel,
   copyError,
 }: {
@@ -137,10 +139,13 @@ export function LemonadeBrowser({
   // Called after a download session ends so the parent can refresh local
   // models; the status markers then recompute from the new inventory.
   onDownloaded?: () => void;
-  // Copy a missing checkpoint's files out of cold storage, offered in the
-  // per-checkpoint breakdown. Absent on tabs whose cold storage isn't this
-  // machine's, which hides the button.
-  onCopyFromCold?: (row: CheckpointStatusRow) => void;
+  // Recover a missing checkpoint by copying it onto this machine from a complete
+  // copy elsewhere — cold storage or a peer — offered in the per-checkpoint
+  // breakdown. `recoverySourcesFor` lists the sources for a row; `onCopyFrom`
+  // starts the copy. Absent on tabs where downloads don't land here, which
+  // hides the buttons.
+  recoverySourcesFor?: (row: CheckpointStatusRow) => RecoverySource[];
+  onCopyFrom?: (row: CheckpointStatusRow, key: string) => void;
   copyingLabel?: string | null;
   copyError?: string | null;
 }) {
@@ -405,8 +410,8 @@ export function LemonadeBrowser({
   }, [extraModels, lemonadeCacheModels]);
 
   // Hovercard detail for a component row: each checkpoint judged across the
-  // tiers, with the copy-from-cold remedy when one sits only in the archive.
-  // Built per rendered row — only expanded sections pay for it.
+  // tiers, with a copy remedy when a missing one sits complete elsewhere — cold
+  // storage or a peer. Built per rendered row — only expanded sections pay for it.
   const breakdownFor = (comp: LemonadeComponent) => (
     <CheckpointBreakdown
       rows={componentCheckpointBreakdown(
@@ -416,7 +421,8 @@ export function LemonadeBrowser({
       )}
       copyingLabel={copyingLabel}
       copyError={copyError}
-      onCopyFromCold={onCopyFromCold}
+      recoverySourcesFor={recoverySourcesFor}
+      onCopyFrom={onCopyFrom}
     />
   );
 

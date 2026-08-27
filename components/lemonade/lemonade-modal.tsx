@@ -13,7 +13,7 @@ import {VStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {Link} from '@astryxdesign/core/Link';
 import {LemonadeBrowser} from '@/components/lemonade/lemonade-browser';
-import {useCheckpointColdCopy} from '@/components/lemonade/use-checkpoint-cold-copy';
+import {useCheckpointRecovery} from '@/components/lemonade/use-checkpoint-recovery';
 import {useInventoryLocations} from '@/components/models/use-inventory-locations';
 
 /**
@@ -115,13 +115,16 @@ export function LemonadeModal({
     ]);
   }, [refreshLocalModels, refreshLemonadeCache, refreshIncomplete]);
 
-  // The breakdown hovercard's copy-from-cold remedy. Same refresh as a
+  // The breakdown hovercard's copy remedy: pull a missing checkpoint onto this
+  // machine from cold storage or a peer that holds it. Same refresh as a
   // download: the copied checkpoint changes local completeness the same way.
-  const {copyFromCold, copyingLabel, copyError} = useCheckpointColdCopy({
-    coldModels,
-    localPeerAddress,
-    onCopied: onDownloaded,
-  });
+  const {recoverySourcesFor, copyFrom, copyingLabel, copyError} =
+    useCheckpointRecovery({
+      inventoryLocations,
+      peerConfigs,
+      localPeerAddress,
+      onCopied: onDownloaded,
+    });
 
   // Closing navigates to the location's table. replace (not push/back) behaves
   // identically for soft and hard navigation and leaves no modal entry in
@@ -145,12 +148,11 @@ export function LemonadeModal({
   // Any peer tab can download, and All when this machine holds models; Cold
   // Storage has no Lemonade view and never reaches here.
   const canDownload = canDownloadTo(activeLocation, peerConfigs);
-  // Copy-from-cold reads this machine's archive and lands locally, so it only
-  // makes sense when the tab's target is the local peer and there is one.
-  const canColdCopy =
-    hasColdStorage &&
-    targetPeerAddress !== null &&
-    targetPeerAddress === localPeerAddress;
+  // The copy remedy lands on this machine's storage, so it only makes sense
+  // when the tab's target is the local peer and there is one; its sources are
+  // cold storage and any peer holding a complete copy.
+  const canRecover =
+    targetPeerAddress !== null && targetPeerAddress === localPeerAddress;
 
   // On soft navigation away (e.g. browser Back while open) Next keeps the
   // unmatched @modal slot's previous state mounted, so gate on the URL: only
@@ -193,7 +195,8 @@ export function LemonadeModal({
           incompleteRepos={incompleteRepos}
           canDownload={canDownload}
           onDownloaded={onDownloaded}
-          onCopyFromCold={canColdCopy ? copyFromCold : undefined}
+          recoverySourcesFor={canRecover ? recoverySourcesFor : undefined}
+          onCopyFrom={canRecover ? copyFrom : undefined}
           copyingLabel={copyingLabel}
           copyError={copyError}
         />
