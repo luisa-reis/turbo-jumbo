@@ -10,6 +10,7 @@ import {
   componentDownloadStatus,
   componentInLemonadeCache,
   lemonadeDownloadStatus,
+  modelCheckpointBreakdown,
   modelInLemonadeCache,
   lemonadeGgufModels,
   lemonadeStatusTooltip,
@@ -1185,6 +1186,56 @@ test('componentCheckpointBreakdown marks unscannable files untracked, not missin
     [],
   );
   expect(rows[0].local).toBe('untracked');
+});
+
+test('modelCheckpointBreakdown splits a vision model into weight and mmproj rows', () => {
+  // The Qwen3.8-27B case: main weight present locally, mmproj gone — and a peer
+  // still holds a complete copy of the companion. The breakdown must name the
+  // mmproj as the missing part and point at the peer, so the marker's hovercard
+  // can offer to recover it (a plain model, not a multi-checkpoint component).
+  const m = model({
+    name: 'Qwen3.8-27B-GGUF',
+    repoId: 'unsloth/Qwen3.8-27B-GGUF',
+    variant: 'Qwen3.8-27B-UD-Q4_K_XL.gguf',
+    mmproj: 'mmproj-F16.gguf',
+  });
+  const weight = single('Qwen3.8-27B-UD-Q4_K_XL.gguf', 'Q4_K_XL');
+  const mmproj = single('mmproj-F16.gguf', 'F16');
+  const rows = modelCheckpointBreakdown(
+    m,
+    [
+      {
+        name: 'local',
+        models: [repoModel('unsloth/Qwen3.8-27B-GGUF', [weight])],
+        isLocal: true,
+      },
+      {
+        name: 'peer-2',
+        models: [repoModel('unsloth/Qwen3.8-27B-GGUF', [weight, mmproj])],
+      },
+      {
+        name: 'cold storage',
+        models: [repoModel('unsloth/Qwen3.8-27B-GGUF', [weight])],
+        isCold: true,
+      },
+    ],
+    [],
+  );
+  expect(
+    rows.map((r) => ({label: r.label, local: r.local, peers: r.peers})),
+  ).toEqual([
+    {
+      label: 'Qwen3.8-27B-UD-Q4_K_XL.gguf',
+      local: 'complete',
+      peers: ['peer-2'],
+    },
+    {label: 'mmproj-F16.gguf', local: 'none', peers: ['peer-2']},
+  ]);
+});
+
+test('modelCheckpointBreakdown is a single row when the model has no mmproj', () => {
+  const rows = modelCheckpointBreakdown(model(), [], []);
+  expect(rows.map((r) => r.label)).toEqual(['unsloth/Qwen3-0.6B-GGUF:Q4_0']);
 });
 
 test('matchCheckpointFiles returns the scanned groups a checkpoint stands for', () => {

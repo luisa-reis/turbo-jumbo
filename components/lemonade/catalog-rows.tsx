@@ -20,16 +20,18 @@ import {
 
 // The end-of-row content shared by a flat model and a collection's
 // downloadable member: download status, suggested badge, capability icons,
-// and size.
+// and size. `statusDetail` is the per-checkpoint breakdown shown in the status
+// marker's hovercard — how a vision GGUF's missing mmproj is named and recovered.
 export function modelEndContent(
   model: LemonadeModel,
   info: LemonadeDownloadInfo | undefined,
   inCache: boolean,
   showSuggestedToken: boolean,
+  statusDetail?: ReactNode,
 ) {
   return (
     <HStack gap={1} vAlign="center">
-      <StatusMarker info={info} />
+      <StatusMarker info={info} content={statusDetail} />
       <LemonadeCacheMarker present={inCache} />
       {showSuggestedToken && model.suggested && (
         <Badge label="suggested" variant="green" />

@@ -28,6 +28,7 @@ import {
   componentCheckpointBreakdown,
   componentDownloadStatus,
   lemonadeDownloadStatus,
+  modelCheckpointBreakdown,
   modelInLemonadeCache,
   repoDownloadStatus,
   type CatalogSection,
@@ -426,6 +427,23 @@ export function LemonadeBrowser({
     />
   );
 
+  // The same breakdown for a plain GGUF model — its main weight and, for a
+  // vision model, its mmproj — so a missing companion is named and recoverable
+  // right where a multi-checkpoint component's is, not just left as a marker.
+  const modelBreakdownFor = (m: LemonadeModel) => (
+    <CheckpointBreakdown
+      rows={modelCheckpointBreakdown(
+        m,
+        inventoryLocations,
+        lemonadeCacheModels,
+      )}
+      copyingLabel={copyingLabel}
+      copyError={copyError}
+      recoverySourcesFor={recoverySourcesFor}
+      onCopyFrom={onCopyFrom}
+    />
+  );
+
   // The flat catalog, grouped into ordered modality sections (GGUF models and
   // standalone non-llamacpp models together).
   const sections = useMemo(() => {
@@ -692,6 +710,7 @@ export function LemonadeBrowser({
                           statusByName.get(row.model.name),
                           inCacheByName.get(row.model.name) ?? false,
                           !suggestedOnly,
+                          modelBreakdownFor(row.model),
                         )}
                       />
                     ) : (

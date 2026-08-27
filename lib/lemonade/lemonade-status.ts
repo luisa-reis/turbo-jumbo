@@ -321,8 +321,10 @@ function checkpointLabel(cp: Checkpoint): string {
  * already exists. Same per-checkpoint judgement as the roll-up
  * (checkpointPresence / checkpointInCache), so the two views can't disagree.
  */
-export function componentCheckpointBreakdown(
-  component: LemonadeComponent,
+// Judge a fixed list of checkpoints across the tiers — the shared core of both
+// the component and the single-model breakdowns.
+function checkpointBreakdown(
+  checkpoints: Checkpoint[],
   locations: InventoryLocation[],
   cacheModels: Model[],
 ): CheckpointStatusRow[] {
@@ -331,7 +333,7 @@ export function componentCheckpointBreakdown(
   const peerLocs = locations.filter((l) => !l.isLocal && !l.isCold);
   const tierPresence = (cp: Checkpoint, locs: InventoryLocation[]): Presence =>
     rollUpPresence(locs.map((l) => checkpointPresence(cp, l.models)));
-  return component.checkpoints.map((cp) => ({
+  return checkpoints.map((cp) => ({
     checkpoint: cp,
     label: checkpointLabel(cp),
     local: tierPresence(cp, tiers('isLocal')),
@@ -344,6 +346,41 @@ export function componentCheckpointBreakdown(
       .map((l) => l.name),
     inCache: checkpointInCache(cp, cacheModels),
   }));
+}
+
+export function componentCheckpointBreakdown(
+  component: LemonadeComponent,
+  locations: InventoryLocation[],
+  cacheModels: Model[],
+): CheckpointStatusRow[] {
+  return checkpointBreakdown(component.checkpoints, locations, cacheModels);
+}
+
+// A plain GGUF catalog model's parts, as checkpoints: the main weight, plus its
+// companion projector (mmproj) when the entry names one — the same main+mmproj
+// pair a download fetches, expressed so the breakdown can judge each separately.
+function modelCheckpoints(model: LemonadeModel): Checkpoint[] {
+  const checkpoints: Checkpoint[] = [
+    {repoId: model.repoId, variant: model.variant},
+  ];
+  if (model.mmproj)
+    checkpoints.push({repoId: model.repoId, variant: model.mmproj});
+  return checkpoints;
+}
+
+/**
+ * Each part of a plain catalog model judged separately across the tiers — the
+ * single-model counterpart to componentCheckpointBreakdown. A vision GGUF whose
+ * mmproj is missing locally reads as one present row and one missing row, so the
+ * status marker's hovercard can name the gap and offer to recover the companion
+ * from cold storage or a peer, the same as a multi-checkpoint component.
+ */
+export function modelCheckpointBreakdown(
+  model: LemonadeModel,
+  locations: InventoryLocation[],
+  cacheModels: Model[],
+): CheckpointStatusRow[] {
+  return checkpointBreakdown(modelCheckpoints(model), locations, cacheModels);
 }
 
 /**
