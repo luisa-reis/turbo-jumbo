@@ -3,10 +3,7 @@ import {peerSlug} from '@/lib/peers/peer-slug';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
 import {streamHfDownload} from '@/lib/hf/hf-download-stream';
-import {
-  isUnconfiguredRoot,
-  storageForPeer,
-} from '@/lib/storage/peer-storage';
+import {isUnconfiguredRoot, storageForPeer} from '@/lib/storage/peer-storage';
 
 // Run an HF download on a specific peer. The local peer runs it directly via
 // the shared streamer; a remote peer runs it on itself — we forward the request
@@ -67,7 +64,9 @@ export async function POST(
     const res = await fetch(`http://${peer.address}/api/v1/hf-download`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      // `proxied`: our UI's HF_TOKEN banner reflects our environment, not this
+      // peer's, so have the peer self-report a missing token into the stream.
+      body: JSON.stringify({...body, proxied: true}),
       signal: req.signal,
     });
     if (!res.ok || !res.body)

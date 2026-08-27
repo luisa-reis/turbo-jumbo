@@ -273,6 +273,7 @@ export function streamHfDownload(
     fileScope,
     sendToCold,
     deleteAfterTransfer,
+    proxied,
   } = (body ?? {}) as {
     repoId?: unknown;
     branch?: unknown;
@@ -280,6 +281,9 @@ export function streamHfDownload(
     fileScope?: unknown;
     sendToCold?: unknown;
     deleteAfterTransfer?: unknown;
+    // Set by the peer download proxy: another machine's UI is driving this run,
+    // so its HF_TOKEN banner reflects that machine's environment, not ours.
+    proxied?: unknown;
   };
 
   if (!isValidRepoId(repoId))
@@ -317,6 +321,22 @@ export function streamHfDownload(
   const stream = new ReadableStream({
     start(controller) {
       const enqueue = (s: string) => controller.enqueue(encode(s));
+
+      // When a remote machine's UI drives an `hf` run on this host (the peer
+      // proxy sets `proxied`), that UI's HF_TOKEN banner reflects its own
+      // environment, not ours — so this host self-reports a missing token, as
+      // the agent does for its own downloads. A genuinely local run leaves the
+      // warning to the client banner; an agent target (its own storage) never
+      // reaches here. Flush-left, so parseNotices lifts it into the dialog's
+      // notices, and byte-identical to the agent's line.
+      if (
+        proxied &&
+        target.storage === storage &&
+        !process.env.HF_TOKEN?.trim()
+      )
+        enqueue(
+          'HF_TOKEN is not set — gated or private repositories may fail to download.\n',
+        );
 
       // hf --json prints no progress while downloading, so synthesize it: size
       // the bar from the repo's file sizes, then poll the inventory and emit a
