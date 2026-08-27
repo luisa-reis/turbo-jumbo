@@ -723,7 +723,11 @@ export function HomeClient({
           progress={redownload.progress}
           running={redownload.running}
           command={redownload.command ?? undefined}
-          hfTokenSet={hfTokenSet}
+          // `hfTokenSet` reflects this host's environment. A recovery onto a
+          // peer runs `hf` there (agent or app), which self-reports a missing
+          // token into the stream — so suppress the local banner for a peer
+          // recovery, as the download picker does for a remote target.
+          hfTokenSet={hfTokenSet || auditPeer != null}
           onClose={closeRedownload}
         />
       )}
