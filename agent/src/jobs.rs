@@ -1,7 +1,7 @@
 //! The three job kinds, ported from lib/storage/local-jobs.ts and held to
 //! its observable behavior: a copy between roots with a hash-verified
-//! resume, a send streaming 8 MiB chunks into another agent's receive
-//! endpoint, and a download shelling out to `hf` — argv only, every
+//! resume, a send streaming the file into another agent's receive endpoint
+//! in one request, and a download shelling out to `hf` — argv only, every
 //! argument validated here whatever the caller checked. Events go out as
 //! NDJSON through the sender; the client closing the connection is the
 //! cancellation, checked wherever the work loops.
@@ -10,6 +10,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use bytes::Bytes;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::hashing::{sha256_region, HashOutcome};
 use crate::ndjson::NdjsonSender;
@@ -23,8 +26,16 @@ use crate::wire::{
 /// Progress is reported at most this often, plus once at the end.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
-/// A send travels in bounded chunks, one request each.
+/// How much a send reads from disk at a time. A send is *one* request whose
+/// body streams, so this is the read granularity, not a request size: the
+/// far side sees a single append and opens the file once.
 const SEND_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
+
+/// Chunks the reader may run ahead of the socket. This is what makes the disk
+/// read and the wire overlap instead of alternating; the cost is that much
+/// memory in flight per send, and progress that leads the bytes actually on
+/// the wire by at most this many chunks.
+const SEND_READAHEAD: usize = 2;
 
 const COPY_CHUNK: usize = 64 * 1024;
 
@@ -244,33 +255,20 @@ async fn send_job(
     };
 
     let mut done = offset;
-    let mut throttle = Throttle::new();
-    if throttle.ready(true) {
-        tx.json(&JobEvent::Progress { done, total: size }).await;
-    }
+    tx.json(&JobEvent::Progress { done, total: size }).await;
     if size == 0 {
         // An empty file still has to exist at the far end.
         post_receive(&client, &to, 0, Vec::new()).await?;
-    }
-    let mut at = offset;
-    while at < size {
-        if tx.is_closed() {
-            return Ok(());
+    } else if offset < size {
+        if let Err(e) = stream_to_receive(&client, &to, &src, offset, size, tx).await {
+            // The client going away aborts the upload mid-body. That is the
+            // cancellation, not a failure worth reporting.
+            if tx.is_closed() {
+                return Ok(());
+            }
+            return Err(e);
         }
-        let chunk_end = (at + SEND_CHUNK_SIZE).min(size);
-        let src_chunk = src.clone();
-        let chunk = tokio::task::spawn_blocking(move || {
-            read_region(&src_chunk, at, (chunk_end - at) as usize)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        post_receive(&client, &to, at, chunk).await?;
-        at = chunk_end;
-        done = chunk_end;
-        if throttle.ready(false) {
-            tx.json(&JobEvent::Progress { done, total: size }).await;
-        }
+        done = size;
     }
     tx.json(&JobEvent::Progress { done, total: size }).await;
     tx.json(&JobEvent::Done {
@@ -424,18 +422,83 @@ fn agent_post(client: &reqwest::Client, to: &SendTarget, op: &str) -> reqwest::R
     req
 }
 
+/// Stream `src[offset..size]` to the target agent as one request body.
+///
+/// A reader task fills a bounded channel while the request drains it, so the
+/// disk read overlaps the wire instead of taking turns with it — and the far
+/// side opens, seeks and appends once for the whole file rather than once per
+/// chunk. Progress is reported by the reader, so it leads the socket by at
+/// most `SEND_READAHEAD` chunks.
+///
+/// Any early end has to abort the request rather than close the body cleanly:
+/// a short body looks to the receiver like a complete file, and it would
+/// commit the truncated bytes as one.
+async fn stream_to_receive(
+    client: &reqwest::Client,
+    to: &SendTarget,
+    src: &Path,
+    offset: u64,
+    size: u64,
+    tx: &NdjsonSender,
+) -> Result<(), String> {
+    let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(SEND_READAHEAD);
+    let src_path = src.to_path_buf();
+    let reader_tx = tx.clone();
+    let reader = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        let mut at = offset;
+        let mut throttle = Throttle::new();
+        while at < size {
+            if reader_tx.is_closed() {
+                let _ = chunk_tx.blocking_send(Err(std::io::Error::other("cancelled")));
+                return Ok(());
+            }
+            let len = SEND_CHUNK_SIZE.min(size - at) as usize;
+            let chunk = match read_region(&src_path, at, len) {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    let _ = chunk_tx.blocking_send(Err(std::io::Error::other(e.to_string())));
+                    return Err(e);
+                }
+            };
+            at += len as u64;
+            // A closed channel means the request is already gone; its own
+            // error is the one worth reporting, so end quietly.
+            if chunk_tx.blocking_send(Ok(Bytes::from(chunk))).is_err() {
+                return Ok(());
+            }
+            if throttle.ready(at == size) {
+                reader_tx.blocking_json(&JobEvent::Progress {
+                    done: at,
+                    total: size,
+                });
+            }
+        }
+        Ok(())
+    });
+
+    let body = reqwest::Body::wrap_stream(ReceiverStream::new(chunk_rx));
+    let sent = post_receive(client, to, offset, body).await;
+    // A failed read aborts the body, which surfaces at the request as a
+    // generic stream error — so the read's own error is the root cause.
+    match reader.await {
+        Ok(Ok(())) => sent,
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 async fn post_receive(
     client: &reqwest::Client,
     to: &SendTarget,
     offset: u64,
-    chunk: Vec<u8>,
+    body: impl Into<reqwest::Body>,
 ) -> Result<(), String> {
     let res = agent_post(client, to, "receive")
         .header("content-type", "application/octet-stream")
         .header(REF_ROOT_HEADER, to.target.root.as_str())
         .header(REF_PATH_HEADER, encode_uri_component(&to.target.path))
         .header(OFFSET_HEADER, offset.to_string())
-        .body(chunk)
+        .body(body)
         .send()
         .await
         .map_err(|e| e.to_string())?;

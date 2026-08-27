@@ -71,6 +71,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Transfers between storage agents are faster.** An agent used to push a
+  file to another agent in a series of 8 MiB uploads, waiting for each one to
+  be written and acknowledged before reading the next — so the disk read, the
+  network and the far side's write took turns instead of running at once, and
+  every 8 MiB paid a full round trip plus a reopen of the file at the other
+  end. A send is now a single streaming upload that reads ahead of the wire,
+  so those overlap and the destination opens the file once. Resuming an
+  interrupted transfer, and everything else about how transfers behave, is
+  unchanged.
+
 - **Copies between peers now run over the storage protocol.** The
   machines talk to each other's `/api/v1/storage` endpoints for
   transfers, conflict checks and the provenance that rides along,
