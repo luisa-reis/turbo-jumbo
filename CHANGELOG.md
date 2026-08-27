@@ -71,6 +71,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Resuming an interrupted transfer starts sooner.** Before a resumed copy
+  moves a byte it checks that the half-finished file really is a prefix of the
+  source, by hashing both — a wait you sit through on a large partial. The two
+  are now hashed at the same time instead of one after the other, and read in
+  larger steps: a 1.5 GiB partial went from ~1.6s to ~0.8s in testing. What is
+  checked is unchanged — the whole partial, on both sides, exactly as before —
+  so a mismatched leftover is still caught and recopied from the start.
+
 - **Archiving to cold storage on the same disk is near-instant.** A copy
   between a machine's own storage tiers used to read every byte into the agent
   and write it back out. It now asks the kernel to do the copy, which on a

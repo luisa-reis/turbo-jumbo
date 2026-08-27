@@ -14,7 +14,11 @@ pub enum HashOutcome {
     Cancelled,
 }
 
-const CHUNK: usize = 64 * 1024;
+/// Read size per hashing step. SHA-256 runs at gigabytes a second where the
+/// CPU accelerates it, so a small chunk turns the read syscall into the cost;
+/// this keeps that count low while still reporting (and so answering
+/// cancellation) often enough at any realistic disk speed.
+const CHUNK: usize = 1024 * 1024;
 
 /// SHA-256 of the first `limit` bytes of `path` (all of them when None),
 /// reporting each chunk's size to `on_bytes` — whose `false` cancels the

@@ -8,7 +8,8 @@
 
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -210,9 +211,11 @@ fn copy_job(
 /// Where a copy of `src` to `dst` may resume: the destination's bytes count
 /// only when hashing them matches the source's same-length region. Both
 /// regions' bytes feed one verify counter (total = twice the partial), as
-/// the TS resumeOffset reports — hashed here in sequence where the TS side
-/// overlapped them, which changes wall-clock, never the answer. None means
-/// the client went away.
+/// the TS resumeOffset reports, and — as it does too — the two are hashed at
+/// once rather than one after the other: they are independent reads, and this
+/// pair is the whole cost of deciding whether a partial can be resumed, which
+/// a user waits through before any bytes move. None means the client went
+/// away.
 fn resume_offset(
     src: &Path,
     dst: &Path,
@@ -227,24 +230,37 @@ fn resume_offset(
         return Ok(Some(0));
     }
     let total = dst_size * 2;
-    let mut hashed = 0u64;
-    let mut throttle = Throttle::new();
-    let mut on_bytes = |n: u64, tx: &NdjsonSender| {
-        hashed += n;
-        if throttle.ready(hashed == total) {
-            return tx.blocking_json(&JobEvent::Verify {
-                done: hashed,
-                total,
-            });
+    // Shared across the two readers, so the counter stays one running total
+    // and the reports keep their single cadence however the reads interleave.
+    let hashed = AtomicU64::new(0);
+    let throttle = Mutex::new(Throttle::new());
+    let on_bytes = |n: u64| -> bool {
+        let done = hashed.fetch_add(n, Ordering::Relaxed) + n;
+        let ready = match throttle.lock() {
+            Ok(mut t) => t.ready(done == total),
+            Err(_) => false,
+        };
+        if ready {
+            return tx.blocking_json(&JobEvent::Verify { done, total });
         }
         !tx.is_closed()
     };
-    let dst_sha = match sha256_region(dst, Some(dst_size), |n| on_bytes(n, tx)) {
-        Ok(HashOutcome::Done(sha)) => sha,
-        Ok(HashOutcome::Cancelled) => return Ok(None),
-        Err(_) => return Ok(Some(0)), // unreadable partial: start over
+    // The destination on a second thread, the source on this one.
+    let (dst_out, src_out) = std::thread::scope(|scope| {
+        let dst_task = scope.spawn(|| sha256_region(dst, Some(dst_size), &on_bytes));
+        let src_out = sha256_region(src, Some(dst_size), &on_bytes);
+        (dst_task.join(), src_out)
+    });
+    // Judged in the same order as when these ran in sequence, so an unreadable
+    // destination still means "start over" rather than surfacing whatever the
+    // source's read happened to do.
+    let dst_sha = match dst_out {
+        Ok(Ok(HashOutcome::Done(sha))) => sha,
+        Ok(Ok(HashOutcome::Cancelled)) => return Ok(None),
+        Ok(Err(_)) => return Ok(Some(0)), // unreadable partial: start over
+        Err(_) => return Err("hashing the destination panicked".to_string()),
     };
-    let src_sha = match sha256_region(src, Some(dst_size), |n| on_bytes(n, tx)) {
+    let src_sha = match src_out {
         Ok(HashOutcome::Done(sha)) => sha,
         Ok(HashOutcome::Cancelled) => return Ok(None),
         Err(e) => return Err(e.to_string()),
