@@ -71,6 +71,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A storage agent sends a file without copying it through itself.** The
+  agent hands the file straight to the kernel to put on the wire, so the bytes
+  go from the disk cache to the network without passing through the agent at
+  all. It costs about a third less CPU per gigabyte, which matters most when
+  several files are moving at once on a busy machine. Nothing about the
+  transfer changes — same endpoint, same resume, and a machine that can't do
+  it falls back to sending the bytes the previous way.
+
 - **Resuming an interrupted transfer starts sooner.** Before a resumed copy
   moves a byte it checks that the half-finished file really is a prefix of the
   source, by hashing both — a wait you sit through on a large partial. The two

@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
+use tokio::net::TcpStream;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::hashing::{sha256_region, HashOutcome};
@@ -301,7 +303,15 @@ async fn send_job(
         // An empty file still has to exist at the far end.
         post_receive(&client, &to, 0, Vec::new()).await?;
     } else if offset < size {
-        if let Err(e) = stream_to_receive(&client, &to, &src, offset, size, tx).await {
+        // Prefer the connection this job drives itself, where the body leaves
+        // with sendfile(2) and never enters this process; fall back to the
+        // portable streaming client for a target that can't be driven that way.
+        let outcome = match sendfile_to_receive(&to, &src, offset, size, tx).await {
+            Ok(true) => Ok(()),
+            Ok(false) => stream_to_receive(&client, &to, &src, offset, size, tx).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = outcome {
             // The client going away aborts the upload mid-body. That is the
             // cancellation, not a failure worth reporting.
             if tx.is_closed() {
@@ -461,6 +471,234 @@ fn agent_post(client: &reqwest::Client, to: &SendTarget, op: &str) -> reqwest::R
         req = req.header("authorization", format!("Bearer {token}"));
     }
     req
+}
+
+/// A plain-http endpoint this job can drive itself: what to connect to, what
+/// the Host header should say, and the protocol root path.
+struct HttpEndpoint {
+    authority: String,
+    connect: String,
+    path: String,
+}
+
+/// Parse `http://host[:port]/path`. None for anything else — a TLS URL, a
+/// shape we don't recognise — which simply keeps that send on the portable
+/// path. Agents speak plain http on the LAN by design, so this is the norm,
+/// not the exception.
+fn plain_http_endpoint(url: &str) -> Option<HttpEndpoint> {
+    let rest = url.strip_prefix("http://")?;
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    // An IPv6 literal keeps its brackets, and carries a port only after the
+    // closing one — so a bare `[::1]` must not be split on its own colons.
+    let has_port = if authority.ends_with(']') {
+        false
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) => {
+                if host.is_empty() || port.parse::<u16>().is_err() {
+                    return None;
+                }
+                true
+            }
+            None => false,
+        }
+    };
+    Some(HttpEndpoint {
+        authority: authority.to_string(),
+        connect: if has_port {
+            authority.to_string()
+        } else {
+            format!("{authority}:80")
+        },
+        path: path.trim_end_matches('/').to_string(),
+    })
+}
+
+/// Errors that mean the kernel won't splice this particular pair — an old
+/// kernel, a source or socket it can't do — as opposed to the transfer
+/// genuinely failing.
+fn sendfile_unsupported(e: &std::io::Error) -> bool {
+    let code = e.raw_os_error();
+    code == Some(rustix::io::Errno::INVAL.raw_os_error())
+        || code == Some(rustix::io::Errno::NOSYS.raw_os_error())
+        || code == Some(rustix::io::Errno::OPNOTSUPP.raw_os_error())
+}
+
+/// Stream `src[offset..size]` to the target's receive endpoint over a
+/// connection this job drives itself, so the body can leave with sendfile(2):
+/// the bytes go from the page cache to the socket without ever being copied
+/// through this process.
+///
+/// It is an ordinary HTTP/1.1 request — the same endpoint, headers and bearer
+/// token the portable path sends, written by hand only so the body can be
+/// handed to the kernel — which is why an agent and a peer running the whole
+/// app both answer it unchanged.
+///
+/// `Ok(false)` means the target isn't a plain-http endpoint this can drive and
+/// the caller should take the portable path. Once the request is on the wire
+/// every outcome is this function's to report.
+async fn sendfile_to_receive(
+    to: &SendTarget,
+    src: &Path,
+    offset: u64,
+    size: u64,
+    tx: &NdjsonSender,
+) -> Result<bool, String> {
+    let Some(ep) = plain_http_endpoint(&to.agent) else {
+        return Ok(false);
+    };
+    let file = fs::File::open(src).map_err(|e| e.to_string())?;
+
+    let mut head = format!(
+        "POST {}/receive HTTP/1.1\r\nHost: {}\r\n",
+        ep.path, ep.authority
+    );
+    if let Some(token) = &to.token {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    head.push_str("Content-Type: application/octet-stream\r\n");
+    head.push_str(&format!(
+        "{REF_ROOT_HEADER}: {}\r\n",
+        to.target.root.as_str()
+    ));
+    head.push_str(&format!(
+        "{REF_PATH_HEADER}: {}\r\n",
+        encode_uri_component(&to.target.path)
+    ));
+    head.push_str(&format!("{OFFSET_HEADER}: {offset}\r\n"));
+    head.push_str(&format!("Content-Length: {}\r\n", size - offset));
+    // One request per connection, so the response is simply everything up to
+    // EOF and there is no keep-alive state to get wrong.
+    head.push_str("Connection: close\r\n\r\n");
+
+    let mut socket = TcpStream::connect(&ep.connect)
+        .await
+        .map_err(|e| format!("connect {}: {e}", ep.connect))?;
+    socket
+        .write_all(head.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut at = offset;
+    let mut throttle = Throttle::new();
+    // Set once the kernel has told us it won't splice this pair; the body then
+    // finishes from userspace on the same connection, so the request stays
+    // exactly as long as its Content-Length promised.
+    let mut by_hand = false;
+    while at < size {
+        if tx.is_closed() {
+            return Err("cancelled".to_string());
+        }
+        let want = (size - at).min(SEND_CHUNK_SIZE) as usize;
+        if !by_hand {
+            let mut cursor = at;
+            let sent = socket
+                .async_io(Interest::WRITABLE, || {
+                    rustix::fs::sendfile(&socket, &file, Some(&mut cursor), want)
+                        .map_err(|e| std::io::Error::from_raw_os_error(e.raw_os_error()))
+                })
+                .await;
+            match sent {
+                Ok(0) => return Err("send: source ended before its size".to_string()),
+                Ok(n) => {
+                    at += n as u64;
+                    if throttle.ready(at == size) {
+                        tx.json(&JobEvent::Progress {
+                            done: at,
+                            total: size,
+                        })
+                        .await;
+                    }
+                    continue;
+                }
+                Err(e) if at == offset && sendfile_unsupported(&e) => by_hand = true,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        let chunk = tokio::task::spawn_blocking({
+            let src = src.to_path_buf();
+            move || read_region(&src, at, want)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        socket.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        at += want as u64;
+        if throttle.ready(at == size) {
+            tx.json(&JobEvent::Progress {
+                done: at,
+                total: size,
+            })
+            .await;
+        }
+    }
+
+    // Read exactly the response head. Waiting for the connection to close
+    // would hang against a server that keeps it alive regardless of the
+    // `Connection: close` we asked for, and the status line is all a success
+    // needs; only a failure goes on to read its message.
+    let mut resp = Vec::new();
+    let mut chunk = [0u8; 2048];
+    let head_end = loop {
+        if let Some(i) = resp
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| i + 4)
+        {
+            break i;
+        }
+        let n = socket
+            .read(&mut chunk)
+            .await
+            .map_err(|e| format!("receive: {e}"))?;
+        if n == 0 {
+            return Err("receive: connection closed before a response".to_string());
+        }
+        resp.extend_from_slice(&chunk[..n]);
+        if resp.len() > 64 * 1024 {
+            return Err("receive: response head too large".to_string());
+        }
+    };
+    let head = String::from_utf8_lossy(&resp[..head_end]).into_owned();
+    let status = head
+        .split_once("\r\n")
+        .and_then(|(line, _)| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| "receive: unreadable response".to_string())?;
+    if (200..300).contains(&status) {
+        return Ok(true);
+    }
+    // The far side's own message is the useful error, so read what it declared
+    // — bounded, and never waiting on a body that isn't coming.
+    let declared = head
+        .lines()
+        .find_map(|l| {
+            l.split_once(':')
+                .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        })
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(8 * 1024);
+    let mut body = resp.split_off(head_end);
+    while body.len() < declared {
+        let n = socket.read(&mut chunk).await.unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..n]);
+    }
+    let message = String::from_utf8_lossy(&body).trim().to_string();
+    Err(if message.is_empty() {
+        format!("receive: HTTP {status}")
+    } else {
+        message
+    })
 }
 
 /// Stream `src[offset..size]` to the target agent as one request body.
