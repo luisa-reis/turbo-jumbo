@@ -37,7 +37,10 @@ const SEND_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
 /// the wire by at most this many chunks.
 const SEND_READAHEAD: usize = 2;
 
-const COPY_CHUNK: usize = 64 * 1024;
+/// How much one in-kernel copy call moves at most. Large enough that the
+/// syscall count stays trivial (16 calls to the gigabyte), small enough that
+/// progress and cancellation still get a look in between them.
+const COPY_CHUNK: u64 = 64 * 1024 * 1024;
 
 struct Throttle {
     last: Option<Instant>,
@@ -140,23 +143,45 @@ fn copy_job(
         reader
             .seek(std::io::SeekFrom::Start(offset))
             .map_err(|e| e.to_string())?;
+        // Deliberately not O_APPEND for a resume: copy_file_range(2) refuses
+        // an append-mode target, and the verified prefix already says exactly
+        // where to continue from. set_len pins the destination to that prefix
+        // so nothing beyond it can survive as a tail.
         let mut writer = if offset > 0 {
-            fs::OpenOptions::new().append(true).open(&dst)
+            let f = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                // Keep what is already there: the prefix was just verified.
+                .truncate(false)
+                .open(&dst)
+                .map_err(|e| e.to_string())?;
+            f.set_len(offset).map_err(|e| e.to_string())?;
+            f
         } else {
-            fs::File::create(&dst)
-        }
-        .map_err(|e| e.to_string())?;
-        let mut buf = vec![0u8; COPY_CHUNK];
-        loop {
+            fs::File::create(&dst).map_err(|e| e.to_string())?
+        };
+        writer
+            .seek(std::io::SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
+        while done < size {
             if tx.is_closed() {
                 return Ok(());
             }
-            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            // std::io::copy over a bounded Take issues copy_file_range(2) on
+            // Linux: the bytes move inside the kernel instead of being read
+            // into this process and written back out, and on a reflink
+            // filesystem (btrfs, XFS) a same-filesystem copy becomes a
+            // copy-on-write clone that moves no data at all. std falls back to
+            // a userspace loop by itself wherever the syscall isn't available,
+            // so this needs no fallback of its own. Bounded per call so
+            // progress and cancellation still get a look in between.
+            let want = (size - done).min(COPY_CHUNK);
+            let n = std::io::copy(&mut Read::by_ref(&mut reader).take(want), &mut writer)
+                .map_err(|e| e.to_string())?;
             if n == 0 {
-                break;
+                break; // source ended earlier than its metadata claimed
             }
-            writer.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-            done += n as u64;
+            done += n;
             report(done, false, &mut throttle);
         }
         writer.flush().map_err(|e| e.to_string())?;

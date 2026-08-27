@@ -71,6 +71,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Archiving to cold storage on the same disk is near-instant.** A copy
+  between a machine's own storage tiers used to read every byte into the agent
+  and write it back out. It now asks the kernel to do the copy, which on a
+  filesystem that supports it (btrfs, XFS) makes a same-filesystem copy a
+  copy-on-write clone: 1 GiB went from ~0.45s to ~0.004s in testing, and the
+  archived copy takes up no extra space until one of the two is changed. Where
+  the tiers sit on different filesystems, or the filesystem has no such
+  support, the copy falls back to moving the bytes as before.
+
 - **A copy of several files no longer waits for one file at a time.** Copying
   a multi-file model ran each file start to finish before touching the next,
   so every file's opening handshake, its resume check and the provenance
