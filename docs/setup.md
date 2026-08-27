@@ -66,6 +66,46 @@ back is pointing `current` at an older one and
 A machine without a model store of its own — the viewer described under
 "Configuration" above — deploys the same way; only its `config.yaml` differs.
 
+### Deploying the storage agents
+
+A storage box can run the thin Rust agent ([`agent/`](../agent)) instead of the
+full app — a single static binary speaking only the storage protocol, which the
+control host drives. `bin/deploy.sh` ships it too, under its own systemd user
+unit ([`deploy/tj-agent.service`](../deploy/tj-agent.service)); the box needs
+only ssh access for the deploying account (and, to download, the `hf` CLI).
+
+On the build host, add the agent boxes to `.env`:
+
+```bash
+AGENT_HOSTS="<account>@<box1> <account>@<box2>"   # one agent per box
+```
+
+The agent is built fully static for `x86_64-unknown-linux-musl` by default, so
+one binary runs on any box regardless of its libc — run
+`rustup target add x86_64-unknown-linux-musl` once on the build host (or set
+`AGENT_TARGET=` empty in `.env` to build for the build host's own target). Then:
+
+```bash
+bin/deploy.sh              # deploys the app AND every agent configured
+bin/deploy.sh --agents     # just the agents
+bin/deploy.sh --app        # just the app
+bin/deploy.sh -n --agents  # build and report what would ship, touching nothing
+```
+
+On each agent box, as the account it runs as: put its `~/tj-agent/agent.yaml`
+(port, bearer token, and the `roots:` this box serves — see
+[`agent.yaml.sample`](../agent.yaml.sample)); a downloading agent's `hf` setup
+goes in `~/tj-agent/agent.env`; and have root run `loginctl enable-linger`
+once, as for the app. A deploy lands in `~/tj-agent/releases/<stamp>/`, flips
+`~/tj-agent/current`, restarts `tj-agent`, and waits for its `/api/v1/version`
+to report the shipped commit (the binary is stamped at build time); the last
+`AGENT_KEEP` releases are kept for rollback. Logs are in
+`journalctl --user -u tj-agent`.
+
+On the control host, point each box's peer entry at its agent with
+`agent_address`/`agent_token` in `config.yaml` (see the "Configuration"
+section). The peers can then be agent-only — no app of their own.
+
 ## Building a container image
 
 Requires [Podman](https://podman.io).

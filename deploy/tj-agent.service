@@ -1,11 +1,14 @@
 # The Turbo Jumbo storage agent as a systemd user unit — bare metal by
-# decision, no container. Install at ~/.config/systemd/user/tj-agent.service
-# on the storage box; `loginctl enable-linger` (root, once) makes it start at
-# boot without a login session.
+# decision, no container. bin/deploy.sh --agents installs this at
+# ~/.config/systemd/user/tj-agent.service on each storage box and restarts it
+# after every release; `loginctl enable-linger <account>` (root, once) makes it
+# start at boot without a login session.
 #
-# Layout on the target:
-#   ~/tj-agent/tj-agent     the release binary (cargo build --release)
-#   ~/tj-agent/agent.yaml   port, token, roots (see agent.yaml.sample)
+# Layout on the target (AGENT_DIR, default "tj-agent"):
+#   ~/tj-agent/current      -> releases/<stamp>   the running release (a dir
+#                              holding the tj-agent binary)
+#   ~/tj-agent/agent.yaml   port, token, roots (see agent.yaml.sample) —
+#                           yours to put there, never shipped
 #   ~/tj-agent/agent.env    optional: the hf CLI's needs for downloads —
 #                           PATH entry, HF_TOKEN, HF_XET_HIGH_PERFORMANCE
 
@@ -18,7 +21,7 @@ Wants=network-online.target
 WorkingDirectory=%h/tj-agent
 Environment=TJ_AGENT_CONFIG=%h/tj-agent/agent.yaml
 EnvironmentFile=-%h/tj-agent/agent.env
-ExecStart=%h/tj-agent/tj-agent
+ExecStart=%h/tj-agent/current/tj-agent
 Restart=always
 RestartSec=3
 

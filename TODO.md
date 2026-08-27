@@ -5,35 +5,21 @@ next thing to pick up. Each states what it is, why it's worth doing, and
 where the detail lives. Finished items are deleted, not checked off —
 history belongs to `docs/plans/` and `docs/specs/`.
 
-## Agent deploy script (`bin/deploy-agent.sh`)
-
-Deploying `tj-agent` is four manual steps today — release build, ship
-the binary and `agent.yaml`, install `deploy/tj-agent.service`, set
-`agent_address`/`agent_token` on the peer's entry — so automate it in
-the shape of `bin/deploy.sh`: settings from `.env` (hostnames stay out
-of the repo), `releases/<stamp>/` plus a `current` symlink under
-`~/tj-agent`, unit install and restart, a health check, `DEPLOY_KEEP`
-rollback. Three deltas from the app's script: many targets (an
-`AGENT_HOSTS` list or a host argument — agents go one per storage
-box); a build stamp baked into the binary (build.rs or compile-time
-env) so the health check can poll the agent's `/api/v1/version` for
-the shipped build rather than the crate version, which doesn't move
-between deploys; and a build-portability decision — musl-static
-(`rustup target add x86_64-unknown-linux-musl`) unless the containers'
-glibc is known to be at least the build box's. This is the on-ramp
-for the cutover entry below.
-
 ## Storage interface migration: cut the peers over
 
 The code is done — the interface, `LocalStorage`, the wire, the Rust
 agent (conformance-gated, cached inventories), and every peer view,
 download, audit and Lemonade sync running over `HttpStorage` for a
-peer with an `agent_address`; `site.ts`'s string arm is retired.
-What's left is operational: build `tj-agent` (`cargo build --release`
-in `agent/`), deploy it per storage box (`deploy/tj-agent.service`,
-`agent.yaml.sample`), set `agent_address`/`agent_token` on the peer's
-entry, and retire the full app there — one machine at a time; the
-fleet mixes freely meanwhile. Decisions and history:
+peer with an `agent_address`; `site.ts`'s string arm is retired. The
+agent deploy is done too: `bin/deploy.sh --agents` builds the
+static binary (musl by default), ships it to each `AGENT_HOSTS` box
+under `~/tj-agent/releases/<stamp>` + `current`, installs
+`deploy/tj-agent.service`, restarts and health-checks
+`/api/v1/version` for the stamped commit. What's left is operational:
+stand up `agent.yaml` on each box, run `bin/deploy.sh --agents`, set
+`agent_address`/`agent_token` on the peer's entry, and retire the full
+app there — one machine at a time; the fleet mixes freely meanwhile.
+Decisions and history:
 [docs/specs/2026-08-10-storage-interface-design.md](docs/specs/2026-08-10-storage-interface-design.md).
 
 ## Keep the standalone build from tracing the repo root
