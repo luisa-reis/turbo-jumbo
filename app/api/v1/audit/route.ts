@@ -175,9 +175,12 @@ export async function POST(req: Request) {
     );
 
     // After the per-file verdicts: for vision models among the selected files,
-    // flag a projector that exists on HF but not locally. Local only — the
-    // re-download fix that clears it isn't available for cold storage or peers.
-    if (body.location === 'local' && !signal.aborted) {
+    // flag a projector that exists on HF but not locally. Runs for any models
+    // root — this host's own ('local') or an agent peer's, both of which can
+    // recover the flagged file (HF re-download onto that machine, or a copy
+    // from a peer that holds it). Cold storage is excluded: it isn't a
+    // download target, so a missing-file verdict there has no in-place fix.
+    if (root.root === 'models' && !signal.aborted) {
       const allRelPaths = models.flatMap((m) =>
         m.files.flatMap((f) =>
           f.isSplit ? f.files.map((s) => s.path) : [f.path],

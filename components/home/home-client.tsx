@@ -227,6 +227,18 @@ export function HomeClient({
         ? 'local'
         : activeLocation;
 
+  // When a remote peer is audited, its recovery downloads and the post-download
+  // re-audit go through that peer's proxy; the local peer uses the default
+  // local route. The aggregate view ('all') has no single location to recover
+  // into, so it leaves the endpoint at its default and offers no recovery.
+  const auditPeer =
+    auditLocation && auditLocation !== 'local'
+      ? (peerConfigs.find((p) => p.address === auditLocation) ?? null)
+      : null;
+  // A models location a recovery download can land on: this host's own storage,
+  // or a peer. Missing-file audit verdicts only offer their fix here.
+  const canRecover = auditLocation === 'local' || auditPeer != null;
+
   // The audit workflow (run/cached/update, the misplaced + duplicate fixes,
   // and the set-source flow) lives in its own hook; it owns the audit-result
   // state and touches the shared selection / models refresh / error.
@@ -300,10 +312,22 @@ export function HomeClient({
   // The audit failure whose checked revisions are shown in a modal, if any.
   const [revisionsFile, setRevisionsFile] = useState<AuditResult | null>(null);
 
-  // Redownload an incomplete file: re-fetch from HF into local storage. The
-  // existing partial file is left in place so the HF downloader recovers it
-  // (never deleted, never sent to cold storage here).
-  const redownload = useDownloadRunner();
+  // Redownload an incomplete/missing file: re-fetch from HF into the audited
+  // location's storage. The existing partial file is left in place so the HF
+  // downloader recovers it (never deleted, never sent to cold storage here).
+  // A remote peer's download runs through its proxy; a full-app peer also gets
+  // a reproducible `tj --url` command, which an agent peer can't (agents don't
+  // run the CLI), so its command disclosure stays local-form.
+  const redownload = useDownloadRunner(
+    auditPeer
+      ? {
+          downloadUrl: `/api/v1/peers/${peerSlug(auditPeer)}/hf-download`,
+          cliUrl: auditPeer.agent_address
+            ? undefined
+            : `http://${auditPeer.address}`,
+        }
+      : {},
+  );
   const [redownloadOpen, setRedownloadOpen] = useState(false);
   const redownloadPath = useRef<string | null>(null);
 
@@ -390,7 +414,7 @@ export function HomeClient({
     void refreshModels();
     void refreshInvalid();
     void refreshIncomplete();
-    if (path && auditLocation === 'local') void runAudit([path]);
+    if (path && canRecover) void runAudit([path]);
   };
 
   const onToggleSelected = useCallback((paths: string[]) => {
@@ -554,15 +578,9 @@ export function HomeClient({
               onFixDuplicate={onFixDuplicate}
               fixingDuplicate={fixingDuplicate}
               onSetSource={onSetSource}
-              onRedownload={
-                auditLocation === 'local' ? onRedownload : undefined
-              }
-              onRedownloadAll={
-                auditLocation === 'local' ? onRedownloadAll : undefined
-              }
-              onDownloadRepoFiles={
-                auditLocation === 'local' ? onDownloadRepoFiles : undefined
-              }
+              onRedownload={canRecover ? onRedownload : undefined}
+              onRedownloadAll={canRecover ? onRedownloadAll : undefined}
+              onDownloadRepoFiles={canRecover ? onDownloadRepoFiles : undefined}
               onShowRevisions={setRevisionsFile}
               redownloading={redownload.running}
               onFixColdIncomplete={

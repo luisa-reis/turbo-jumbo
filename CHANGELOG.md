@@ -11,6 +11,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A missing vision projector is flagged and recoverable on any machine.**
+  Auditing a model on a peer — not just this host — now flags a vision
+  projector (`mmproj`) or other expected file that Hugging Face lists but the
+  machine is missing, and the audit hovercard's **Download** action fetches it
+  straight onto that machine. Previously this check ran only when a machine
+  audited its own storage, so a projector deleted from a peer went unflagged
+  and, once peers became agents, unflagged everywhere.
+
 - **A thin storage agent, in Rust.** A machine can serve its model
   disks with `tj-agent` — a single small binary speaking just the
   storage protocol, behind a bearer token (`agent.yaml.sample`),
