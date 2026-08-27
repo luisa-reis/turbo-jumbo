@@ -459,6 +459,9 @@ export function HomeClient({
     onConflictsConfirm,
     onFixColdIncomplete,
     cancelConflicts,
+    recoverySourceFor,
+    onRecoverFile,
+    recovering,
   } = useCopyWorkflow({
     selected,
     setSelected,
@@ -469,6 +472,41 @@ export function HomeClient({
     localPeerAddress,
     seededPeerModels,
   });
+
+  // The audited location as a copy destination — the config peer address behind
+  // this tab (the local peer's own address, or the agent peer's). null when
+  // recovery isn't offered (the aggregate view has no single destination).
+  const recoverDest =
+    auditLocation === 'local' ? localPeerAddress : (auditPeer?.address ?? null);
+
+  // For a missing-file audit verdict, the display name of a machine it can be
+  // copied from — the largest complete copy across cold storage and the peers,
+  // excluding the destination itself. null when no other machine holds it, so
+  // only the Hugging Face re-download is offered. Not a useCallback: it closes
+  // over hook-returned functions whose identity the React Compiler memoizes.
+  const copySourceLabelFor = (f: AuditResult): string | null => {
+    if (!recoverDest) return null;
+    const source = recoverySourceFor(f.file);
+    if (!source || source.from === recoverDest) return null;
+    if (source.from === 'cold-storage') return 'Cold storage';
+    return (
+      peerConfigs.find((p) => p.address === source.from)?.name ?? source.from
+    );
+  };
+
+  // Pull a missing file onto the audited location from that source, then reflect
+  // it: refresh the listing and the incomplete/invalid flags, re-fetch the
+  // destination peer's models, and re-audit the recovered file.
+  const onCopyFrom = async (f: AuditResult) => {
+    if (!recoverDest) return;
+    const source = recoverySourceFor(f.file);
+    if (!source) return;
+    await onRecoverFile(recoverDest, source);
+    void refreshInvalid();
+    void refreshIncomplete();
+    if (auditPeer) void refreshPeerModels(auditPeer);
+    if (canRecover) void runAudit([f.file]);
+  };
 
   // On a remote peer's tab, quants must carry the peer's own paths: audit,
   // copy and delete all resolve paths on the peer, whose storage layout can
@@ -587,6 +625,9 @@ export function HomeClient({
                 localPeerAddress ? onFixColdIncomplete : undefined
               }
               coldFixing={copying}
+              copySourceLabelFor={canRecover ? copySourceLabelFor : undefined}
+              onCopyFrom={canRecover ? onCopyFrom : undefined}
+              recovering={recovering}
             />
           </LayoutContent>
         }

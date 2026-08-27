@@ -51,6 +51,9 @@ export function useCopyWorkflow({
 }) {
   const [confirmingCopy, setConfirmingCopy] = useState(false);
   const [copying, setCopying] = useState(false);
+  // A single-file recovery copy (audit hovercard's "Copy from <source>") is in
+  // flight. Separate from `copying` so it disables only the recovery button.
+  const [recovering, setRecovering] = useState(false);
   const [copyProgress, setCopyProgress] = useState<CopyProgress | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkProgress, setCheckProgress] = useState<CheckProgress | null>(
@@ -260,6 +263,49 @@ export function useCopyWorkflow({
     }
   }
 
+  // Where a single file can be recovered from: its largest complete copy across
+  // cold storage and the peers, by exact path. A missing file (an absent
+  // projector, a gap in a shard set) sits at the same `<repoId>/<file>` path on
+  // any machine that holds it, so the path-keyed index finds it. Used by the
+  // audit hovercard to offer "Copy from <source>" beside the HF re-download.
+  function recoverySourceFor(path: string): SourceFile | undefined {
+    return buildSourceFilesFor([path])[0];
+  }
+
+  // Pull one missing file onto `destAddress` from the source `recoverySourceFor`
+  // found — the audit hovercard's copy-based recovery. A peer→peer or cold→peer
+  // copy runs as a job on the machine holding the bytes (this host never carries
+  // them). Bypasses the conflict check: the destination doesn't have the file,
+  // so there's nothing to overwrite. Refreshes the table so the recovered file
+  // (and any flags keyed off it) reflect the new state.
+  async function onRecoverFile(destAddress: string, source: SourceFile) {
+    if (source.from === destAddress) return;
+    setRecovering(true);
+    setCopyProgress(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/v1/copy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          files: [source],
+          toColdStorage: false,
+          toPeers: [destAddress],
+          deleteAfterCopy: false,
+          skip: [],
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      await readCopyAndReportErrors(res, setCopyProgress, setError);
+      await refreshModels();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRecovering(false);
+      setCopyProgress(null);
+    }
+  }
+
   const cancelConflicts = () => {
     setPendingConflicts([]);
     setPendingDestinations(null);
@@ -279,5 +325,8 @@ export function useCopyWorkflow({
     onConflictsConfirm,
     onFixColdIncomplete,
     cancelConflicts,
+    recoverySourceFor,
+    onRecoverFile,
+    recovering,
   };
 }

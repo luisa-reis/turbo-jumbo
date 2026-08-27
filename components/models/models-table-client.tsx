@@ -90,6 +90,9 @@ export function ModelsTableClient({
   coldFixing = false,
   onFixDuplicate,
   fixingDuplicate = false,
+  copySourceLabelFor,
+  onCopyFrom,
+  recovering = false,
 }: {
   models: ModelRow[];
   peers: PeerConfig[];
@@ -131,6 +134,12 @@ export function ModelsTableClient({
   coldFixing?: boolean;
   onFixDuplicate?: (paths: string[]) => void;
   fixingDuplicate?: boolean;
+  // For a missing-file audit verdict, the display name of a machine it can be
+  // copied from (or null), and the action that starts that copy. `recovering`
+  // is true while such a copy is in flight.
+  copySourceLabelFor?: (file: AuditResult) => string | null;
+  onCopyFrom?: (file: AuditResult) => void;
+  recovering?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Lemonade catalog entry names keyed by the HF repo id backing them, so a
@@ -522,6 +531,9 @@ export function ModelsTableClient({
                         : undefined
                     }
                     fixingDuplicate={fixingDuplicate}
+                    copySourceLabelFor={copySourceLabelFor}
+                    onCopyFrom={onCopyFrom}
+                    recovering={recovering}
                   />
                   {updates.length > 0 && <UpdateBadge updates={updates} />}
                 </HStack>

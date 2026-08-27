@@ -66,6 +66,9 @@ function AuditFailureContent({
   onShowRevisions,
   onFixDuplicate,
   fixingDuplicate,
+  copySourceLabelFor,
+  onCopyFrom,
+  recovering,
 }: {
   failures: AuditResult[];
   onFix?: (path: string) => void;
@@ -80,6 +83,13 @@ function AuditFailureContent({
   onShowRevisions?: (file: AuditResult) => void;
   onFixDuplicate?: (path: string) => void;
   fixingDuplicate?: boolean;
+  // For a missing file recoverable by copy, the display name of the location it
+  // can be pulled from (a peer, or "Cold storage"); null when no other machine
+  // holds it. `onCopyFrom` starts that copy. Offered beside the HF re-download
+  // so a missing projector can be recovered over the LAN instead of the internet.
+  copySourceLabelFor?: (file: AuditResult) => string | null;
+  onCopyFrom?: (file: AuditResult) => void;
+  recovering?: boolean;
 }) {
   // The files a re-download can recover. With more than one, a single grouped
   // action downloads them all — including small companions the audit found no
@@ -105,6 +115,23 @@ function AuditFailureContent({
     grouped && commits.size === 1
       ? (sources.find((h) => h.commit != null) ?? null)
       : null;
+  // "Copy from <location>" for a missing file another machine holds — rendered
+  // beside the HF re-download in both the grouped and per-file layouts.
+  const copyButton = (f: AuditResult) => {
+    const label = copySourceLabelFor?.(f) ?? null;
+    if (!label || onCopyFrom == null) return null;
+    return (
+      <HStack>
+        <Button
+          label={recovering ? 'Copying…' : `Copy from ${label}`}
+          variant="ghost"
+          size="sm"
+          onClick={() => onCopyFrom(f)}
+          isDisabled={recovering}
+        />
+      </HStack>
+    );
+  };
   return (
     <VStack gap={3}>
       <VStack gap={3} xstyle={styles.fileList}>
@@ -140,6 +167,7 @@ function AuditFailureContent({
                     />
                   </HStack>
                 )}
+                {copyButton(f)}
               </VStack>
             );
           }
@@ -263,6 +291,7 @@ function AuditFailureContent({
                   />
                 </HStack>
               )}
+              {copyButton(f)}
             </VStack>
           );
         })}
@@ -393,6 +422,9 @@ export function AuditCell({
   onShowRevisions,
   onFixDuplicate,
   fixingDuplicate,
+  copySourceLabelFor,
+  onCopyFrom,
+  recovering,
 }: {
   audit: RowAudit;
   failures?: AuditResult[];
@@ -425,6 +457,9 @@ export function AuditCell({
   onShowRevisions?: (file: AuditResult) => void;
   onFixDuplicate?: (path: string) => void;
   fixingDuplicate?: boolean;
+  copySourceLabelFor?: (file: AuditResult) => string | null;
+  onCopyFrom?: (file: AuditResult) => void;
+  recovering?: boolean;
 }) {
   if (audit == null) return null;
   if (audit.kind === 'pending') {
@@ -578,6 +613,9 @@ export function AuditCell({
           onShowRevisions={onShowRevisions}
           onFixDuplicate={onFixDuplicate}
           fixingDuplicate={fixingDuplicate}
+          copySourceLabelFor={copySourceLabelFor}
+          onCopyFrom={onCopyFrom}
+          recovering={recovering}
         />
       }
     >
