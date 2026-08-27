@@ -15,6 +15,7 @@ import {
   resolveSupportFiles,
   supportFileSources,
 } from '@/lib/storage/support-files';
+import {runWithConcurrency} from '@/lib/util/concurrency';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
 
@@ -23,6 +24,35 @@ type SourceFile = {
   from: string; // "cold-storage" | peer address (may be the local peer's own address)
   size: number;
 };
+
+/**
+ * One transfer in flight. Several run at once (see COPY_CONCURRENCY), so a
+ * progress frame's per-file fields are these summed rather than one file's.
+ *
+ * Each carries its own pre-copy verification state: while a partial
+ * destination is being hash-compared against its source, `phase` is
+ * 'verifying' and verifyDone/verifyTotal track the hashing; `resume` then
+ * records the outcome ('resumed' = prefix matched, 'from-start' = SHA256
+ * mismatch, null = no partial was found). All of it read straight off the
+ * job's events — the jobs report the same phases wherever they run.
+ */
+interface InFlight {
+  total: number;
+  done: number;
+  phase: 'verifying' | 'copying';
+  verifyDone: number;
+  verifyTotal: number;
+  resume: 'resumed' | 'from-start' | null;
+}
+
+/**
+ * How many file transfers run at once. Small on purpose: the win is hiding
+ * each file's handshake, resume verification and sidecar round trips behind
+ * another file's bytes, not driving more streams than a link or a disk can
+ * serve — a wide fan-out would turn an archival disk into a seek storm and
+ * multiply the read-ahead each send holds.
+ */
+const COPY_CONCURRENCY = 2;
 
 type CopyRequest = {
   files: SourceFile[];
@@ -239,25 +269,9 @@ export async function POST(req: Request) {
 
     let filesDone = 0;
     let bytesDone = 0;
-    let fileDone = 0;
-    let fileTotal = 0;
-    // Pre-copy verification state for the current file: while a partial
-    // destination is being hash-compared against the source, phase is
-    // 'verifying' and verifyDone/verifyTotal track the hashing; afterwards
-    // `resume` records the outcome ('resumed' = prefix matched, 'from-start' =
-    // SHA256 mismatch, null = no partial was found). All of it read straight
-    // off the job's events now — the jobs report the same phases wherever
-    // they run.
-    let phase: 'verifying' | 'copying' = 'copying';
-    let verifyDone = 0;
-    let verifyTotal = 0;
-    let resume: 'resumed' | 'from-start' | null = null;
-    const resetFilePhase = () => {
-      phase = 'copying';
-      verifyDone = 0;
-      verifyTotal = 0;
-      resume = null;
-    };
+    // The transfers currently running, summed into each frame's per-file
+    // fields; see InFlight.
+    const inFlight = new Set<InFlight>();
 
     // Per-(file, destination) failures are collected rather than aborting the
     // whole run: one unreachable peer or unreadable file shouldn't cancel the
@@ -270,17 +284,37 @@ export async function POST(req: Request) {
     // skipped), so the post-copy delete only removes sources that are safe.
     const coldDone = new Set<string>();
 
-    const emit = () =>
-      safeWrite(
+    const emit = () => {
+      // Per-file fields describe every transfer in flight: their bytes summed,
+      // and the verification of whichever are still hashing. With one running
+      // this is exactly that file, as it always was.
+      let fileDone = 0;
+      let fileTotal = 0;
+      let verifyDone = 0;
+      let verifyTotal = 0;
+      let verifying = false;
+      let resume: 'resumed' | 'from-start' | null = null;
+      for (const t of inFlight) {
+        fileDone += t.done;
+        fileTotal += t.total;
+        if (t.phase === 'verifying') {
+          verifying = true;
+          verifyDone += t.verifyDone;
+          verifyTotal += t.verifyTotal;
+        }
+        resume ??= t.resume;
+      }
+      return safeWrite(
         enc.encode(
           JSON.stringify({
             filesDone,
             filesTotal,
             fileDone,
             fileTotal,
+            filesInFlight: inFlight.size,
             bytesDone,
             bytesTotal,
-            phase,
+            phase: verifying ? 'verifying' : 'copying',
             verifyDone,
             verifyTotal,
             resume,
@@ -288,6 +322,7 @@ export async function POST(req: Request) {
           }) + '\n',
         ),
       );
+    };
 
     const fail = (where: string, message: string) => {
       logger.error(`[copy] ${where}: ${message}`);
@@ -301,85 +336,109 @@ export async function POST(req: Request) {
       `[copy] start: ${allFiles.length} file(s) → ${destinations.join(', ') || '(no destinations)'}`,
     );
 
-    try {
-      for (const dest of destinations) {
-        for (const f of allFiles) {
-          if (f.from === dest || shouldSkip(f.path, dest)) continue;
-          signal.throwIfAborted();
-
-          const leg = legFor(f.path, f.from, dest);
-          fileTotal = f.size;
-          fileDone = 0;
-          resetFilePhase();
-          await emit();
-
-          try {
-            logger.info(
-              `[copy] ${f.from} → ${dest} (on ${leg.runOn}): ${f.path}`,
-            );
-            const job = await storageForPeer(leg.runOn).start(leg.spec);
-            const cancel = () => void job.cancel();
-            signal.addEventListener('abort', cancel, {once: true});
-            let sawVerify = false;
-            let result: CopyResult | null = null;
-            try {
-              for await (const event of job.events()) {
-                if (event.kind === 'verify') {
-                  phase = 'verifying';
-                  sawVerify = true;
-                  verifyDone = event.done;
-                  verifyTotal = event.total;
-                  emit();
-                } else if (event.kind === 'progress') {
-                  if (phase === 'verifying' || (sawVerify && resume === null)) {
-                    phase = 'copying';
-                    resume = event.done > 0 ? 'resumed' : 'from-start';
-                  }
-                  bytesDone += event.done - fileDone;
-                  fileDone = event.done;
-                  emit();
-                } else if (event.kind === 'done') {
-                  result = event.result as CopyResult;
-                } else if (event.kind === 'error') {
-                  throw new Error(event.message);
-                }
-              }
-            } finally {
-              signal.removeEventListener('abort', cancel);
-            }
-            if (result === null) throw new Error('job ended without a result');
-            if (result.resumedFrom > 0 && result.resumedFrom < fileTotal) {
-              logger.info(
-                `[copy] resumed ${f.path} at ${result.resumedFrom}/${fileTotal} bytes`,
-              );
-            }
-
-            // Bytes are down; carry the file's provenance so the destination
-            // names and audits it without a re-hash. Best effort: a meta
-            // failure is reported but the copy stands.
-            try {
-              await propagateFileMeta(leg.srcSite, leg.dstSite, f.path);
-            } catch (err) {
-              if (signal.aborted) throw err;
-              fail(
-                `meta ${f.from} → ${dest}: ${f.path}`,
-                err instanceof Error ? err.message : String(err),
-              );
-            }
-
-            filesDone++;
-            fileDone = f.size;
-            if (dest === 'cold-storage') coldDone.add(f.path);
-            emit();
-          } catch (err) {
-            if (signal.aborted) throw err;
-            fail(
-              `${f.from} → ${dest}: ${f.path}`,
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-        }
+    // Every (file, destination) leg this run will perform, flattened so a pool
+    // can take them as capacity frees up rather than marching through them.
+    const tasks: Array<{dest: string; f: SourceFile}> = [];
+    for (const dest of destinations) {
+      for (const f of allFiles) {
+        if (f.from === dest || shouldSkip(f.path, dest)) continue;
+        tasks.push({dest, f});
       }
+    }
+
+    const runTask = async ({dest, f}: {dest: string; f: SourceFile}) => {
+      signal.throwIfAborted();
+      const leg = legFor(f.path, f.from, dest);
+      const track: InFlight = {
+        total: f.size,
+        done: 0,
+        phase: 'copying',
+        verifyDone: 0,
+        verifyTotal: 0,
+        resume: null,
+      };
+      inFlight.add(track);
+      await emit();
+
+      try {
+        logger.info(`[copy] ${f.from} → ${dest} (on ${leg.runOn}): ${f.path}`);
+        const job = await storageForPeer(leg.runOn).start(leg.spec);
+        const cancel = () => void job.cancel();
+        signal.addEventListener('abort', cancel, {once: true});
+        let sawVerify = false;
+        let result: CopyResult | null = null;
+        try {
+          for await (const event of job.events()) {
+            if (event.kind === 'verify') {
+              track.phase = 'verifying';
+              sawVerify = true;
+              track.verifyDone = event.done;
+              track.verifyTotal = event.total;
+              emit();
+            } else if (event.kind === 'progress') {
+              if (
+                track.phase === 'verifying' ||
+                (sawVerify && track.resume === null)
+              ) {
+                track.phase = 'copying';
+                track.resume = event.done > 0 ? 'resumed' : 'from-start';
+              }
+              bytesDone += event.done - track.done;
+              track.done = event.done;
+              emit();
+            } else if (event.kind === 'done') {
+              result = event.result as CopyResult;
+            } else if (event.kind === 'error') {
+              throw new Error(event.message);
+            }
+          }
+        } finally {
+          signal.removeEventListener('abort', cancel);
+        }
+        if (result === null) throw new Error('job ended without a result');
+        if (result.resumedFrom > 0 && result.resumedFrom < track.total) {
+          logger.info(
+            `[copy] resumed ${f.path} at ${result.resumedFrom}/${track.total} bytes`,
+          );
+        }
+
+        // Bytes are down; carry the file's provenance so the destination
+        // names and audits it without a re-hash. Best effort: a meta
+        // failure is reported but the copy stands. Concurrent files of one
+        // model write the same tjmodel.json — upsertFileMeta serializes that
+        // read-modify-write per model dir, so they merge instead of clobber.
+        try {
+          await propagateFileMeta(leg.srcSite, leg.dstSite, f.path);
+        } catch (err) {
+          if (signal.aborted) throw err;
+          fail(
+            `meta ${f.from} → ${dest}: ${f.path}`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+
+        filesDone++;
+        track.done = f.size;
+        if (dest === 'cold-storage') coldDone.add(f.path);
+        emit();
+      } catch (err) {
+        if (signal.aborted) throw err;
+        fail(
+          `${f.from} → ${dest}: ${f.path}`,
+          err instanceof Error ? err.message : String(err),
+        );
+      } finally {
+        inFlight.delete(track);
+      }
+    };
+
+    try {
+      // A few legs at a time, sharing one queue, so a file's handshake,
+      // resume verification and sidecar round trips overlap another's bytes.
+      // A per-leg failure is collected rather than fatal (runTask handles
+      // it); only an abort escapes, and it reaches the other workers through
+      // the same signal.
+      await runWithConcurrency(tasks, COPY_CONCURRENCY, runTask);
 
       // Delete sources after a successful cold-storage copy — but only files
       // that actually reached cold storage this run, so a failed copy never

@@ -71,6 +71,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A copy of several files no longer waits for one file at a time.** Copying
+  a multi-file model ran each file start to finish before touching the next,
+  so every file's opening handshake, its resume check and the provenance
+  written afterwards were dead time with nothing moving. A few files now
+  travel at once, which hides those gaps behind another file's bytes. The
+  progress panel's per-file bar covers whichever files are in flight and says
+  how many; the total, file count and per-file resume notes are unchanged.
+
 - **Transfers between storage agents are faster.** An agent used to push a
   file to another agent in a series of 8 MiB uploads, waiting for each one to
   be written and acknowledged before reading the next — so the disk read, the

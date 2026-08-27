@@ -6,8 +6,12 @@ import {readNdjson} from '@/lib/util/ndjson';
 export interface CopyProgress {
   filesDone: number;
   filesTotal: number;
-  fileDone: number; // bytes written for the current file
-  fileTotal: number; // size of the current file in bytes
+  // Bytes written and total size for the transfers currently in flight —
+  // several files move at once, so these are their sums, and `filesInFlight`
+  // says how many they cover (1 for a single transfer, as before).
+  fileDone: number;
+  fileTotal: number;
+  filesInFlight?: number;
   bytesDone: number; // bytes written across all destinations so far
   bytesTotal: number; // total bytes to write across all destinations
   // Pre-copy verification of a partial destination (resumable copies):

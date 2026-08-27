@@ -242,7 +242,11 @@ export function ActionBar({
             />
             {copyProgress!.fileTotal > 0 && (
               <ProgressBar
-                label="Current file"
+                label={
+                  (copyProgress!.filesInFlight ?? 1) > 1
+                    ? `Current files (${copyProgress!.filesInFlight})`
+                    : 'Current file'
+                }
                 value={copyProgress!.fileDone}
                 max={copyProgress!.fileTotal}
                 hasValueLabel
