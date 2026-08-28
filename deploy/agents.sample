@@ -1,0 +1,59 @@
+# Targets for bin/deploy-agent.sh. Copy into .env.agents at the repo root and
+# fill in your own fleet.
+#
+# Keep it at the repo root, where `.env*` is gitignored: this repository is
+# mirrored publicly, so host names and addresses must not be committed. The
+# addresses below are the documentation range from RFC 5737 and are not real.
+
+# One row per agent container:
+#
+#   <vmid> <name> <virtualisation host> <container address> <dev|prod>
+#
+# The virtualisation host is pinned per vmid on purpose. Do not derive it from
+# the guest's name: a `pct` command aimed at the wrong host acts on whatever
+# container happens to hold that id there, which is how a MAC/IP twin gets
+# booted onto the network.
+TJ_AGENTS=(
+    "10176 alpha-tj-agent-dev 192.0.2.12 192.0.2.176 dev"
+    "10177 beta-tj-agent-dev  192.0.2.13 192.0.2.177 dev"
+    "10178 alpha-tj-agent     192.0.2.12 192.0.2.178 prod"
+    "10179 beta-tj-agent      192.0.2.13 192.0.2.179 prod"
+)
+
+# How to reach the virtualisation hosts. The account needs no more than
+# `pct` through sudo — a rule like:
+#
+#   deployer ALL = (root) NOPASSWD: /usr/sbin/pct
+#
+# covers both the `pct push` and the `pct exec` this script runs. Root works
+# too and is not needed.
+PVE_SSH_USER=deployer
+PVE_SSH_KEY=~/.ssh/id_deployer
+
+# The account the agent runs as inside the container, as numbers.
+#
+# Numbers, not names, and they are not cosmetic: the model store is an NFS
+# share mounted sec=sys, so the server trusts the ids on the wire, and the
+# container's id map punches exactly these through an otherwise-shifted
+# unprivileged range. A name here would resolve against the wrong passwd file.
+AGENT_UID=1032
+AGENT_GID=100
+
+# Where the agent lives inside the container. agent.yaml, agent.env and any
+# credential file in here are rendered by configuration management and carry
+# secrets; this script never reads, writes or backs them up.
+AGENT_HOME=/home/tj/tj-agent
+
+# Optional, with these defaults:
+#AGENT_USER=tj
+#AGENT_UNIT=tj-agent
+#AGENT_PORT=3900
+
+# Where to build when this machine has no Rust toolchain or no agent/ checkout
+# (or with --build-host). The checkout belongs to another account there, so the
+# script reads it through sudo rather than as this login.
+#
+# Build it stamped, or the version gate has nothing to match:
+#   TJ_AGENT_COMMIT=$(git rev-parse --short HEAD) cargo build --release
+#BUILD_HOST=builder@build-host.example
+#BUILD_CHECKOUT=/home/someone/turbo-jumbo
