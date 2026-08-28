@@ -28,8 +28,12 @@ Options:
                   still stamped with the current HEAD.
   -h, --help      Print this help.
 
-Settings come from .env at the repo root (or ENV_FILE=/path/to/env); see
-deploy/env.sample.
+Settings come from .env.prod at the repo root — so a plain run deploys
+production. Any other fleet names its own file:
+
+      ENV_FILE=.env.dev bin/deploy.sh --agents
+
+See deploy/env.sample for every setting and its default.
 
 The app (DEPLOY_HOST), under ~/<DEPLOY_DIR> (default tj):
   releases/<stamp>/   the bundle: Next's standalone server on bun
@@ -75,10 +79,35 @@ done
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-ENV_FILE=${ENV_FILE:-$REPO_ROOT/.env}
+ENV_FILE=${ENV_FILE:-$REPO_ROOT/.env.prod}
+
+# The env file alone decides which fleet a run targets, so whatever the
+# surrounding shell exports — a direnv .envrc, most likely — is dropped first.
+# Otherwise a key merely *missing* from .env.dev would quietly fall through to
+# the ambient value and ship a dev deploy at production, which is exactly the
+# mistake this split exists to prevent. Say so rather than doing it silently:
+# an ignored value is surprising precisely when it used to be what worked.
+DEPLOY_SETTINGS=(
+    DEPLOY_HOST DEPLOY_DIR DEPLOY_PORT DEPLOY_KEEP
+    AGENT_HOSTS AGENT_DIR AGENT_PORT AGENT_KEEP AGENT_TARGET
+)
+ignored=()
+for setting in "${DEPLOY_SETTINGS[@]}"; do
+    if [[ -n ${!setting:-} ]]; then
+        ignored+=("$setting")
+        unset "$setting"
+    fi
+done
+if ((${#ignored[@]})); then
+    echo "note: ignoring ${ignored[*]} from the environment — $(basename "$ENV_FILE") decides the fleet" >&2
+fi
+
 if [[ -f $ENV_FILE ]]; then
     # shellcheck source=/dev/null
     source "$ENV_FILE"
+else
+    echo "error: no $ENV_FILE (see deploy/env.sample)" >&2
+    exit 1
 fi
 
 DEPLOY_DIR=${DEPLOY_DIR:-tj}

@@ -50,7 +50,11 @@ On the target, as the account the app will run as:
   lingering account.
 
 On the machine you build from, copy [`deploy/env.sample`](../deploy/env.sample)
-into `.env` at the repo root and set `DEPLOY_HOST=<account>@<host>`. Then:
+into `.env.prod` at the repo root and set `DEPLOY_HOST=<account>@<host>`. That
+is the file `bin/deploy.sh` reads by default, so a plain run deploys
+production; a second fleet gets a file of its own (`.env.dev`, say) named on
+the command line as `ENV_FILE=.env.dev bin/deploy.sh …`. Keep them at the repo
+root, where `.env*` is gitignored. Then:
 
 ```bash
 bin/deploy.sh        # build, ship, install the unit, restart, health-check
@@ -74,7 +78,8 @@ control host drives. `bin/deploy.sh` ships it too, under its own systemd user
 unit ([`deploy/tj-agent.service`](../deploy/tj-agent.service)); the box needs
 only ssh access for the deploying account (and, to download, the `hf` CLI).
 
-On the build host, add the agent boxes to `.env`:
+On the build host, add the agent boxes to `.env.prod` (or the fleet's own
+env file):
 
 ```bash
 AGENT_HOSTS="<account>@<box1> <account>@<box2>"   # one agent per box
@@ -83,7 +88,7 @@ AGENT_HOSTS="<account>@<box1> <account>@<box2>"   # one agent per box
 The agent is built fully static for `x86_64-unknown-linux-musl` by default, so
 one binary runs on any box regardless of its libc — run
 `rustup target add x86_64-unknown-linux-musl` once on the build host (or set
-`AGENT_TARGET=` empty in `.env` to build for the build host's own target). Then:
+`AGENT_TARGET=` empty in that file to build for the build host's own target). Then:
 
 ```bash
 bin/deploy.sh              # deploys the app AND every agent configured
