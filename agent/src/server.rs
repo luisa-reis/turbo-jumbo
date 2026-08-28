@@ -60,6 +60,12 @@ async fn liveness() -> &'static str {
 /// re-exporting TJ_AGENT_COMMIT), or null for an unstamped dev/cargo build —
 /// the deploy health check matches it to confirm the shipped build is running.
 /// Unauthenticated like liveness — it moves no bytes.
+///
+/// `bulk` lists the bulk-receive protocols this build understands. It is how a
+/// sender learns it may ask for the upgrade at all: a receiver that does not
+/// advertise one must never be sent an upgrade request, since it would read it
+/// as an ordinary zero-length receive and truncate the destination. An older
+/// agent, and the full app, simply have no `bulk` field.
 async fn version() -> Response {
     let commit = env!("TJ_AGENT_COMMIT");
     axum::Json(serde_json::json!({
@@ -70,6 +76,7 @@ async fn version() -> Response {
         } else {
             serde_json::Value::String(commit.to_owned())
         },
+        "bulk": [crate::wire::BULK_SPLICE_V1],
     }))
     .into_response()
 }
@@ -101,8 +108,12 @@ async fn dispatch(
             ops::write(storage, &parts.headers, body).await
         }
         "receive" => {
-            let (parts, body) = req.into_parts();
-            ops::receive(storage, &parts.headers, body).await
+            // The upgrade handle has to come out before the request is split:
+            // it is what lets the bulk path recover the raw connection once
+            // the 101 is on the wire.
+            let (mut parts, body) = req.into_parts();
+            let upgrade = parts.extensions.remove::<hyper::upgrade::OnUpgrade>();
+            ops::receive(storage, &parts.headers, body, upgrade).await
         }
         "list" | "read" | "mkdir" | "usage" | "remove" | "move" | "copy" | "link" | "hash"
         | "job" => {

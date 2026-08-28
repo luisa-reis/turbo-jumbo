@@ -22,8 +22,8 @@ use crate::ndjson::NdjsonSender;
 use crate::refs::Ref;
 use crate::storage::LocalStorage;
 use crate::wire::{
-    CopyResult, DownloadResult, JobEvent, SendTarget, OFFSET_HEADER, REF_PATH_HEADER,
-    REF_ROOT_HEADER,
+    CopyResult, DownloadResult, JobEvent, SendTarget, BULK_SPLICE_V1, LENGTH_HEADER, OFFSET_HEADER,
+    REF_PATH_HEADER, REF_ROOT_HEADER,
 };
 
 /// Progress is reported at most this often, plus once at the end.
@@ -303,13 +303,22 @@ async fn send_job(
         // An empty file still has to exist at the far end.
         post_receive(&client, &to, 0, Vec::new()).await?;
     } else if offset < size {
-        // Prefer the connection this job drives itself, where the body leaves
-        // with sendfile(2) and never enters this process; fall back to the
-        // portable streaming client for a target that can't be driven that way.
-        let outcome = match sendfile_to_receive(&to, &src, offset, size, tx).await {
-            Ok(true) => Ok(()),
-            Ok(false) => stream_to_receive(&client, &to, &src, offset, size, tx).await,
-            Err(e) => Err(e),
+        // Three paths, best first. The bulk receive is zero-copy at both ends
+        // but only exists against an agent that advertises it; the hand-driven
+        // request is zero-copy here and works against anything speaking plain
+        // http; the streaming client covers whatever is left.
+        let endpoint = plain_http_endpoint(&to.agent);
+        let bulk = match &endpoint {
+            Some(ep) if target_supports_splice(&client, &to).await => Some(ep),
+            _ => None,
+        };
+        let outcome = match bulk {
+            Some(ep) => splice_to_receive(ep, &to, &src, offset, size, tx).await,
+            None => match sendfile_to_receive(&to, &src, offset, size, tx).await {
+                Ok(true) => Ok(()),
+                Ok(false) => stream_to_receive(&client, &to, &src, offset, size, tx).await,
+                Err(e) => Err(e),
+            },
         };
         if let Err(e) = outcome {
             // The client going away aborts the upload mid-body. That is the
@@ -530,6 +539,190 @@ fn sendfile_unsupported(e: &std::io::Error) -> bool {
         || code == Some(rustix::io::Errno::OPNOTSUPP.raw_os_error())
 }
 
+/// Put `src[offset..size]` on an already-connected socket with sendfile(2) —
+/// page cache straight to the wire, never through this process. Shared by both
+/// paths that drive their own connection.
+///
+/// If the kernel won't splice this pair the body finishes from userspace on
+/// the same socket, so exactly as many bytes go out either way.
+async fn write_body_with_sendfile(
+    socket: &TcpStream,
+    file: &fs::File,
+    src: &Path,
+    offset: u64,
+    size: u64,
+    tx: &NdjsonSender,
+) -> Result<(), String> {
+    let mut at = offset;
+    let mut throttle = Throttle::new();
+    let mut by_hand = false;
+    while at < size {
+        if tx.is_closed() {
+            return Err("cancelled".to_string());
+        }
+        let want = (size - at).min(SEND_CHUNK_SIZE) as usize;
+        if !by_hand {
+            let mut cursor = at;
+            let sent = socket
+                .async_io(Interest::WRITABLE, || {
+                    rustix::fs::sendfile(socket, file, Some(&mut cursor), want)
+                        .map_err(|e| std::io::Error::from_raw_os_error(e.raw_os_error()))
+                })
+                .await;
+            match sent {
+                Ok(0) => return Err("send: source ended before its size".to_string()),
+                Ok(n) => {
+                    at += n as u64;
+                    if throttle.ready(at == size) {
+                        tx.json(&JobEvent::Progress {
+                            done: at,
+                            total: size,
+                        })
+                        .await;
+                    }
+                    continue;
+                }
+                Err(e) if at == offset && sendfile_unsupported(&e) => by_hand = true,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        let chunk = tokio::task::spawn_blocking({
+            let src = src.to_path_buf();
+            move || read_region(&src, at, want)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        let mut written = 0usize;
+        while written < chunk.len() {
+            socket.writable().await.map_err(|e| e.to_string())?;
+            match socket.try_write(&chunk[written..]) {
+                Ok(n) => written += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        at += want as u64;
+        if throttle.ready(at == size) {
+            tx.json(&JobEvent::Progress {
+                done: at,
+                total: size,
+            })
+            .await;
+        }
+    }
+    Ok(())
+}
+
+/// Whether the target advertises the bulk receive, asked fresh for each send.
+///
+/// Deliberately not cached: a stale yes against an agent that has since been
+/// rolled back would send it an upgrade request it reads as a zero-length
+/// body, truncating the destination. One small GET before a whole file is
+/// nothing, and it keeps the guarantee that we only upgrade against a
+/// receiver that just said it could.
+async fn target_supports_splice(client: &reqwest::Client, to: &SendTarget) -> bool {
+    let base = to.agent.trim_end_matches('/');
+    let Some(prefix) = base.strip_suffix("/storage") else {
+        return false;
+    };
+    let mut req = client.get(format!("{prefix}/version"));
+    if let Some(token) = &to.token {
+        req = req.header("authorization", format!("Bearer {token}"));
+    }
+    let Ok(res) = req.send().await else {
+        return false;
+    };
+    if !res.status().is_success() {
+        return false;
+    }
+    let Ok(body) = res.text().await else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return false;
+    };
+    value["bulk"]
+        .as_array()
+        .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(BULK_SPLICE_V1)))
+}
+
+/// Hand the body over on an upgraded connection, so it is zero-copy at *both*
+/// ends: sendfile out of the page cache here, spliced from the socket into the
+/// file there, never entering either process.
+///
+/// Only ever called against a receiver that just advertised the protocol —
+/// see `target_supports_splice` for why that check can't be cached. After the
+/// 101 there is no HTTP left, so the outcome comes back as a one-line ack.
+async fn splice_to_receive(
+    ep: &HttpEndpoint,
+    to: &SendTarget,
+    src: &Path,
+    offset: u64,
+    size: u64,
+    tx: &NdjsonSender,
+) -> Result<(), String> {
+    let file = fs::File::open(src).map_err(|e| e.to_string())?;
+    let mut head = format!(
+        "POST {}/receive HTTP/1.1\r\nHost: {}\r\n",
+        ep.path, ep.authority
+    );
+    if let Some(token) = &to.token {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    head.push_str(&format!(
+        "{REF_ROOT_HEADER}: {}\r\n",
+        to.target.root.as_str()
+    ));
+    head.push_str(&format!(
+        "{REF_PATH_HEADER}: {}\r\n",
+        encode_uri_component(&to.target.path)
+    ));
+    head.push_str(&format!("{OFFSET_HEADER}: {offset}\r\n"));
+    head.push_str(&format!("{LENGTH_HEADER}: {}\r\n", size - offset));
+    // The bytes follow the 101, not this request, so it carries no body.
+    head.push_str("Content-Length: 0\r\n");
+    head.push_str("Connection: Upgrade\r\n");
+    head.push_str(&format!("Upgrade: {BULK_SPLICE_V1}\r\n\r\n"));
+
+    let mut socket = TcpStream::connect(&ep.connect)
+        .await
+        .map_err(|e| format!("connect {}: {e}", ep.connect))?;
+    socket
+        .write_all(head.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Nothing may be sent until the 101 lands: anything else means the far
+    // side read this as an ordinary request, and the body must not follow.
+    let (status, _) = read_head(&mut socket).await?;
+    if status != 101 {
+        return Err(format!("bulk receive refused: HTTP {status}"));
+    }
+
+    write_body_with_sendfile(&socket, &file, src, offset, size, tx).await?;
+
+    // The ack, which after an upgrade is the only channel left for a verdict.
+    let mut ack = Vec::new();
+    let mut byte = [0u8; 1];
+    while !ack.ends_with(b"\n") && ack.len() < 4096 {
+        match socket.read(&mut byte).await {
+            Ok(0) => break,
+            Ok(_) => ack.push(byte[0]),
+            Err(e) => return Err(format!("bulk receive: {e}")),
+        }
+    }
+    let ack = String::from_utf8_lossy(&ack).trim().to_string();
+    match ack.strip_prefix("TJ-OK ") {
+        Some(n) if n.trim().parse::<u64>() == Ok(size - offset) => Ok(()),
+        _ if ack.is_empty() => Err("bulk receive: no acknowledgement".to_string()),
+        _ => Err(ack
+            .strip_prefix("TJ-ERR ")
+            .map(|m| format!("bulk receive: {m}"))
+            .unwrap_or_else(|| format!("bulk receive: unexpected acknowledgement {ack:?}"))),
+    }
+}
+
 /// Stream `src[offset..size]` to the target's receive endpoint over a
 /// connection this job drives itself, so the body can leave with sendfile(2):
 /// the bytes go from the page cache to the socket without ever being copied
@@ -585,64 +778,22 @@ async fn sendfile_to_receive(
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut at = offset;
-    let mut throttle = Throttle::new();
-    // Set once the kernel has told us it won't splice this pair; the body then
-    // finishes from userspace on the same connection, so the request stays
-    // exactly as long as its Content-Length promised.
-    let mut by_hand = false;
-    while at < size {
-        if tx.is_closed() {
-            return Err("cancelled".to_string());
-        }
-        let want = (size - at).min(SEND_CHUNK_SIZE) as usize;
-        if !by_hand {
-            let mut cursor = at;
-            let sent = socket
-                .async_io(Interest::WRITABLE, || {
-                    rustix::fs::sendfile(&socket, &file, Some(&mut cursor), want)
-                        .map_err(|e| std::io::Error::from_raw_os_error(e.raw_os_error()))
-                })
-                .await;
-            match sent {
-                Ok(0) => return Err("send: source ended before its size".to_string()),
-                Ok(n) => {
-                    at += n as u64;
-                    if throttle.ready(at == size) {
-                        tx.json(&JobEvent::Progress {
-                            done: at,
-                            total: size,
-                        })
-                        .await;
-                    }
-                    continue;
-                }
-                Err(e) if at == offset && sendfile_unsupported(&e) => by_hand = true,
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-        let chunk = tokio::task::spawn_blocking({
-            let src = src.to_path_buf();
-            move || read_region(&src, at, want)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        socket.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        at += want as u64;
-        if throttle.ready(at == size) {
-            tx.json(&JobEvent::Progress {
-                done: at,
-                total: size,
-            })
-            .await;
-        }
-    }
+    write_body_with_sendfile(&socket, &file, src, offset, size, tx).await?;
 
-    // Read exactly the response head. Waiting for the connection to close
-    // would hang against a server that keeps it alive regardless of the
-    // `Connection: close` we asked for, and the status line is all a success
-    // needs; only a failure goes on to read its message.
+    let (status, leftover) = read_head(&mut socket).await?;
+    if (200..300).contains(&status) {
+        return Ok(true);
+    }
+    Err(read_error_body(&mut socket, status, leftover).await)
+}
+
+/// Read one HTTP response head off the socket, returning its status and
+/// whatever was read past the blank line.
+///
+/// Deliberately not "read to EOF": a server that keeps the connection alive
+/// regardless of the `Connection: close` we asked for would hang that forever,
+/// which is exactly what a keep-alive receiver did.
+async fn read_head(socket: &mut TcpStream) -> Result<(u16, HeadRest), String> {
     let mut resp = Vec::new();
     let mut chunk = [0u8; 2048];
     let head_end = loop {
@@ -671,11 +822,9 @@ async fn sendfile_to_receive(
         .and_then(|(line, _)| line.split_whitespace().nth(1))
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| "receive: unreadable response".to_string())?;
-    if (200..300).contains(&status) {
-        return Ok(true);
-    }
-    // The far side's own message is the useful error, so read what it declared
-    // — bounded, and never waiting on a body that isn't coming.
+    let rest = resp.split_off(head_end);
+    // Content-Length rides along so the error body is read to a known end,
+    // never waiting on bytes that aren't coming.
     let declared = head
         .lines()
         .find_map(|l| {
@@ -685,20 +834,34 @@ async fn sendfile_to_receive(
         .and_then(|(_, v)| v.trim().parse::<usize>().ok())
         .unwrap_or(0)
         .min(8 * 1024);
-    let mut body = resp.split_off(head_end);
-    while body.len() < declared {
-        let n = socket.read(&mut chunk).await.unwrap_or(0);
-        if n == 0 {
-            break;
+    Ok((status, HeadRest { rest, declared }))
+}
+
+/// What followed a response head: the bytes already in hand, and how many the
+/// response said there would be.
+struct HeadRest {
+    rest: Vec<u8>,
+    declared: usize,
+}
+
+/// The far side's own message for a failed request — the useful error — read
+/// only up to the length it declared, so this can't block on a kept-alive
+/// connection that has nothing more to send.
+async fn read_error_body(socket: &mut TcpStream, status: u16, head: HeadRest) -> String {
+    let HeadRest { mut rest, declared } = head;
+    let mut chunk = [0u8; 2048];
+    while rest.len() < declared {
+        match socket.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => rest.extend_from_slice(&chunk[..n]),
         }
-        body.extend_from_slice(&chunk[..n]);
     }
-    let message = String::from_utf8_lossy(&body).trim().to_string();
-    Err(if message.is_empty() {
+    let message = String::from_utf8_lossy(&rest).trim().to_string();
+    if message.is_empty() {
         format!("receive: HTTP {status}")
     } else {
         message
-    })
+    }
 }
 
 /// Stream `src[offset..size]` to the target agent as one request body.

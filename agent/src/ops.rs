@@ -283,10 +283,141 @@ pub async fn hash(storage: Arc<LocalStorage>, body: Bytes) -> Result<Response, A
     Ok(response)
 }
 
+/// The pipe capacity a bulk receive asks for, and so the most one splice can
+/// move. 1 MiB is the usual `/proc/sys/fs/pipe-max-size`; the kernel caps the
+/// request rather than refusing it, and the granted size is what gets used.
+const SPLICE_CHUNK: usize = 1024 * 1024;
+
+/// The upgraded half of a bulk receive: take the raw socket back off hyper and
+/// splice the declared number of bytes into the file, then say how it went on
+/// the same connection — after a 101 there is no HTTP left to carry a status.
+///
+/// Every failure is reported through that line rather than a response, so the
+/// sender always learns the outcome; a connection that dies before the ack is
+/// a failed send, and the partial file is what the next resume verifies.
+async fn bulk_receive(upgrade: hyper::upgrade::OnUpgrade, file: std::fs::File, len: u64) {
+    let upgraded = match upgrade.await {
+        Ok(upgraded) => upgraded,
+        Err(_) => return, // the connection went away before it was handed over
+    };
+    // Through hyper-util's helper, not hyper's own downcast: axum::serve runs
+    // the h1/h2 auto builder, which wraps the connection in a `Rewind` for its
+    // protocol sniff. Downcasting to the bare socket therefore always fails,
+    // and this unwraps that layer and folds the sniffed bytes back into
+    // read_buf where they belong.
+    match hyper_util::server::conn::auto::upgrade::downcast::<
+        hyper_util::rt::TokioIo<tokio::net::TcpStream>,
+    >(upgraded)
+    {
+        Ok(parts) => {
+            // Blocking mode and a blocking thread: splice on a regular file
+            // would otherwise stall an executor thread, and this way the loop
+            // needs no readiness dance of its own.
+            let tcp = match parts.io.into_inner().into_std() {
+                Ok(tcp) => tcp,
+                Err(_) => return,
+            };
+            if tcp.set_nonblocking(false).is_err() {
+                return;
+            }
+            let prefix = parts.read_buf;
+            let _ = tokio::task::spawn_blocking(move || splice_body(tcp, prefix, file, len)).await;
+        }
+        Err(upgraded) => {
+            // The connection isn't a plain TCP socket this build can splice
+            // from. Read it the ordinary way so the transfer still completes.
+            let _ = copy_upgraded(upgraded, file, len).await;
+        }
+    }
+}
+
+/// socket → pipe → file, never through this process. Returns what the ack says.
+fn splice_body(tcp: std::net::TcpStream, prefix: Bytes, mut file: std::fs::File, len: u64) {
+    use rustix::pipe::{splice, SpliceFlags};
+    use std::io::Write;
+    let outcome = (|| -> std::io::Result<()> {
+        let mut done = 0u64;
+        // Whatever hyper had already read past the headers belongs to the body
+        // and never reached the socket buffer, so it is written by hand first.
+        if !prefix.is_empty() {
+            let take = (prefix.len() as u64).min(len) as usize;
+            file.write_all(&prefix[..take])?;
+            done += take as u64;
+        }
+        if done < len {
+            let (reader, writer) = rustix::pipe::pipe()?;
+            // A pipe holds 64 KiB by default, and a splice can only move what
+            // fits — which would be two syscalls every 64 KiB, enough to cost
+            // more than the copy it saves. Ask for the system maximum and use
+            // whatever it grants; a refusal just leaves the default.
+            let capacity = rustix::pipe::fcntl_setpipe_size(&writer, SPLICE_CHUNK)
+                .or_else(|_| rustix::pipe::fcntl_getpipe_size(&writer))
+                .unwrap_or(64 * 1024);
+            while done < len {
+                let want = ((len - done) as usize).min(capacity);
+                let moved = splice(&tcp, None, &writer, None, want, SpliceFlags::MOVE)?;
+                if moved == 0 {
+                    return Err(std::io::Error::other(
+                        "connection closed before the declared length",
+                    ));
+                }
+                let mut left = moved;
+                while left > 0 {
+                    let written = splice(&reader, None, &file, None, left, SpliceFlags::MOVE)?;
+                    if written == 0 {
+                        return Err(std::io::Error::other("splice to the file wrote nothing"));
+                    }
+                    left -= written;
+                }
+                done += moved as u64;
+            }
+        }
+        file.flush()
+    })();
+    let mut tcp = tcp;
+    let _ = match outcome {
+        Ok(()) => writeln!(tcp, "TJ-OK {len}"),
+        Err(e) => writeln!(tcp, "TJ-ERR {e}"),
+    };
+    let _ = tcp.flush();
+}
+
+/// The fallback when the socket can't be reached: the same bytes, read the
+/// ordinary way, with the same ack.
+async fn copy_upgraded(upgraded: hyper::upgrade::Upgraded, file: std::fs::File, len: u64) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut io = hyper_util::rt::TokioIo::new(upgraded);
+    let mut file = tokio::fs::File::from_std(file);
+    let mut left = len;
+    let mut buf = vec![0u8; SPLICE_CHUNK];
+    let outcome = async {
+        while left > 0 {
+            let want = (left as usize).min(buf.len());
+            let n = io.read(&mut buf[..want]).await?;
+            if n == 0 {
+                return Err(std::io::Error::other(
+                    "connection closed before the declared length",
+                ));
+            }
+            file.write_all(&buf[..n]).await?;
+            left -= n as u64;
+        }
+        file.flush().await
+    }
+    .await;
+    let ack = match outcome {
+        Ok(()) => format!("TJ-OK {len}\n"),
+        Err(e) => format!("TJ-ERR {e}\n"),
+    };
+    let _ = io.write_all(ack.as_bytes()).await;
+    let _ = io.flush().await;
+}
+
 pub async fn receive(
     storage: Arc<LocalStorage>,
     headers: &HeaderMap,
     body: Body,
+    upgrade: Option<hyper::upgrade::OnUpgrade>,
 ) -> Result<Response, AgentError> {
     let r = header_ref(headers)?;
     let offset: u64 = headers
@@ -327,15 +458,54 @@ pub async fn receive(
             });
         }
     }
-    let file = if offset == 0 {
-        std::fs::File::create(&full)
-    } else {
-        std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&full)
+    // Settle the bulk receive *before* the file is touched: opening it pins the
+    // destination to `offset`, and a request refused after that would already
+    // have discarded whatever came later. An Upgrade this build does not know
+    // is refused outright rather than read as an ordinary body — such a request
+    // carries no bytes, and treating it as one would empty the destination.
+    let bulk = match headers.get("upgrade").and_then(|v| v.to_str().ok()) {
+        None => None,
+        Some(want) if want.eq_ignore_ascii_case(crate::wire::BULK_SPLICE_V1) => {
+            let upgrade = upgrade.ok_or_else(|| bad("upgrade"))?;
+            let len: u64 = headers
+                .get(crate::wire::LENGTH_HEADER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok())
+                .ok_or_else(|| bad(crate::wire::LENGTH_HEADER))?;
+            Some((upgrade, len))
+        }
+        Some(_) => return Err(bad("upgrade")),
+    };
+
+    // Positioned rather than appended: splice(2) refuses an append-mode
+    // target, so a resume could not be spliced into one. The offset was just
+    // checked against what is here, so pinning the file to exactly that prefix
+    // and writing from there is the same thing an append did — and it also
+    // means nothing beyond the prefix can survive as a tail.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&full)
+        .map_err(AgentError::from)?;
+    file.set_len(offset).map_err(AgentError::from)?;
+    {
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .map_err(AgentError::from)?;
     }
-    .map_err(AgentError::from)?;
+
+    // Answer 101 and take the connection over, so the body can be spliced from
+    // the socket into the file without passing through either process.
+    if let Some((upgrade, len)) = bulk {
+        tokio::spawn(bulk_receive(upgrade, file, len));
+        return Response::builder()
+            .status(StatusCode::SWITCHING_PROTOCOLS)
+            .header("connection", "upgrade")
+            .header("upgrade", crate::wire::BULK_SPLICE_V1)
+            .body(Body::empty())
+            .map_err(|e| AgentError::internal(e.to_string()));
+    }
 
     // The disk write runs on a blocking thread fed by a channel, rather than
     // through `tokio::fs::File`, for two reasons: a hyper chunk is

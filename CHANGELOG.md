@@ -71,6 +71,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A transfer between two storage agents no longer passes through either of
+  them.** When both ends are agents new enough to agree on it, the file now
+  goes from the sending machine's disk cache onto the wire and from the wire
+  into the receiving machine's file entirely inside the kernel. That cuts the
+  receiving machine's CPU by about a third — the part that matters when a busy
+  machine is moving several files at once. Transfers to anything else, an older
+  agent or a peer running the whole app, are unchanged and still work.
+
 - **A storage agent writes an incoming file while it is still arriving.** The
   receiving end used to take turns — read a piece off the network, write it to
   disk, read the next — and copied each piece an extra time on the way. It now

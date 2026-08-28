@@ -72,6 +72,21 @@ pub enum LinkOutcome {
 /// `receive` only: the byte offset this chunk starts at.
 pub const OFFSET_HEADER: &str = "x-tj-offset";
 
+/// The bulk receive: an HTTP upgrade that hands the connection over so the
+/// body can be spliced from the socket into the file without passing through
+/// either process. The body length moves to a header of its own, because the
+/// upgrade request carries no body — the bytes follow the 101.
+///
+/// A sender must only ask for this against a receiver that advertises it in
+/// `/api/v1/version` (BULK_SPLICE_V1 in `bulk`). A receiver that did not
+/// advertise it would read the upgrade request as an ordinary receive of
+/// `Content-Length: 0` and truncate the destination, which is why the
+/// capability probe — not the Upgrade header — is what gates this.
+pub const BULK_SPLICE_V1: &str = "tj-splice/1";
+
+/// Bulk receive only: how many bytes follow the 101.
+pub const LENGTH_HEADER: &str = "x-tj-length";
+
 /// How often the hash stream reports a cumulative byte count. A final
 /// frame always closes the count.
 pub const HASH_EMIT_BYTES: u64 = 8 * 1024 * 1024;

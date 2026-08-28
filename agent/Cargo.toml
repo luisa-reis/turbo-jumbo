@@ -8,10 +8,16 @@ publish = false
 [dependencies]
 axum = "0.8"
 bytes = "1"
+# For the bulk receive: hyper hands over the upgraded connection, and
+# hyper-util names the IO type axum::serve wraps it in, which is what lets the
+# handler recover the raw socket to splice from. Both are already in the tree
+# under axum; naming them here makes the coupling explicit.
+hyper = "1"
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 # No TLS on purpose: agents speak plain http on the LAN, like the app's own
 # peer traffic. `stream` feeds the hash-frame reader in the send job.
 reqwest = { version = "0.12", default-features = false, features = ["stream"] }
-rustix = { version = "1", features = ["fs", "process"] }
+rustix = { version = "1", features = ["fs", "pipe", "process"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: a safetensors header's "dominant dtype" is the *first*
 # tensor in the document, and serde_json's default map would sort the keys.
