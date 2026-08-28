@@ -17,6 +17,10 @@ use crate::refs::{Ref, Root};
 use crate::storage::LocalStorage;
 use crate::wire::{FileEntry, ListOptions, MAX_SMALL_FILE, REF_PATH_HEADER, REF_ROOT_HEADER};
 
+/// Body chunks a receive may hold between the socket and the disk. Bounded so
+/// a slow disk pushes back on the wire instead of queueing the file in memory.
+const RECEIVE_QUEUE: usize = 8;
+
 pub fn bad(what: &str) -> AgentError {
     AgentError::bad_request(format!("Invalid {what}"))
 }
@@ -284,7 +288,6 @@ pub async fn receive(
     headers: &HeaderMap,
     body: Body,
 ) -> Result<Response, AgentError> {
-    use tokio::io::AsyncWriteExt;
     let r = header_ref(headers)?;
     let offset: u64 = headers
         .get(crate::wire::OFFSET_HEADER)
@@ -324,22 +327,58 @@ pub async fn receive(
             });
         }
     }
-    let mut file = if offset == 0 {
-        tokio::fs::File::create(&full).await
+    let file = if offset == 0 {
+        std::fs::File::create(&full)
     } else {
-        tokio::fs::OpenOptions::new()
+        std::fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(&full)
-            .await
     }
     .map_err(AgentError::from)?;
+
+    // The disk write runs on a blocking thread fed by a channel, rather than
+    // through `tokio::fs::File`, for two reasons: a hyper chunk is
+    // reference-counted, so handing it over costs nothing where an async
+    // `write_all` would copy it into tokio's own buffer first; and the write
+    // then overlaps the next read off the socket instead of taking turns with
+    // it. The queue is bounded, so a slow disk still pushes back on the wire.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Bytes>(RECEIVE_QUEUE);
+    let writer = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = file;
+        while let Some(chunk) = rx.blocking_recv() {
+            file.write_all(&chunk)?;
+        }
+        file.flush()
+    });
+
     let mut stream = body.into_data_stream();
+    let mut read_err = None;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| AgentError::internal(format!("body read: {e}")))?;
-        file.write_all(&chunk).await.map_err(AgentError::from)?;
+        match chunk {
+            Ok(chunk) => {
+                // A closed channel means the writer already failed; its error
+                // is the one worth reporting, so stop and let it surface.
+                if tx.send(chunk).await.is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                read_err = Some(AgentError::internal(format!("body read: {e}")));
+                break;
+            }
+        }
     }
-    file.flush().await.map_err(AgentError::from)?;
+    drop(tx);
+    match writer.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(AgentError::from(e)),
+        Err(e) => return Err(AgentError::internal(format!("write task: {e}"))),
+    }
+    if let Some(e) = read_err {
+        return Err(e);
+    }
     Ok(ok_json())
 }
 

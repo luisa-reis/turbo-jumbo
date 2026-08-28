@@ -71,6 +71,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A storage agent writes an incoming file while it is still arriving.** The
+  receiving end used to take turns — read a piece off the network, write it to
+  disk, read the next — and copied each piece an extra time on the way. It now
+  hands pieces straight to a writer that runs alongside the network read, so
+  the disk and the network work at once: a 1 GiB transfer between two agents
+  went from ~0.37s to ~0.22s in testing, for about a quarter less CPU. A slow
+  disk still slows the sender down rather than piling the file up in memory.
+
 - **A storage agent sends a file without copying it through itself.** The
   agent hands the file straight to the kernel to put on the wire, so the bytes
   go from the disk cache to the network without passing through the agent at
