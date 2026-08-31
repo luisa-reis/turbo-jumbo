@@ -1,0 +1,200 @@
+name: build
+
+# Publish the two artifacts a deploy consumes, each named by the revision that
+# produced it:
+#
+#   <registry>/<owner>/turbo-jumbo:sha-<rev>   the front door, as an image
+#   generic/tj-agent/<rev>/tj-agent            the storage agent, one binary
+#   generic/tj-agent/<rev>/tj-agent.sha256     what it should hash to
+#
+# Deployment is not here and must not be added: Ansible in the infra repo owns
+# the targets, pins a revision, pulls these, and restarts the units. This
+# workflow holds no credential to any target and reaches nothing but Forgejo.
+#
+# One revision names both artifacts, and both bake it in at build time. The
+# deploy gates on their version endpoints reporting exactly that revision back,
+# which is how it can tell a restart that took from one that silently didn't.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    # The image build needs the podman socket, which a job container cannot
+    # see. `native` runs on the host runner instead.
+    runs-on: native
+
+    env:
+      # The registry host is deployment-specific and this repository is
+      # mirrored publicly, so it comes from a CI variable rather than a
+      # committed literal. The owner and the instance URL come from the
+      # event, so neither is written down either.
+      REGISTRY: ${{ vars.REGISTRY_HOST }}
+      OWNER: ${{ github.repository_owner }}
+      SERVER: ${{ github.server_url }}
+      TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Settle the revision
+        id: rev
+        # Fixed-width from the event rather than `git rev-parse --short`, whose
+        # length is adaptive: the deploy pins this string, so it has to be the
+        # same string every time it is derived.
+        run: |
+          rev=${GITHUB_SHA:0:9}
+          echo "rev=$rev" >>"$GITHUB_OUTPUT"
+          echo "revision $rev" >&2
+
+      - name: Check the CI configuration is present
+        run: |
+          [[ -n $REGISTRY ]] || {
+            echo "error: the REGISTRY_HOST variable is not set on this repository" >&2
+            exit 1
+          }
+          [[ -n $TOKEN ]] || {
+            echo "error: the PACKAGES_TOKEN secret is not set on this repository" >&2
+            exit 1
+          }
+
+      # Tags are immutable. A rebuild of a revision that was already published
+      # must fail rather than replace it: the deploy pins explicit revisions,
+      # and a tag that can change underneath one is what makes a rollback
+      # quietly undo itself. Asked of the package API, which answers with the
+      # same token and needs no registry auth dance.
+      - name: Refuse to republish a revision
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        run: |
+          published() { # published <type> <name> <version>
+            local status
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              --user "$OWNER:$TOKEN" \
+              "$SERVER/api/v1/packages/$OWNER/$1/$2/$3")
+            case $status in
+            404) return 1 ;;
+            200) return 0 ;;
+            *)
+              # Not knowing is not the same as free. Stop.
+              echo "error: package API answered $status for $1/$2/$3" >&2
+              exit 1
+              ;;
+            esac
+          }
+          fail=0
+          if published container turbo-jumbo "sha-$REV"; then
+            echo "error: image tag sha-$REV already exists; tags are immutable" >&2
+            fail=1
+          fi
+          if published generic tj-agent "$REV"; then
+            echo "error: package tj-agent/$REV already exists; versions are immutable" >&2
+            fail=1
+          fi
+          ((!fail)) || exit 1
+
+      # Both artifacts are built before either is published, so a failure
+      # halfway leaves a revision wholly unpublished rather than half.
+
+      - name: Build the front door image
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        # TJ_COMMIT is what /api/v1/version reports where the image carries no
+        # git checkout, which is exactly the case here — .dockerignore keeps
+        # .git out. TJ_RELEASE stays empty on purpose: a build of main is not
+        # an official tagged release, and claiming otherwise would make every
+        # merge look like one.
+        run: |
+          podman build \
+            --build-arg TJ_COMMIT="$REV" \
+            --build-arg TJ_RELEASE= \
+            -t "$REGISTRY/$OWNER/turbo-jumbo:sha-$REV" \
+            .
+
+      - name: Build the agent binary
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        # Static musl: the runner and the target run the same distribution
+        # today, and a static binary is what keeps that from being load-bearing
+        # — one file, no libc to match, nothing to install beside it.
+        run: |
+          command -v cargo >/dev/null || {
+            echo "error: no Rust toolchain on this runner" >&2
+            exit 1
+          }
+          rustup target add x86_64-unknown-linux-musl
+          TJ_AGENT_COMMIT="$REV" cargo build --release \
+            --manifest-path agent/Cargo.toml \
+            --target x86_64-unknown-linux-musl
+
+      - name: Check the binary is actually static
+        run: |
+          bin=agent/target/x86_64-unknown-linux-musl/release/tj-agent
+          [[ -s $bin ]] || {
+            echo "error: no binary at $bin" >&2
+            exit 1
+          }
+          # A dynamically linked agent deploys fine from here and then fails on
+          # a box whose libc differs, so assert it rather than trust the target
+          # triple. Asked as "does it need any shared library", which is the
+          # property that matters: file(1) calls this musl build "static-pie
+          # linked" and a glibc one "dynamically linked", so matching on that
+          # wording would be matching on a spelling.
+          if command -v readelf >/dev/null; then
+            needed=$(readelf -d "$bin" 2>/dev/null | grep -c NEEDED || true)
+            if ((needed)); then
+              echo "error: $bin links $needed shared librar$( ((needed==1)) && echo y || echo ies); expected none" >&2
+              readelf -d "$bin" | grep NEEDED >&2
+              exit 1
+            fi
+          else
+            echo "warning: no readelf on this runner; static linking unverified" >&2
+          fi
+
+      - name: Checksum the binary
+        run: |
+          cd agent/target/x86_64-unknown-linux-musl/release
+          sha256sum tj-agent >tj-agent.sha256
+          cat tj-agent.sha256 >&2
+
+      # Publishing starts here. The registry's own CA is trusted by the
+      # runners: no --tls-verify=false, on login or on push.
+      - name: Log in to the registry
+        run: podman login "$REGISTRY" --username "$OWNER" --password-stdin <<<"$TOKEN"
+
+      - name: Push the image
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        # This tag and nothing else. No `latest`: a floating tag is a second,
+        # unpinned name for a revision, and the deploy pins revisions.
+        run: podman push "$REGISTRY/$OWNER/turbo-jumbo:sha-$REV"
+
+      - name: Publish the agent binary and its checksum
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        # The generic registry refuses an existing file with 409, so this is
+        # the second guard on immutability as well as the upload.
+        run: |
+          cd agent/target/x86_64-unknown-linux-musl/release
+          for file in tj-agent tj-agent.sha256; do
+            curl -fsS --user "$OWNER:$TOKEN" \
+              --upload-file "$file" \
+              "$SERVER/api/packages/$OWNER/generic/tj-agent/$REV/$file"
+          done
+
+      - name: Say what was published
+        env:
+          REV: ${{ steps.rev.outputs.rev }}
+        run: |
+          {
+            echo "### Published \`$REV\`"
+            echo
+            echo "| artifact | address |"
+            echo "| --- | --- |"
+            echo "| front door | \`$REGISTRY/$OWNER/turbo-jumbo:sha-$REV\` |"
+            echo "| agent | \`generic/tj-agent/$REV/tj-agent\` |"
+            echo "| checksum | \`generic/tj-agent/$REV/tj-agent.sha256\` |"
+            echo
+            echo "Both report \`$REV\` from their version endpoint."
+          } >>"$GITHUB_STEP_SUMMARY"
