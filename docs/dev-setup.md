@@ -30,7 +30,7 @@ and deployment live in [setup.md](setup.md).
 ## The `hf` downloader
 
 Every HuggingFace download shells out to the official `hf` CLI, which must be
-on `PATH`. Install it the same way the `Dockerfile` does:
+on `PATH`. Install it the same way the `Containerfile` does:
 
 ```bash
 curl -LsSf https://hf.co/cli/install.sh | bash   # lands in ~/.local/bin/hf

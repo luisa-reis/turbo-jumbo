@@ -52,7 +52,7 @@ if the rows must stay `List`/`ListItem`.
 Hugging Face downloads shell out to the `hf` CLI, and its version is neither
 shown nor updatable from the app — today it means a shell on each machine.
 Add a control that runs `hf update` (the CLI picks the right method for how
-it was installed — the curl installer in the `Dockerfile`, pip, uv, …) and
+it was installed — the curl installer in the `Containerfile`, pip, uv, …) and
 show the current version next to it (`hf version`, plain `version=1.28.0`
 output), so the header or a settings spot says what every peer is running
 and whether it moved. It has to run on the peer that does the downloading,

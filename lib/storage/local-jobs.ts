@@ -78,7 +78,7 @@ export function startDownloadJob(
 
   // The spawn inherits the server's environment: transfer acceleration
   // (HF_XET_HIGH_PERFORMANCE) and HF_TOKEN come from there (.envrc in dev,
-  // ENV in the Dockerfile) rather than app code.
+  // ENV in the Containerfile) rather than app code.
   const proc = spawn('hf', args);
   let output = '';
   proc.stdout.on('data', (chunk: Buffer) => {
