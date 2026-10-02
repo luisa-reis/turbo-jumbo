@@ -11,6 +11,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`tj` runs on machines without a checkout.** Each release now carries
+  standalone `tj` binaries for macOS, Linux and Windows, so a laptop can fetch
+  one with `curl`, point `TJ_URL` at a server, and go — no Bun, no clone, no
+  `bun install`. See [docs/cli.md](docs/cli.md#running-it).
 - **A missing vision projector is flagged and recoverable on any machine.**
   Auditing a model on a peer — not just this host — now flags a vision
   projector (`mmproj`) or other expected file that Hugging Face lists but the

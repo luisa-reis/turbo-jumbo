@@ -11,6 +11,21 @@ disagree with each other.
 
 ## Running it
 
+On a machine without a checkout — a laptop, say — download the standalone
+binary for its platform from the Forgejo release. It carries its own runtime,
+so nothing else needs installing:
+
+```console
+$ curl -fLo ~/bin/tj https://<forgejo>/<owner>/turbo-jumbo/releases/download/v0.2.0/tj-darwin-arm64
+$ chmod +x ~/bin/tj
+```
+
+Each release carries `tj-darwin-arm64`, `tj-darwin-x64`, `tj-linux-x64`,
+`tj-linux-arm64` and `tj-windows-x64.exe`, plus a `SHA256SUMS` to check them
+against. Point it at a server with `TJ_URL` (see
+[Finding the server](#finding-the-server)). `bin/build-cli.sh` builds the same
+binaries from a checkout.
+
 From a checkout:
 
 ```console
@@ -597,7 +612,9 @@ tj 0.1.0 (dev)
   platform linux-x64
 ```
 
-Build detail rides the verbosity dial rather than a second flag.
+Build detail rides the verbosity dial rather than a second flag. A standalone
+binary reports the commit it was built from, wherever you run it; only one built
+from a release drops the `(dev)`.
 
 ## Output formats
 

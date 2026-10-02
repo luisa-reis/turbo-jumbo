@@ -3,8 +3,9 @@ set -euo pipefail
 
 # Cut a release: stamp the changelog's Unreleased section with the new
 # version, bump package.json, commit, move the main bookmark, create the
-# annotated tag, push branch and tag to both remotes, and publish the
-# changelog section as release notes on GitHub and Forgejo.
+# annotated tag, build the `tj` CLI binaries, push branch and tag to both
+# remotes, and publish the changelog section as release notes on GitHub and
+# Forgejo, with the CLI binaries attached to the Forgejo release.
 #
 # Usage:
 #   bin/release.sh <version>          e.g. bin/release.sh 0.2.0
@@ -85,6 +86,33 @@ git -c user.name="$(jj config get user.name)" \
     tag -a "$TAG" -m "Turbo Jumbo $VERSION" "$RELEASE_COMMIT"
 echo "Tagged $TAG at ${RELEASE_COMMIT:0:12}"
 
+# --- Build the CLI binaries -----------------------------------------------
+
+# After tagging, so they are stamped as the release; before pushing, so a
+# failed build stops the release while nothing has left this machine yet.
+CLI_DIR=$REPO_ROOT/build/cli
+# Through a variable, not `< <(…)`: set -e ignores a failing process
+# substitution, and a half-built set must stop the release.
+cli_paths=$(bin/build-cli.sh --out-dir "$CLI_DIR")
+mapfile -t CLI_BINARIES <<<"$cli_paths"
+# A binary that still says "(dev)" would defeat the point of stamping. Ask the
+# one this machine can run, when there is one.
+case $(uname -s)-$(uname -m) in
+Linux-x86_64) HOST_CLI=$CLI_DIR/tj-linux-x64 ;;
+Linux-aarch64) HOST_CLI=$CLI_DIR/tj-linux-arm64 ;;
+Darwin-arm64) HOST_CLI=$CLI_DIR/tj-darwin-arm64 ;;
+Darwin-x86_64) HOST_CLI=$CLI_DIR/tj-darwin-x64 ;;
+*) HOST_CLI="" ;;
+esac
+if [[ -n $HOST_CLI ]]; then
+    reported=$("$HOST_CLI" --version)
+    if [[ $reported != "tj $VERSION" ]]; then
+        echo "error: the built CLI reports '$reported', expected 'tj $VERSION'" >&2
+        exit 1
+    fi
+fi
+echo "Built ${#CLI_BINARIES[@]} CLI binaries in $CLI_DIR"
+
 # --- Push branch + tag to both remotes ------------------------------------
 
 for remote in origin github; do
@@ -129,8 +157,24 @@ if [[ -z "${FORGEJO_URL:-}" ]]; then
     done
 fi
 if [[ -n "${FORGEJO_URL:-}" ]]; then
-    publish Forgejo "$FORGEJO_URL/api/v1/repos/$(repo_path origin)/releases" \
-        token "${FORGEJO_TOKEN:-}"
+    FORGEJO_RELEASES=$FORGEJO_URL/api/v1/repos/$(repo_path origin)/releases
+    publish Forgejo "$FORGEJO_RELEASES" token "${FORGEJO_TOKEN:-}"
+    # The CLI binaries ride on the Forgejo release, so a machine on the
+    # network can fetch one with curl from a URL naming the version.
+    if [[ -n "${FORGEJO_TOKEN:-}" ]] &&
+        release_id=$(curl -sf "$FORGEJO_RELEASES/tags/$TAG" \
+            -H "Authorization: token $FORGEJO_TOKEN" | jq -er .id); then
+        for file in "${CLI_BINARIES[@]}" "$CLI_DIR/SHA256SUMS"; do
+            name=$(basename "$file")
+            curl -sf -X POST "$FORGEJO_RELEASES/$release_id/assets?name=$name" \
+                -H "Authorization: token $FORGEJO_TOKEN" \
+                -F "attachment=@$file" >/dev/null ||
+                echo "warning: attaching $name to the Forgejo release failed — upload it from $CLI_DIR by hand" >&2
+        done
+        echo "Attached the CLI binaries to the Forgejo release"
+    elif [[ -n "${FORGEJO_TOKEN:-}" ]]; then
+        echo "warning: no Forgejo release for $TAG to attach to — upload $CLI_DIR by hand" >&2
+    fi
 else
     echo "warning: no reachable Forgejo API (set FORGEJO_URL) — create the $TAG release by hand" >&2
 fi

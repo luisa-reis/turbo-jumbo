@@ -30,8 +30,8 @@ jj commit -m "<message>"  # Commit (this repo uses Jujutsu, not git)
 ## Releases and the changelog
 
 - `CHANGELOG.md` is hand-curated ([Keep a Changelog](https://keepachangelog.com)). **When a change is user-visible, add a bullet under `## [Unreleased]` in the same commit**, written for users of the app ("searching the catalog now finds…"), not restyled commit subjects. Internal-only changes (refactors, dev tooling) stay out.
-- `bin/release.sh <version>` cuts a release: stamps the Unreleased section, bumps `package.json`, commits, moves `main`, creates the annotated `v<version>` tag, pushes branch + tag to `origin` (Forgejo, source of truth) and `github` (public mirror), and publishes the changelog section as release notes on both forges (`GITHUB_TOKEN`/`FORGEJO_TOKEN` from `.env`).
-- The app reports its version identity (`lib/version/`) in the header and at `/api/v1/version`: `dev: true` unless the running code is exactly a clean checkout of the `v<package.json version>` tag. Docker builds are stamped by `bin/docker-build.sh` (`TJ_RELEASE`/`TJ_COMMIT` env), since images carry no git checkout.
+- `bin/release.sh <version>` cuts a release: stamps the Unreleased section, bumps `package.json`, commits, moves `main`, creates the annotated `v<version>` tag, builds the standalone `tj` CLI binaries (`bin/build-cli.sh`, into `build/cli/`), pushes branch + tag to `origin` (Forgejo, source of truth) and `github` (public mirror), and publishes the changelog section as release notes on both forges (`GITHUB_TOKEN`/`FORGEJO_TOKEN` from `.env`), attaching the CLI binaries to the Forgejo release.
+- The app reports its version identity (`lib/version/`) in the header and at `/api/v1/version`: `dev: true` unless the running code is exactly a clean checkout of the `v<package.json version>` tag. Docker builds are stamped by `bin/docker-build.sh` (`TJ_RELEASE`/`TJ_COMMIT` env), since images carry no git checkout; the compiled CLI gets the same stamp as compile-time literals (`bin/build-cli.sh`). A stamp, when present, wins over git.
 
 ## Architecture
 
