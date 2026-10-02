@@ -692,5 +692,5 @@ The first release: mission control for your hoard of AI models.
 - **Deployment** — a single Next.js app per machine, one shared peer config,
   Docker/podman images with a tarball deploy flow.
 
-[Unreleased]: https://github.com/eendeego/turbo-jumbo/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/eendeego/turbo-jumbo/releases/tag/v0.1.0
+[Unreleased]: https://github.com/luisa-reis/turbo-jumbo/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/luisa-reis/turbo-jumbo/releases/tag/v0.1.0
