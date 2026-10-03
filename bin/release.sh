@@ -95,16 +95,18 @@ CLI_DIR=$REPO_ROOT/build/cli
 # substitution, and a half-built set must stop the release.
 cli_paths=$(bin/build-cli.sh --out-dir "$CLI_DIR")
 mapfile -t CLI_BINARIES <<<"$cli_paths"
-# A binary that still says "(dev)" would defeat the point of stamping. Ask the
-# one this machine can run, when there is one.
+# A binary that still says "(dev)" would defeat the point of stamping. Ask one
+# this machine can run — built for the check alone, beside the published set,
+# since that set need not include this platform.
 case $(uname -s)-$(uname -m) in
-Linux-x86_64) HOST_CLI=$CLI_DIR/tj-linux-x64 ;;
-Linux-aarch64) HOST_CLI=$CLI_DIR/tj-linux-arm64 ;;
-Darwin-arm64) HOST_CLI=$CLI_DIR/tj-darwin-arm64 ;;
-Darwin-x86_64) HOST_CLI=$CLI_DIR/tj-darwin-x64 ;;
-*) HOST_CLI="" ;;
+Linux-x86_64) HOST_TARGET=linux-x64 ;;
+Linux-aarch64) HOST_TARGET=linux-arm64 ;;
+Darwin-arm64) HOST_TARGET=darwin-arm64 ;;
+Darwin-x86_64) HOST_TARGET=darwin-x64 ;;
+*) HOST_TARGET="" ;;
 esac
-if [[ -n $HOST_CLI ]]; then
+if [[ -n $HOST_TARGET ]]; then
+    HOST_CLI=$(bin/build-cli.sh --out-dir "$REPO_ROOT/build/cli-check" "$HOST_TARGET")
     reported=$("$HOST_CLI" --version)
     if [[ $reported != "tj $VERSION" ]]; then
         echo "error: the built CLI reports '$reported', expected 'tj $VERSION'" >&2

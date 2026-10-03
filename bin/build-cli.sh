@@ -8,6 +8,9 @@ set -euo pipefail
 #   bin/build-cli.sh [--out-dir DIR] [TARGET...]
 
 ALL_TARGETS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64)
+# What a deploy and a release carry when no target is named: each binary is
+# ~60-110 MB, so only the platforms someone actually runs it on.
+DEFAULT_TARGETS=(darwin-arm64 darwin-x64)
 
 usage() {
     cat <<EOF
@@ -25,7 +28,7 @@ Options:
                   there is rewritten to list only this run's binaries.
   -h, --help      Print this help
 
-Targets (default: all):
+Targets (default: ${DEFAULT_TARGETS[*]}):
   ${ALL_TARGETS[*]}
 
 The binaries report this checkout's commit from 'tj --version -v', and only
@@ -69,7 +72,7 @@ while (($#)); do
         ;;
     esac
 done
-((${#targets[@]})) || targets=("${ALL_TARGETS[@]}")
+((${#targets[@]})) || targets=("${DEFAULT_TARGETS[@]}")
 
 # Resolve before the cd below, so a relative --out-dir means the caller's cwd.
 mkdir -p "$OUT_DIR"

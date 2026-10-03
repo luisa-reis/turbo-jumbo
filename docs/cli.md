@@ -22,12 +22,14 @@ $ chmod +x ~/bin/tj
 $ export TJ_URL=http://192.0.2.10:3000
 ```
 
-There are `tj-darwin-arm64`, `tj-darwin-x64`, `tj-linux-x64`, `tj-linux-arm64`
-and `tj-windows-x64.exe`, plus a `SHA256SUMS` to check them against;
+For now there are macOS builds only — `tj-darwin-arm64` (Apple silicon) and
+`tj-darwin-x64` (Intel) — plus a `SHA256SUMS` to check them against;
 `/api/v1/cli` lists what a server has. Every deploy builds them in
 (`bin/deploy.sh` and the container image both run `bin/build-cli.sh`), and each
 release also carries them on its Forgejo release page, under
-`releases/download/v<version>/`.
+`releases/download/v<version>/`. `bin/build-cli.sh` can also build
+`linux-x64`, `linux-arm64` and `windows-x64` on request; adding one to its
+`DEFAULT_TARGETS` ships it everywhere.
 
 From a checkout:
 
