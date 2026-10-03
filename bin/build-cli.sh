@@ -10,7 +10,7 @@ set -euo pipefail
 ALL_TARGETS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64)
 # What a deploy and a release carry when no target is named: each binary is
 # ~60-110 MB, so only the platforms someone actually runs it on.
-DEFAULT_TARGETS=(darwin-arm64 darwin-x64)
+DEFAULT_TARGETS=(darwin-arm64)
 
 usage() {
     cat <<EOF
