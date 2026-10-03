@@ -4,6 +4,7 @@ import {
   lemonadeHref,
   hfHref,
   locationHref,
+  repoFilesHref,
 } from '@/lib/storage/locations';
 import type {Peer} from '@/lib/config';
 
@@ -160,4 +161,17 @@ test('parseRoute: All has no download views without a local peer', () => {
     location: '192.0.2.2',
     view: 'hf',
   });
+});
+
+test('repoFilesHref: each tab lists the files its own location holds', () => {
+  const repo = 'org/repo';
+  expect(repoFilesHref('cold-storage', peers, repo)).toBe(
+    '/api/v1/cold-storage/repo-files?repoId=org%2Frepo',
+  );
+  expect(repoFilesHref('192.0.2.2', peers, repo)).toBe(
+    '/api/v1/peers/remote-two/repo-files?repoId=org%2Frepo',
+  );
+  expect(repoFilesHref('all', peers, repo)).toBe(
+    '/api/v1/local-models/repo-files?repoId=org%2Frepo',
+  );
 });

@@ -12,7 +12,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
-import {peerSlug} from '@/lib/peers/peer-slug';
+import {repoFilesHref} from '@/lib/storage/locations';
 import {fileBasename} from '@/lib/peers/peer-paths';
 import {
   checkpointDependents,
@@ -226,16 +226,13 @@ export function ModelsTableClient({
 
   // Fetch the file list for whole-repo models when they're expanded — and
   // eagerly for any flagged invalid, so the audit hovercard can name the bad
-  // files without an expansion. Against the active location (the local store, or
-  // a peer proxied to its own endpoint). Resolved against the augmented list:
-  // a model held only on a peer has no entry in `models`, and on that peer's
-  // tab its expansion is exactly this file list.
+  // files without an expansion. Against the active location (the local store,
+  // cold storage, or a peer proxied to its own endpoint). Resolved against the
+  // augmented list: a model held only on a peer has no entry in `models`, and on
+  // that peer's tab its expansion is exactly this file list.
   useEffect(() => {
-    const peer = peers.find((p) => p.address === activeLocation);
     const urlFor = (repoId: string) =>
-      peer
-        ? `/api/v1/peers/${peerSlug(peer)}/repo-files?repoId=${encodeURIComponent(repoId)}`
-        : `/api/v1/local-models/repo-files?repoId=${encodeURIComponent(repoId)}`;
+      repoFilesHref(activeLocation, peers, repoId);
     const wanted = new Set<string>(expanded);
     for (const name of invalidRepos ?? []) wanted.add(name);
     for (const name of wanted) {

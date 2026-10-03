@@ -150,6 +150,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Expanding a model on the Cold Storage tab lists its cold files.** A
+  non-GGUF model's file list (ONNX, safetensors, FastFlowLM…) was fetched from
+  this machine's local storage even on the Cold Storage tab, so it showed the
+  local copy's files there — or, on a machine with no local storage, nothing
+  at all under a model whose size was plainly there. It now lists what cold
+  storage holds.
+
 - **A copied model is judged complete by the same files as its original.** A
   model downloaded through the Lemonade/FastFlowLM catalog is complete with
   just the files FastFlowLM's registry lists (its repo carries extra NPU

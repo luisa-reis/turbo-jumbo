@@ -14,6 +14,23 @@ export function locationHref(id: string, peers: Peer[]): string {
   return peer ? `/${peerSlug(peer)}` : '/';
 }
 
+// Internal tab id -> the endpoint listing one whole-repo model's files (present,
+// missing, invalid) as that tab's location holds them: a peer's own, proxied;
+// cold storage's; and this machine's local store for All.
+export function repoFilesHref(
+  id: string,
+  peers: Peer[],
+  repoId: string,
+): string {
+  const query = `?repoId=${encodeURIComponent(repoId)}`;
+  if (id === COLD_STORAGE_LOCATION)
+    return `/api/v1/cold-storage/repo-files${query}`;
+  const peer = peers.find((p) => p.address === id);
+  return peer
+    ? `/api/v1/peers/${peerSlug(peer)}/repo-files${query}`
+    : `/api/v1/local-models/repo-files${query}`;
+}
+
 // URL segments (from an optional catch-all) -> internal tab id, or null when
 // the path doesn't correspond to a known tab. Reserved slugs win over a peer
 // claiming the same one — config validation rejects that, but the order here
