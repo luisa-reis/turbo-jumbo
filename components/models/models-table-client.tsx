@@ -225,16 +225,18 @@ export function ModelsTableClient({
     });
 
   // Fetch the file list for whole-repo models when they're expanded — and
-  // eagerly for any flagged invalid, so the audit hovercard can name the bad
-  // files without an expansion. Against the active location (the local store,
-  // cold storage, or a peer proxied to its own endpoint). Resolved against the
-  // augmented list: a model held only on a peer has no entry in `models`, and on
-  // that peer's tab its expansion is exactly this file list.
+  // eagerly for any flagged invalid or incomplete, so the audit hovercard can
+  // name the bad or missing files without an expansion. Against the active
+  // location (the local store, cold storage, or a peer proxied to its own
+  // endpoint). Resolved against the augmented list: a model held only on a peer
+  // has no entry in `models`, and on that peer's tab its expansion is exactly
+  // this file list.
   useEffect(() => {
     const urlFor = (repoId: string) =>
       repoFilesHref(activeLocation, peers, repoId);
     const wanted = new Set<string>(expanded);
     for (const name of invalidRepos ?? []) wanted.add(name);
+    for (const name of incompleteRepos ?? []) wanted.add(name);
     for (const name of wanted) {
       const key = `${activeLocation}::${name}`;
       if (repoFiles.has(key) || inFlight.current.has(key)) continue;
@@ -261,6 +263,7 @@ export function ModelsTableClient({
     activeLocation,
     repoFiles,
     invalidRepos,
+    incompleteRepos,
   ]);
 
   const showCheckboxes = onToggleSelected != null;
@@ -499,6 +502,10 @@ export function ModelsTableClient({
                     invalid={
                       item.depth === 0 &&
                       (invalidRepos?.has(item.parentName) ?? false)
+                    }
+                    incomplete={
+                      item.depth === 0 &&
+                      (incompleteRepos?.has(item.parentName) ?? false)
                     }
                     coldIncomplete={item.coldIncomplete}
                     onCopyToCold={

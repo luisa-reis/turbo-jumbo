@@ -6,6 +6,7 @@ import {VStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {Banner} from '@astryxdesign/core/Banner';
 import {peerSlug} from '@/lib/peers/peer-slug';
+import {COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {Model} from '@/lib/models/models';
 import {
@@ -44,6 +45,42 @@ import {useConsole} from '@/components/chrome/console-context';
 // A stable empty set, so locations with no incomplete repos don't hand the
 // table a fresh reference each render.
 const EMPTY_SET: Set<string> = new Set();
+
+/**
+ * The repo ids each location flags `incomplete` or `invalid`, keyed by
+ * location id: every peer's address, plus `cold-storage` when this machine has
+ * an archive. A location that can't answer reads as flagging nothing.
+ */
+async function flagSetsByLocation(
+  kind: 'incomplete' | 'invalid',
+  peers: PeerConfig[],
+  hasColdStorage: boolean,
+): Promise<Map<string, Set<string>>> {
+  const sources = [
+    ...peers.map((p) => ({
+      id: p.address,
+      url: `/api/v1/peers/${peerSlug(p)}/${kind}`,
+    })),
+    ...(hasColdStorage
+      ? [{id: COLD_STORAGE_LOCATION, url: `/api/v1/cold-storage/${kind}`}]
+      : []),
+  ];
+  const entries = await Promise.all(
+    sources.map(async ({id, url}) => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return [id, new Set<string>()] as const;
+        const data = (await res.json()) as Partial<
+          Record<typeof kind, string[]>
+        >;
+        return [id, new Set(data[kind] ?? [])] as const;
+      } catch {
+        return [id, new Set<string>()] as const;
+      }
+    }),
+  );
+  return new Map(entries);
+}
 
 // Derive the redownload target (repo, branch, in-repo path) from an audited
 // file's HF summary. The branch and in-repo path come from the file URL; the
@@ -163,44 +200,26 @@ export function HomeClient({
   const [models, setModels] = useState(modelsTableData);
   // Per-peer repo ids whose local copy is incomplete (present but missing
   // files a full download would include); drives the table's incomplete marker.
+  // Keyed by location id: each peer's address, and `cold-storage` for the
+  // archive where there is one.
   const [incompleteByPeer, setIncompleteByPeer] = useState<
     Map<string, Set<string>>
   >(new Map());
   const refreshIncomplete = useCallback(async () => {
-    const entries = await Promise.all(
-      peerConfigs.map(async (p) => {
-        try {
-          const res = await fetch(`/api/v1/peers/${peerSlug(p)}/incomplete`);
-          if (!res.ok) return [p.address, new Set<string>()] as const;
-          const data = (await res.json()) as {incomplete?: string[]};
-          return [p.address, new Set(data.incomplete ?? [])] as const;
-        } catch {
-          return [p.address, new Set<string>()] as const;
-        }
-      }),
+    setIncompleteByPeer(
+      await flagSetsByLocation('incomplete', peerConfigs, hasColdStorage),
     );
-    setIncompleteByPeer(new Map(entries));
-  }, [peerConfigs]);
-  // Per-peer repo ids with at least one invalid local file (present but corrupt
+  }, [peerConfigs, hasColdStorage]);
+  // Per-location repo ids with at least one invalid file (present but corrupt
   // or unverifiable); drives the table's invalid marker, parallel to incomplete.
   const [invalidByPeer, setInvalidByPeer] = useState<Map<string, Set<string>>>(
     new Map(),
   );
   const refreshInvalid = useCallback(async () => {
-    const entries = await Promise.all(
-      peerConfigs.map(async (p) => {
-        try {
-          const res = await fetch(`/api/v1/peers/${peerSlug(p)}/invalid`);
-          if (!res.ok) return [p.address, new Set<string>()] as const;
-          const data = (await res.json()) as {invalid?: string[]};
-          return [p.address, new Set(data.invalid ?? [])] as const;
-        } catch {
-          return [p.address, new Set<string>()] as const;
-        }
-      }),
+    setInvalidByPeer(
+      await flagSetsByLocation('invalid', peerConfigs, hasColdStorage),
     );
-    setInvalidByPeer(new Map(entries));
-  }, [peerConfigs]);
+  }, [peerConfigs, hasColdStorage]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   // The global console (logs) lives in the layout shell; read its open state so

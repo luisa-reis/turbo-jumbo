@@ -406,6 +406,7 @@ export function AuditCell({
   audit,
   failures,
   invalid = false,
+  incomplete = false,
   coldIncomplete = false,
   onCopyToCold,
   copyingToCold = false,
@@ -431,6 +432,9 @@ export function AuditCell({
   // The model has a local file that audits invalid (depth-0 rows). Its weights
   // can still pass, so a Pass verdict would be misleading — show Invalid instead.
   invalid?: boolean;
+  // The model is missing files it needs at this location (depth-0 rows). Its
+  // weights can still pass, so the same override applies — show Incomplete.
+  incomplete?: boolean;
   // This row's cold-storage copy is present but incomplete (smaller than the
   // largest known copy). The audit of this tab's own copy can still pass, so a
   // Pass verdict would hide the broken backup — show Incomplete instead.
@@ -461,8 +465,10 @@ export function AuditCell({
   onCopyFrom?: (file: AuditResult) => void;
   recovering?: boolean;
 }) {
-  if (audit == null) return null;
-  if (audit.kind === 'pending') {
+  // A flagged model shows its flag even with no hash verdict to override — a
+  // copy missing its weights has nothing the audit could hash.
+  if (audit == null && !(invalid || incomplete)) return null;
+  if (audit?.kind === 'pending') {
     // Waiting for a worker (audits serialize on cold storage): a muted marker
     // until the file's start event arrives.
     if (audit.queued) {
@@ -478,22 +484,30 @@ export function AuditCell({
       </HStack>
     );
   }
-  // A model with an invalid file must not read as Pass even when every audited
-  // weight passes (the invalid file — e.g. a bad index.json — isn't a weight, so
-  // it never enters the audited paths). Expand the row to see which file.
-  if (invalid && audit.status === 'pass') {
+  // A model with an invalid or missing file must not read as Pass even when
+  // every audited weight passes: the audit hashes weights, and the bad file — a
+  // corrupt index.json, an absent tokenizer — isn't one, so it never enters the
+  // audited paths. Invalid wins the label when both apply: it means a file on
+  // disk is wrong, not just absent. Expand the row to see which files.
+  if ((invalid || incomplete) && (audit == null || audit.status === 'pass')) {
     const token = (
       <Badge
-        label="Invalid"
+        label={invalid ? 'Invalid' : 'Incomplete'}
         variant="error"
-        xstyle={audit.cached ? styles.dimmed : undefined}
+        xstyle={audit?.cached ? styles.dimmed : undefined}
       />
     );
     const issues = repoIssues ?? [];
     // Detail not fetched yet: still don't claim Pass, just no hovercard.
     if (issues.length === 0) {
       return (
-        <HoverCard content="Invalid — a local file doesn't match its Hugging Face source.">
+        <HoverCard
+          content={
+            invalid
+              ? "Invalid — a file doesn't match its Hugging Face source."
+              : 'Incomplete — files the model needs are missing.'
+          }
+        >
           {token}
         </HoverCard>
       );
@@ -506,7 +520,9 @@ export function AuditCell({
         content={
           <VStack gap={2}>
             <Text type="supporting">
-              These files don&apos;t match Hugging Face:
+              {issues.some((f) => f.state !== 'missing')
+                ? "These files don't match Hugging Face:"
+                : 'These files the model needs are missing:'}
             </Text>
             <VStack gap={2} xstyle={styles.fileList}>
               {issues.map((f) => (
@@ -540,6 +556,9 @@ export function AuditCell({
       </HoverCard>
     );
   }
+  // Unflagged and unaudited was already answered above; a flagged one returned
+  // its flag. What's left has a verdict.
+  if (audit == null) return null;
   // A file whose cold-storage copy is incomplete must not read as Pass even when
   // this tab's own copy verifies (e.g. a peer holds the complete file) — the
   // cold backup is still broken. Mirrors the `invalid` override above.

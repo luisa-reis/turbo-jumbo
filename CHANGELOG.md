@@ -161,6 +161,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The Audit column no longer says Pass for a model missing files.** The audit
+  verifies a model's weights, so a model missing its tokenizer, config or ONNX
+  graph still read Pass, with only a small tag by its name saying otherwise.
+  It now reads **Incomplete**, and its hovercard names the missing files (with
+  **Download files** where a download can land) — as an invalid file already
+  turned it to **Invalid**. A model flagged either way shows its flag even when
+  nothing in it could be audited, rather than an empty cell.
+
+- **Cold storage is checked for incomplete and invalid models too.** Only peers
+  were, so a partial copy in the archive — weights without their companions,
+  or companions without their weights — showed nothing wrong at all. The Cold
+  Storage tab now flags them like any peer, and the All tab counts them among
+  the models incomplete or invalid somewhere.
+
 - **Expanding a model on the Cold Storage tab lists its cold files.** A
   non-GGUF model's file list (ONNX, safetensors, FastFlowLM…) was fetched from
   this machine's local storage even on the Cold Storage tab, so it showed the
