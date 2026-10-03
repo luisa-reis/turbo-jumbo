@@ -15,8 +15,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   hands out a standalone `tj` binary for Apple-silicon Macs at `/api/v1/cli/`,
   built from the same commit it runs, so a laptop can fetch it with `curl`,
   point `TJ_URL` at that server, and go — no Bun, no clone, no `bun install`.
-  Each release carries it on its Forgejo release page too. See
-  [docs/cli.md](docs/cli.md#running-it).
+  The new **Command-line tool** page (the terminal icon in the top bar) walks
+  through it with the commands ready to copy, this server's address already
+  in them, and each download's checksum. Each release carries the binary on
+  its Forgejo release page too. See [docs/cli.md](docs/cli.md#running-it).
 - **A missing vision projector is flagged and recoverable on any machine.**
   Auditing a model on a peer — not just this host — now flags a vision
   projector (`mmproj`) or other expected file that Hugging Face lists but the

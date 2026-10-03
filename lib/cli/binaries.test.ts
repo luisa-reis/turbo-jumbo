@@ -5,6 +5,7 @@ import {
   binaryName,
   cliDir,
   isServedFile,
+  parseChecksums,
 } from '@/lib/cli/binaries';
 
 describe('binaryName', () => {
@@ -47,5 +48,20 @@ describe('cliDir', () => {
 
   test('defaults to build/cli under the working directory', () => {
     expect(cliDir({})).toBe(`${process.cwd()}/build/cli`);
+  });
+});
+
+describe('parseChecksums', () => {
+  const a = 'a'.repeat(64);
+  const b = 'b'.repeat(64);
+
+  test('reads sha256sum output, text and binary mode alike', () => {
+    const sums = parseChecksums(`${a}  tj-darwin-arm64\n${b} *tj-linux-x64\n`);
+    expect(sums.get('tj-darwin-arm64')).toBe(a);
+    expect(sums.get('tj-linux-x64')).toBe(b);
+  });
+
+  test('skips lines that are not hashes', () => {
+    expect(parseChecksums('\nnot a hash  tj-darwin-arm64\n').size).toBe(0);
   });
 });

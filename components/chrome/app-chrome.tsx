@@ -8,6 +8,7 @@ import {HStack} from '@astryxdesign/core/Stack';
 import {Button} from '@astryxdesign/core/Button';
 import {HoverCard} from '@astryxdesign/core/HoverCard';
 import {Text} from '@astryxdesign/core/Text';
+import {CommandLineIcon} from '@heroicons/react/24/outline';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import type {Peer as PeerConfig} from '@/lib/config';
 import {versionLabel, type AppVersion} from '@/lib/version/resolve-version';
@@ -27,6 +28,11 @@ import {ThemeToggle} from '@/components/theme/theme-toggle';
 import {Log} from '@/components/log/log';
 import {LemonadeSyncModal} from '@/components/lemonade/lemonade-sync-modal';
 import {ConsoleProvider} from '@/components/chrome/console-context';
+
+/** The page explaining how to install `tj` (app/(chrome)/cli). */
+const CLI_PAGE = '/cli';
+/** A tab value no tab has, for pages that aren't about a location. */
+const NO_LOCATION = '';
 
 // The persistent app shell: TopNav (identity, location tabs, download actions,
 // theme) plus the single global console. Rendered by the route layout, so it
@@ -49,17 +55,21 @@ export function AppChrome({
   const pathname = usePathname();
 
   // The active location follows the URL (the layout is static), so the tabs
-  // track navigation regardless of layout re-render timing.
+  // track navigation regardless of layout re-render timing. The CLI page is
+  // about no location, so there no tab is active — and with no location, no
+  // per-location action shows either.
+  const onCliPage = pathname === CLI_PAGE;
   const activeLocation = useMemo(() => {
+    if (onCliPage) return NO_LOCATION;
     const segments = pathname.split('/').filter(Boolean);
     return parseRoute(segments, peers)?.location ?? ALL_LOCATION;
-  }, [pathname, peers]);
+  }, [pathname, peers, onCliPage]);
   // "Consolidate" runs on a single machine, so it shows on any peer tab (it
   // runs on that peer) but not on All.
   const consolidatePeer = peers.find((p) => p.address === activeLocation);
   // "Add model" works on any peer tab (downloads run on that peer) and on All
   // when this machine holds models (All downloads onto it).
-  const canAddModel = canDownloadTo(activeLocation, peers);
+  const canAddModel = !onCliPage && canDownloadTo(activeLocation, peers);
 
   const [consoleOpen, setConsoleOpen] = useState(false);
   const toggleConsole = useCallback(() => setConsoleOpen((o) => !o), []);
@@ -157,6 +167,15 @@ export function AppChrome({
                     isDisabled={activePeerDown}
                   />
                 )}
+                <Button
+                  isIconOnly
+                  label="Command-line tool"
+                  tooltip="Command-line tool"
+                  variant={onCliPage ? 'secondary' : 'ghost'}
+                  size="sm"
+                  icon={<CommandLineIcon style={{width: 16, height: 16}} />}
+                  onClick={() => router.push(CLI_PAGE)}
+                />
                 <ThemeToggle />
               </HStack>
             }

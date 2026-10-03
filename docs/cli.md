@@ -14,7 +14,9 @@ disagree with each other.
 On a machine without a checkout — a laptop, say — download the standalone
 binary for its platform from the Turbo Jumbo server you'll point it at. It
 carries its own runtime, so nothing else needs installing, and it is built from
-exactly the commit that server runs:
+exactly the commit that server runs. The web app's **Command-line tool** page
+(the terminal icon in the top bar, or `/cli`) gives these steps with that
+server's address already filled in:
 
 ```console
 $ curl -fLo ~/bin/tj http://192.0.2.10:3000/api/v1/cli/tj-darwin-arm64
