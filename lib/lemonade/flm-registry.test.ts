@@ -1,5 +1,9 @@
 import {test, expect} from 'bun:test';
-import {parseFlmRegistry, parseFlmSourceUrl} from '@/lib/lemonade/flm-registry';
+import {
+  flmRegistryFiles,
+  parseFlmRegistry,
+  parseFlmSourceUrl,
+} from '@/lib/lemonade/flm-registry';
 
 test('parseFlmSourceUrl handles plain, resolve- and tree-pinned HF urls', () => {
   expect(
@@ -58,4 +62,31 @@ test('parseFlmRegistry maps flm tags to their HF sources', () => {
 test('parseFlmRegistry tolerates junk payloads', () => {
   expect(parseFlmRegistry(null).size).toBe(0);
   expect(parseFlmRegistry({models: 'nope'}).size).toBe(0);
+});
+
+test('flmRegistryFiles: the files the registry lists for a repo at a revision', () => {
+  const registry = new Map([
+    [
+      'embed:300m',
+      {repoId: 'FastFlowLM/E', revision: 'main', files: ['a', 'b']},
+    ],
+    // Two tags sharing one repo and revision: their lists are unioned.
+    [
+      'embed:alt',
+      {repoId: 'FastFlowLM/E', revision: 'main', files: ['b', 'c']},
+    ],
+    ['embed:v2', {repoId: 'FastFlowLM/E', revision: 'v2', files: ['z']}],
+    ['empty:1b', {repoId: 'FastFlowLM/Empty', revision: 'main', files: []}],
+  ]);
+  expect(flmRegistryFiles(registry, 'FastFlowLM/E', 'main')?.sort()).toEqual([
+    'a',
+    'b',
+    'c',
+  ]);
+  expect(flmRegistryFiles(registry, 'FastFlowLM/E', 'v2')).toEqual(['z']);
+  // A revision the registry doesn't pin, an unknown repo, an entry without a
+  // file list: the registry doesn't define this copy.
+  expect(flmRegistryFiles(registry, 'FastFlowLM/E', 'v3')).toBeNull();
+  expect(flmRegistryFiles(registry, 'other/repo', 'main')).toBeNull();
+  expect(flmRegistryFiles(registry, 'FastFlowLM/Empty', 'main')).toBeNull();
 });

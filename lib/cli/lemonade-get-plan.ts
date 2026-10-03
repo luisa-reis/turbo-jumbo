@@ -150,9 +150,10 @@ export function planComponentDownload(
 /**
  * An FLM model's download, from the HF source FastFlowLM's registry pins for
  * its tag: fetch what the target lacks, and record the registry's whole list as
- * the model's file set. The repo carries more than the model — NPU kernels for
- * other targets — so without that scope everything else would count against it
- * as missing.
+ * the model's file set. The repo carries more than the model — per-model NPU
+ * kernels FastFlowLM no longer fetches — so without that scope everything else
+ * would count against it as missing. (The live registry wins when it can be
+ * reached; the recorded scope is the fallback, see completeFileSet.)
  *
  * A file the registry names but the repo no longer has means the two have
  * drifted; that fails rather than quietly fetching a partial model that would

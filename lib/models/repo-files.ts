@@ -1,9 +1,9 @@
 import {
   readFileMetaByPath,
   fileProvenance,
-  modelFileScope,
   modelRevision,
 } from '@/lib/models/model-sidecar';
+import {completeFileSet} from '@/lib/models/complete-file-set';
 import type {FileProvenance} from '@/lib/models/sidecar-types';
 import {isPickOneBinRepo, isPickOneSafetensorsRepo} from '@/lib/hf/hf-download';
 import {isDiffusersRepo} from '@/lib/models/diffusers';
@@ -77,18 +77,21 @@ export async function repoFileStatuses(
   // whatever main looks like today — a pinned repo's main may carry different
   // files entirely.
   const revision = await modelRevision(site, repoId);
-  // A file-scoped model (a FastFlowLM registry pin) is judged only against
-  // the files that make a complete copy of it — the repo's extra files (NPU
-  // kernels) aren't part of the model, so they're neither listed nor missing.
-  const scope = await modelFileScope(site, repoId);
-  // Drop repo clutter (`.gitattributes`, docs, images): never a required file,
-  // so never reported as missing.
-  const tree = (await repoTree(repoId, revision)).filter(
-    (f) => !isClutterFile(f.path) && (scope == null || scope.has(f.path)),
-  );
+  // A model with a defined file set (a FastFlowLM model, see completeFileSet)
+  // is judged only against it: the repo's other files aren't part of the
+  // model, so one that isn't on disk is never missing. One that is on disk is
+  // still listed, and still judged valid or not — it takes up room there.
+  const scope = await completeFileSet(site, repoId);
   // One inventory of the model directory answers presence and size for every
   // file in the tree.
   const onDisk = await entriesUnder(storage, root, repoId);
+  // Drop repo clutter (`.gitattributes`, docs, images): never a required file,
+  // so never reported as missing.
+  const tree = (await repoTree(repoId, revision)).filter(
+    (f) =>
+      !isClutterFile(f.path) &&
+      (scope == null || scope.has(f.path) || onDisk.has(`${repoId}/${f.path}`)),
+  );
   const paths = tree.map((f) => f.path);
   // A pick-one repo — ggml whisper.cpp-style `.bin` weights, a Comfy-Org
   // split_files safetensors bundle, or a diffusers pipeline (component folders

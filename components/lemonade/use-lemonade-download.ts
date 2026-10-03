@@ -130,9 +130,10 @@ export function useLemonadeDownload({
         repoId: source.repoId,
         branch: source.revision,
         filePaths: missing.length > 0 ? missing : wanted,
-        // The registry's file list IS the complete model — the repo's extra
-        // files (NPU kernels) aren't part of it, so completeness checks
-        // must judge only this set.
+        // The registry's file list IS the complete model — the repo's other
+        // files (per-model NPU kernels FastFlowLM no longer fetches) aren't
+        // part of it. Recorded so completeness checks still judge only this
+        // set when the live registry can't be reached (see completeFileSet).
         fileScope: wanted,
         sendToCold,
         deleteAfterTransfer,

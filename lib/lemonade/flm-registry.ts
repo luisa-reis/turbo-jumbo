@@ -7,8 +7,10 @@
 import type {FlmSource} from '@/lib/lemonade/flm';
 import {logger} from '@/lib/util/logger';
 
+// The project moved to the ROCm org; the old FastFlowLM/FastFlowLM path still
+// redirects, but this is where it lives now.
 export const FLM_REGISTRY_URL =
-  'https://raw.githubusercontent.com/FastFlowLM/FastFlowLM/main/src/model_list.json';
+  'https://raw.githubusercontent.com/ROCm/FastFlowLM/main/src/model_list.json';
 
 /**
  * The HF repo and revision a registry `url` names. The url is either the bare
@@ -68,6 +70,29 @@ export function parseFlmRegistry(payload: unknown): Map<string, FlmSource> {
     }
   }
   return out;
+}
+
+/**
+ * The files the registry says make a complete copy of `repoId` at `revision`,
+ * or null when no entry names that repo at that revision with a file list.
+ * Several tags sharing one repo and revision are unioned.
+ *
+ * This is the live definition, not the one recorded at download time: the
+ * registry's lists change under existing copies (v0.9.28 dropped every
+ * model's NPU `.xclbin` kernels, which FastFlowLM no longer fetches per
+ * model), and a copy downloaded any other way records no list at all.
+ */
+export function flmRegistryFiles(
+  registry: Map<string, FlmSource>,
+  repoId: string,
+  revision: string,
+): string[] | null {
+  const files = new Set<string>();
+  for (const source of registry.values()) {
+    if (source.repoId !== repoId || source.revision !== revision) continue;
+    for (const f of source.files) files.add(f);
+  }
+  return files.size > 0 ? [...files] : null;
 }
 
 // The registry changes rarely; cache it like the HF repo trees. A failed

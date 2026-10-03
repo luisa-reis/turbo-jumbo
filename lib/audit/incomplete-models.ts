@@ -15,9 +15,9 @@ import {
   upsertFileMeta,
   removeFileMeta,
   metaToEntry,
-  modelFileScope,
   modelRevision,
 } from '@/lib/models/model-sidecar';
+import {completeFileSet} from '@/lib/models/complete-file-set';
 import {entriesUnder} from '@/lib/storage/entries';
 import {siteStorage, type Site} from '@/lib/storage/site';
 
@@ -79,7 +79,7 @@ export async function findIncompleteRepos(
   const results = await Promise.all(
     candidates.map(async (m) => {
       try {
-        const scope = await modelFileScope(site, m.name);
+        const scope = await completeFileSet(site, m.name);
         const expected = (
           await expectedFiles(m.name, await modelRevision(site, m.name))
         ).filter((f) => scope == null || scope.has(f));
@@ -183,7 +183,7 @@ export async function detectMissingExpectedFiles(
     }
     let expected: string[];
     try {
-      const scope = await modelFileScope(site, repoId);
+      const scope = await completeFileSet(site, repoId);
       expected = (await expectedFiles(repoId, repoBranch)).filter(
         (f) => scope == null || scope.has(f),
       );

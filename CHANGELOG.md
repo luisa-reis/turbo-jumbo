@@ -79,6 +79,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **FastFlowLM models are judged by FastFlowLM's current model list.** A
+  FastFlowLM model is complete when it has the files FastFlowLM's registry
+  lists for it today — however it got onto the machine, and even if the
+  registry changed after it was downloaded. Previously only a copy downloaded
+  through the Lemonade catalog was judged that way, by the list as it stood
+  then; one downloaded straight from Hugging Face, or copied from another
+  machine, was held to the whole repo, and could be flagged as missing the
+  per-model NPU kernels FastFlowLM stopped fetching in v0.9.28. Files a model
+  holds beyond that list are still shown, never counted as missing. If the
+  registry can't be reached, the list recorded at download time stands in.
+
 - **A transfer between two storage agents no longer passes through either of
   them.** When both ends are agents new enough to agree on it, the file now
   goes from the sending machine's disk cache onto the wire and from the wire

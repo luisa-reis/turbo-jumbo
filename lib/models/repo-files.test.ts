@@ -360,3 +360,33 @@ test('a file-scoped model is judged only against its scope', async () => {
   ]);
   await fsp.rm(base, {recursive: true, force: true});
 });
+
+test('a scoped model lists files it holds beyond its scope, but never misses them', async () => {
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-rf-'));
+  const repoId = 'rf/scoped-extras';
+  mockTree(repoId, [
+    {path: 'model.q4nx', size: 10},
+    {path: 'mm.xclbin', size: 4},
+    {path: 'mv.xclbin', size: 5},
+  ]);
+  await writeFileOfSize(path.join(base, repoId, 'model.q4nx'), 10);
+  // An extra the scope doesn't need, held on disk (a whole-repo download).
+  await writeFileOfSize(path.join(base, repoId, 'mm.xclbin'), 4);
+  const model: TjModel = {
+    modelUrl: `https://huggingface.co/${repoId}`,
+    repoId,
+    fileScope: ['model.q4nx'],
+    files: [],
+  };
+  await fsp.writeFile(
+    path.join(base, repoId, MODEL_SIDECAR_NAME),
+    JSON.stringify(model),
+  );
+
+  const out = await repoFileStatuses(dirSite(base), repoId);
+  expect(out.map((f) => [f.path, f.state]).sort()).toEqual([
+    ['mm.xclbin', 'present'],
+    ['model.q4nx', 'present'],
+  ]);
+  await fsp.rm(base, {recursive: true, force: true});
+});
