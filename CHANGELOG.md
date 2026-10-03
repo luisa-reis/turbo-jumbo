@@ -150,6 +150,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A copied model is judged complete by the same files as its original.** A
+  model downloaded through the Lemonade/FastFlowLM catalog is complete with
+  just the files FastFlowLM's registry lists (its repo carries extra NPU
+  kernels it never uses), and a model downloaded at a pinned revision is
+  audited against that revision. Copying one to another machine or to cold
+  storage used to drop both, so the copy was audited against `main` and the
+  whole repo, and could be flagged as missing files the original never needed.
+  The copy now keeps them when the model is new at the destination; a model
+  the destination already holds keeps its own.
+
 - **Moving a download on to cold storage leaves no husk behind.** A model
   sent to cold storage with "delete after transfer" used to leave its local
   directory standing with nothing in it but the `hf` CLI's `.cache`

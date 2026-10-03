@@ -7,6 +7,7 @@ import {
   modelDirForRepo,
   readFileMetaByPath,
   upsertFileMeta,
+  type ModelScope,
 } from '@/lib/models/model-sidecar';
 import {TJMETA_SUFFIX} from '@/lib/models/sidecar-types';
 
@@ -173,7 +174,8 @@ export async function readMetaResolved(
  * Read-merge-write a file's provenance into its model sidecar, keyed by its
  * resolved `repoId`. A file with no model dir (a stray at the storage root)
  * falls back to a legacy per-file sidecar — it carries no model sidecar by
- * design (see the model-sidecars spec).
+ * design (see the model-sidecars spec). `newModelScope` applies only when the
+ * write creates the model sidecar (see `upsertFileMeta`).
  */
 export async function updateMetaResolved(
   site: Site,
@@ -181,6 +183,7 @@ export async function updateMetaResolved(
   repoId: string,
   next: TjMeta,
   repoHead?: {id: string; date?: string} | null,
+  newModelScope?: ModelScope,
 ): Promise<void> {
   const loc = modelDirForRepo(relPath, repoId);
   if (loc) {
@@ -190,6 +193,7 @@ export async function updateMetaResolved(
       repoId,
       metaToEntry(loc.key, next),
       repoHead,
+      newModelScope,
     );
     return;
   }

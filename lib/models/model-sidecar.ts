@@ -222,7 +222,11 @@ export async function findModelSidecarDirs(site: Site): Promise<string[]> {
   // stopped descending used to.
   if (all.has('')) return [''];
   return dirs.filter((d) => {
-    for (let p = path.posix.dirname(d); p && p !== '.'; p = path.posix.dirname(p)) {
+    for (
+      let p = path.posix.dirname(d);
+      p && p !== '.';
+      p = path.posix.dirname(p)
+    ) {
       if (all.has(p)) return false;
     }
     return true;
@@ -315,10 +319,32 @@ export async function readFileMeta(
 }
 
 /**
+ * What a model's sidecar says about the model as a whole, beyond its files:
+ * the revision it tracks and the file set that makes it complete. Copying a
+ * model carries it, or the copy is audited against `main` and the whole tree.
+ */
+export type ModelScope = Pick<TjModel, 'revision' | 'fileScope'>;
+
+/** `model`'s revision pin and file scope, or undefined when it records neither. */
+export function modelScopeOf(model: TjModel | null): ModelScope | undefined {
+  if (!model) return undefined;
+  const scope: ModelScope = {
+    ...(model.revision ? {revision: model.revision} : {}),
+    ...(model.fileScope?.length ? {fileScope: model.fileScope} : {}),
+  };
+  return Object.keys(scope).length > 0 ? scope : undefined;
+}
+
+/**
  * Read-merge-write a file's entry into its model sidecar, serialized per dir.
  * When `repoHead` is given it sets the model-level `repoCommit`/`repoCommitDate`;
  * when omitted, any value the sidecar already records is preserved (callers
  * without a fresh HF resolution — moves, legacy migration — never clobber it).
+ *
+ * `newModelScope` is adopted only when this write creates the sidecar — the
+ * model is new here. Decided under the lock, so of a copy's concurrent files
+ * exactly the first to land carries it; a sidecar that already exists keeps its
+ * own revision and scope, so a deliberate whole-repo download is never narrowed.
  */
 export async function upsertFileMeta(
   site: Site,
@@ -326,12 +352,14 @@ export async function upsertFileMeta(
   repoId: string,
   next: TjModelFile,
   repoHead?: {id: string; date?: string} | null,
+  newModelScope?: ModelScope,
 ): Promise<void> {
   await withSidecarLock(dir, async () => {
     const model = (await readModelSidecar(site, dir)) ?? {
       modelUrl: `https://huggingface.co/${repoId}`,
       repoId,
       files: [],
+      ...newModelScope,
     };
     const i = model.files.findIndex((f) => f.path === next.path);
     const merged = mergeFileMeta(i >= 0 ? model.files[i] : null, next);

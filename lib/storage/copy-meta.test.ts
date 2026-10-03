@@ -146,3 +146,80 @@ test('applyFileMeta sets repoCommit only when the destination has none', async (
   );
   await fsp.rm(root, {recursive: true, force: true});
 });
+
+// An FLM-style model: pinned, and complete with fewer files than its repo has.
+const scoped = {revision: 'v1', fileScope: ['a.gguf', 'b.gguf']};
+const bEntry = entry({
+  path: 'b.gguf',
+  originUrl: 'https://huggingface.co/org/repo/blob/main/b.gguf',
+});
+
+test('readFileMetaWithRepoHead carries the source model revision and file scope', async () => {
+  const {root, src} = await tmpBases();
+  await writeModelSidecar(
+    dirSite(src),
+    'org/repo',
+    model({files: [entry({})], ...scoped}),
+  );
+  const payload = await readFileMetaWithRepoHead(
+    dirSite(src),
+    'org/repo/a.gguf',
+  );
+  expect(payload?.modelScope).toEqual(scoped);
+  await fsp.rm(root, {recursive: true, force: true});
+});
+
+test('a copy of a scoped model keeps its revision and scope at a fresh destination', async () => {
+  const {root, src, dst} = await tmpBases();
+  await writeModelSidecar(
+    dirSite(src),
+    'org/repo',
+    model({files: [entry({}), bEntry], ...scoped}),
+  );
+
+  // The copy route propagates a model's files concurrently.
+  await Promise.all(
+    ['org/repo/a.gguf', 'org/repo/b.gguf'].map((p) =>
+      propagateFileMeta(dirSite(src), dirSite(dst), p),
+    ),
+  );
+
+  const after = await readModelSidecar(dirSite(dst), 'org/repo');
+  expect(after?.revision).toBe('v1');
+  expect(after?.fileScope).toEqual(['a.gguf', 'b.gguf']);
+  expect(after?.files.map((f) => f.path).sort()).toEqual(['a.gguf', 'b.gguf']);
+  await fsp.rm(root, {recursive: true, force: true});
+});
+
+test('a copy never narrows or repins a model the destination already has', async () => {
+  const {root, src, dst} = await tmpBases();
+  await writeModelSidecar(
+    dirSite(src),
+    'org/repo',
+    model({files: [entry({})], ...scoped}),
+  );
+  // A whole-repo download at the destination: unpinned and unscoped on purpose.
+  await writeModelSidecar(dirSite(dst), 'org/repo', model({files: [bEntry]}));
+
+  await propagateFileMeta(dirSite(src), dirSite(dst), 'org/repo/a.gguf');
+
+  const after = await readModelSidecar(dirSite(dst), 'org/repo');
+  expect(after?.revision).toBeUndefined();
+  expect(after?.fileScope).toBeUndefined();
+  expect(after?.files.map((f) => f.path).sort()).toEqual(['a.gguf', 'b.gguf']);
+  await fsp.rm(root, {recursive: true, force: true});
+});
+
+test('a copy of an unscoped model adds no scope', async () => {
+  const {root, src, dst} = await tmpBases();
+  await writeModelSidecar(
+    dirSite(src),
+    'org/repo',
+    model({files: [entry({})]}),
+  );
+  await propagateFileMeta(dirSite(src), dirSite(dst), 'org/repo/a.gguf');
+  const after = await readModelSidecar(dirSite(dst), 'org/repo');
+  expect(after).not.toHaveProperty('revision');
+  expect(after).not.toHaveProperty('fileScope');
+  await fsp.rm(root, {recursive: true, force: true});
+});
