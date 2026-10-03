@@ -30,6 +30,8 @@ Targets (default: all):
 
 The binaries report this checkout's commit from 'tj --version -v', and only
 a clean checkout of a release tag builds binaries that don't say '(dev)'.
+Where there is no checkout to ask, set TJ_COMMIT (and TJ_RELEASE, for a
+release) in the environment and they are stamped with that instead.
 EOF
 }
 
@@ -77,12 +79,20 @@ cd "$REPO_ROOT"
 # The release identity, by the rule bin/docker-build.sh, bin/deploy.sh and
 # lib/version/app-version.ts share: the commit always, the tag only for a
 # clean build of a tagged revision. Compiled in as literals, because a binary
-# that asked git at run time would describe the user's cwd instead.
-TJ_COMMIT=$(git rev-parse --short HEAD)
-TJ_RELEASE=""
-if [[ -z "$(git status --porcelain)" ]]; then
-    TJ_RELEASE=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+# that asked git at run time would describe the user's cwd instead. A stamp
+# already in the environment wins: the image build has no .git to ask, and
+# is handed the same identity as the server it ships beside.
+if [[ -z ${TJ_COMMIT-} ]]; then
+    TJ_COMMIT=$(git rev-parse --short HEAD 2>/dev/null) || {
+        echo "error: no git checkout here to stamp the binaries from; set TJ_COMMIT" >&2
+        exit 1
+    }
+    TJ_RELEASE=""
+    if [[ -z "$(git status --porcelain)" ]]; then
+        TJ_RELEASE=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+    fi
 fi
+TJ_RELEASE=${TJ_RELEASE-}
 echo "stamping commit $TJ_COMMIT${TJ_RELEASE:+, release $TJ_RELEASE}" >&2
 
 built=()

@@ -11,10 +11,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **`tj` runs on machines without a checkout.** Each release now carries
-  standalone `tj` binaries for macOS, Linux and Windows, so a laptop can fetch
-  one with `curl`, point `TJ_URL` at a server, and go — no Bun, no clone, no
-  `bun install`. See [docs/cli.md](docs/cli.md#running-it).
+- **`tj` runs on machines without a checkout.** Every Turbo Jumbo server now
+  hands out standalone `tj` binaries for macOS, Linux and Windows at
+  `/api/v1/cli/`, built from the same commit it runs, so a laptop can fetch one
+  with `curl`, point `TJ_URL` at that server, and go — no Bun, no clone, no
+  `bun install`. Each release carries them on its Forgejo release page too. See
+  [docs/cli.md](docs/cli.md#running-it).
 - **A missing vision projector is flagged and recoverable on any machine.**
   Auditing a model on a peer — not just this host — now flags a vision
   projector (`mmproj`) or other expected file that Hugging Face lists but the

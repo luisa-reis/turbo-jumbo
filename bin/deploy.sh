@@ -36,7 +36,8 @@ production. Any other fleet names its own file:
 See deploy/env.sample for every setting and its default.
 
 The app (DEPLOY_HOST), under ~/<DEPLOY_DIR> (default tj):
-  releases/<stamp>/   the bundle: Next's standalone server on bun
+  releases/<stamp>/   the bundle: Next's standalone server on bun, and the
+                      tj CLI binaries it serves at /api/v1/cli
   current             symlink to the release being served
   config.yaml         the app config — yours to put there, never shipped
   tj.env              optional per-host overrides of the unit's environment
@@ -187,6 +188,11 @@ build_app() {
     # itself; the build leaves them outside its output.
     cp -r "$DIST/static" "$BUNDLE/$DIST/static"
     cp -r public "$BUNDLE/public"
+    # The tj binaries the app hands out at /api/v1/cli, stamped as this
+    # release so a CLI fetched from a server matches it.
+    echo "Building CLI binaries $STAMP…" >&2
+    TJ_COMMIT=$TJ_COMMIT TJ_RELEASE=$TJ_RELEASE \
+        bin/build-cli.sh --out-dir "$BUNDLE/build/cli" >/dev/null
 }
 
 deploy_app() {

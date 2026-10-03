@@ -8,6 +8,13 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bun run build
 
+# The tj binaries the app hands out at /api/v1/cli, stamped with the same
+# identity as the image (see below). After the app build, so Next's file
+# tracing never sees them.
+ARG TJ_RELEASE=
+ARG TJ_COMMIT=
+RUN TJ_COMMIT="$TJ_COMMIT" TJ_RELEASE="$TJ_RELEASE" bin/build-cli.sh >/dev/null
+
 # Stage 2: run
 FROM docker.io/oven/bun:1-slim AS runner
 WORKDIR /app
@@ -38,6 +45,7 @@ ENV HF_XET_HIGH_PERFORMANCE=1
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/build/cli ./build/cli
 
 EXPOSE 3000
 CMD ["bun", "server.js"]

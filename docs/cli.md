@@ -12,19 +12,22 @@ disagree with each other.
 ## Running it
 
 On a machine without a checkout — a laptop, say — download the standalone
-binary for its platform from the Forgejo release. It carries its own runtime,
-so nothing else needs installing:
+binary for its platform from the Turbo Jumbo server you'll point it at. It
+carries its own runtime, so nothing else needs installing, and it is built from
+exactly the commit that server runs:
 
 ```console
-$ curl -fLo ~/bin/tj https://<forgejo>/<owner>/turbo-jumbo/releases/download/v0.2.0/tj-darwin-arm64
+$ curl -fLo ~/bin/tj http://192.0.2.10:3000/api/v1/cli/tj-darwin-arm64
 $ chmod +x ~/bin/tj
+$ export TJ_URL=http://192.0.2.10:3000
 ```
 
-Each release carries `tj-darwin-arm64`, `tj-darwin-x64`, `tj-linux-x64`,
-`tj-linux-arm64` and `tj-windows-x64.exe`, plus a `SHA256SUMS` to check them
-against. Point it at a server with `TJ_URL` (see
-[Finding the server](#finding-the-server)). `bin/build-cli.sh` builds the same
-binaries from a checkout.
+There are `tj-darwin-arm64`, `tj-darwin-x64`, `tj-linux-x64`, `tj-linux-arm64`
+and `tj-windows-x64.exe`, plus a `SHA256SUMS` to check them against;
+`/api/v1/cli` lists what a server has. Every deploy builds them in
+(`bin/deploy.sh` and the container image both run `bin/build-cli.sh`), and each
+release also carries them on its Forgejo release page, under
+`releases/download/v<version>/`.
 
 From a checkout:
 

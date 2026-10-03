@@ -50,6 +50,8 @@ Loaded from `./config.yaml` (override with `CONFIG_PATH`), validated against `co
 
 Each peer serves `app/api/v1/*`. Routes under `app/api/v1/peers/[name]/*` are **proxies**: the local app forwards to the named remote peer's matching endpoint (e.g. a peer's models, disk usage, hf-download). This lets the UI drive downloads and audits on remote machines through the local instance.
 
+`app/api/v1/cli/*` serves the standalone `tj` binaries from `build/cli/` under the server's working directory (`TJ_CLI_DIR` overrides; allow-list in `lib/cli/binaries.ts`). `bin/deploy.sh` and the `Containerfile` build them into every deploy; in dev, run `bin/build-cli.sh` first or the routes 404.
+
 ### Model identity and provenance (sidecars)
 
 Models are discovered by **synchronously scanning the filesystem** (`lib/models/models.ts`), not a database. Provenance is recorded in sidecar files alongside the weights:
