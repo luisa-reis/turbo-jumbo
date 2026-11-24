@@ -7,6 +7,7 @@ import {
   findIncompleteRepos,
   findReposWithInvalidFiles,
   detectMissingExpectedFiles,
+  detectInvalidRepoFiles,
 } from '@/lib/audit/incomplete-models';
 import {MODEL_SIDECAR_NAME, type TjModel} from '@/lib/models/model-sidecar';
 
@@ -244,4 +245,41 @@ test('sees nested expected files via a recursive tree and flags a missing one', 
 
   expect(await findIncompleteRepos(dirSite(base))).toEqual([repoId]);
   await fsp.rm(base, {recursive: true, force: true});
+});
+
+test('reports a stale support file as an audit verdict, leaving weights alone', async () => {
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'tj-inv-'));
+  const repoId = 'invorg/stale-support';
+  // Upstream rewrote tokenizer_config.json (now 30 bytes); this copy predates
+  // it. The unselected weight is also the wrong size, but it is the audit's
+  // own to judge, not this pass's.
+  mockTree(repoId, [
+    {path: 'model.safetensors', size: 100},
+    {path: 'tokenizer_config.json', size: 30},
+    {path: 'config.json', size: 10},
+  ]);
+  await writeSized(path.join(base, repoId, 'model.safetensors'), 90);
+  await writeSized(path.join(base, repoId, 'tokenizer_config.json'), 50);
+  await writeSized(path.join(base, repoId, 'config.json'), 10);
+
+  const results = await detectInvalidRepoFiles(
+    [repoId],
+    dirSite(base),
+    new Set(),
+  );
+  expect(results).toEqual([
+    {
+      file: `${repoId}/tokenizer_config.json`,
+      status: 'incomplete',
+      message: 'size 50 != expected 30',
+      hf: {
+        repoId,
+        modelUrl: `https://huggingface.co/${repoId}`,
+        fileUrl: `https://huggingface.co/${repoId}/blob/main/tokenizer_config.json`,
+        expectedSize: 30,
+        expectedSha256: '',
+        expectedPath: `${repoId}/tokenizer_config.json`,
+      },
+    },
+  ]);
 });

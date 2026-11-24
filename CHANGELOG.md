@@ -177,6 +177,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   destination as "already present" when that copy has invalid or missing
   files.
 
+- **The audit reports the files behind an Invalid badge.** A model could show
+  Invalid while its audit passed, because the audit only checked the weight
+  files. It now also lists a model's other files that don't match Hugging Face,
+  such as an outdated `tokenizer_config.json`, with the option to download them
+  again.
+
 - **A vision projector named after its model is recognised as one.** A
   projector file whose name leads with the model, like
   `Qwen3.8-27B-NariQ-mmproj-BF16.gguf`, wasn't taken for a projector: the

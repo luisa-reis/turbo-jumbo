@@ -15,7 +15,10 @@ import {hasOptionalStringFiles, readJsonBody} from '@/lib/util/request';
 import {hashProgressEmitter} from '@/lib/audit/audit-progress';
 import {clearHfCache} from '@/lib/hf/hf-infer';
 import {detectMissingMmproj} from '@/lib/audit/mmproj';
-import {detectMissingExpectedFiles} from '@/lib/audit/incomplete-models';
+import {
+  detectInvalidRepoFiles,
+  detectMissingExpectedFiles,
+} from '@/lib/audit/incomplete-models';
 import {detectMissingShards} from '@/lib/audit/missing-shards';
 
 // How many files to audit at once. Each job reads an entire (multi-GB) file to
@@ -174,6 +177,31 @@ export async function POST(req: Request) {
       Array.from({length: Math.min(concurrency, jobs.length)}, worker),
     );
 
+    // The selected files' models with an org/repo name.
+    const repoIds = [
+      ...new Set(
+        models
+          .filter(
+            (m) =>
+              m.name.includes('/') &&
+              m.files.some((f) =>
+                f.isSplit
+                  ? f.files.some((s) => selected.has(s.path))
+                  : selected.has(f.path),
+              ),
+          )
+          .map((m) => m.name),
+      ),
+    ];
+    // A whole-repo model's own files at the wrong size (a support file
+    // rewritten upstream, say), so the audit agrees with the table's Invalid
+    // badge. Every root, cold storage included: the verdict is true there
+    // too, and a copy from a current machine is its fix.
+    if (!signal.aborted) {
+      const audited = new Set(jobs.map((j) => j.file));
+      for (const r of await detectInvalidRepoFiles(repoIds, root, audited))
+        await emit(r);
+    }
     // After the per-file verdicts: for vision models among the selected files,
     // flag a projector that exists on HF but not locally. Runs for any models
     // root — this host's own ('local') or an agent peer's, both of which can
@@ -186,21 +214,6 @@ export async function POST(req: Request) {
           f.isSplit ? f.files.map((s) => s.path) : [f.path],
         ),
       );
-      const repoIds = [
-        ...new Set(
-          models
-            .filter(
-              (m) =>
-                m.name.includes('/') &&
-                m.files.some((f) =>
-                  f.isSplit
-                    ? f.files.some((s) => selected.has(s.path))
-                    : selected.has(f.path),
-                ),
-            )
-            .map((m) => m.name),
-        ),
-      ];
       const extra = await detectMissingMmproj(repoIds, allRelPaths, 'main');
       for (const r of extra) await emit(r);
       // Whole-repo (non-GGUF) models — flag any expected weight file that a full

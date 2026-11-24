@@ -18,6 +18,7 @@ import {
   modelRevision,
 } from '@/lib/models/model-sidecar';
 import {completeFileSet} from '@/lib/models/complete-file-set';
+import {isWeightFile} from '@/lib/models/weight-files';
 import {entriesUnder} from '@/lib/storage/entries';
 import {siteStorage, type Site} from '@/lib/storage/site';
 
@@ -137,6 +138,59 @@ export async function findReposWithInvalidFiles(
     }),
   );
   return results.filter((x): x is string => x != null);
+}
+
+/**
+ * Audit verdicts for a whole-repo model's files that sit on disk at the wrong
+ * size — the ones `findReposWithInvalidFiles` flags. The audit hashes only
+ * the weights it was asked about, so without these a support file that no
+ * longer matches Hugging Face (a tokenizer_config.json rewritten upstream)
+ * kept the model's Invalid badge while the audit itself reported nothing.
+ * Judged like a weight file of the wrong size (`incomplete`, with the HF
+ * source that lets the row re-download it). Paths in `audited` already have
+ * a verdict of their own and are left to it; a repo HF can't answer for is
+ * skipped rather than falsely flagged. Weight files are left out: a selected
+ * one is hashed by the audit itself, and an unselected one is not this run's
+ * business.
+ */
+export async function detectInvalidRepoFiles(
+  repoIds: string[],
+  site: Site,
+  audited: Set<string>,
+): Promise<AuditResult[]> {
+  const out: AuditResult[] = [];
+  for (const repoId of repoIds) {
+    let files;
+    try {
+      files = await repoFileStatuses(site, repoId);
+    } catch {
+      continue;
+    }
+    const revision = await modelRevision(site, repoId);
+    for (const f of files) {
+      const file = `${repoId}/${f.path}`;
+      // Weight files are the audit's own to judge, when selected.
+      if (f.state !== 'invalid' || audited.has(file) || isWeightFile(f.path))
+        continue;
+      out.push({
+        file,
+        status: 'incomplete',
+        message:
+          f.size === f.expectedSize
+            ? "its recorded checksum doesn't match Hugging Face"
+            : `size ${f.size} != expected ${f.expectedSize}`,
+        hf: {
+          repoId,
+          modelUrl: `https://huggingface.co/${repoId}`,
+          fileUrl: `https://huggingface.co/${repoId}/blob/${revision}/${f.path}`,
+          expectedSize: f.expectedSize,
+          expectedSha256: '',
+          expectedPath: file,
+        },
+      });
+    }
+  }
+  return out;
 }
 
 /**
