@@ -88,6 +88,23 @@ export function useAuditWorkflow({
     setCheckingUpdates(false);
   }, []);
 
+  // Drop the verdicts for files that were just replaced (a re-download), so
+  // the row stops showing what the audit said about the old copy.
+  const forgetAudit = useCallback((paths: string[]) => {
+    const drop = <T>(prev: Map<string, T>) => {
+      const next = new Map(prev);
+      for (const p of paths) next.delete(p);
+      return next;
+    };
+    setAuditResults(drop);
+    setAuditProgress(drop);
+    setAuditedPaths((prev) => {
+      const next = new Set(prev);
+      for (const p of paths) next.delete(p);
+      return next;
+    });
+  }, []);
+
   const runAudit = useCallback(
     async (paths: string[]) => {
       if (!auditLocation || paths.length === 0) return;
@@ -463,6 +480,7 @@ export function useAuditWorkflow({
     sourceError,
     sourceProgress,
     resetAudit,
+    forgetAudit,
     runAudit,
     onAudit,
     onFix,

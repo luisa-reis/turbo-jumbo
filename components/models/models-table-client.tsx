@@ -66,6 +66,7 @@ export function ModelsTableClient({
   peerModels,
   incompleteRepos,
   invalidRepos,
+  refreshKey,
   selected,
   onToggleSelected,
   locations,
@@ -101,6 +102,9 @@ export function ModelsTableClient({
   incompleteRepos?: Set<string>;
   // Repo ids (model names) with at least one local file that audits invalid.
   invalidRepos?: Set<string>;
+  // Bumped whenever the table refreshes after a change; the cached per-file
+  // lists are dropped and refetched so their states follow the disk.
+  refreshKey?: number;
   selected?: Set<string>;
   onToggleSelected?: (paths: string[]) => void;
   locations?: LocationTab[];
@@ -202,6 +206,20 @@ export function ModelsTableClient({
     new Map(),
   );
   const inFlight = useRef<Set<string>>(new Set());
+  // A refresh after a change (a download, a copy) invalidates every cached
+  // list: the file states it recorded may be the ones that just changed.
+  const [listsFor, setListsFor] = useState(refreshKey);
+  if (listsFor !== refreshKey) {
+    setListsFor(refreshKey);
+    setRepoFiles(new Map());
+  }
+  // Which refresh the in-flight fetches belong to: one answering for an older
+  // one is dropped rather than cached as current.
+  const generation = useRef(refreshKey);
+  useEffect(() => {
+    generation.current = refreshKey;
+    inFlight.current.clear();
+  }, [refreshKey]);
 
   const toggle = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -243,6 +261,7 @@ export function ModelsTableClient({
       const m = augmentedModels.find((mm) => mm.name === name);
       if (!m || !isWholeRepoModel(m)) continue;
       inFlight.current.add(key);
+      const gen = refreshKey;
       void (async () => {
         let files: RepoFile[] = [];
         try {
@@ -252,6 +271,7 @@ export function ModelsTableClient({
         } catch {
           /* best-effort: leave the list empty */
         }
+        if (generation.current !== gen) return;
         inFlight.current.delete(key);
         setRepoFiles((prev) => new Map(prev).set(key, files));
       })();
@@ -264,6 +284,7 @@ export function ModelsTableClient({
     repoFiles,
     invalidRepos,
     incompleteRepos,
+    refreshKey,
   ]);
 
   const showCheckboxes = onToggleSelected != null;

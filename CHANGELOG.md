@@ -183,6 +183,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   such as an outdated `tokenizer_config.json`, with the option to download them
   again.
 
+- **Fixing a file clears its Invalid mark without a reload.** After a download
+  or copy replaced a stale file, the model's file list, its Invalid and
+  Incomplete badges, and the audit's verdicts for the replaced files kept
+  showing the old state until the page was reloaded.
+
 - **A vision projector named after its model is recognised as one.** A
   projector file whose name leads with the model, like
   `Qwen3.8-27B-NariQ-mmproj-BF16.gguf`, wasn't taken for a projector: the

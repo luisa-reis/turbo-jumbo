@@ -7,6 +7,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {Banner} from '@astryxdesign/core/Banner';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
+import {isWeightFile} from '@/lib/models/weight-files';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {Model} from '@/lib/models/models';
 import {
@@ -276,6 +277,7 @@ export function HomeClient({
     sourceError,
     sourceProgress,
     resetAudit,
+    forgetAudit,
     runAudit,
     onAudit,
     onFix,
@@ -321,9 +323,12 @@ export function HomeClient({
   const [diskRefresh, setDiskRefresh] = useState(0);
 
   // Re-fetch the table data after a mutation (e.g. copy) without a full
-  // server round-trip / page reload.
+  // server round-trip / page reload. The invalid/incomplete flags are part of
+  // that state: a copy or download that replaced a stale file clears its badge.
   async function refreshModels() {
     setDiskRefresh((n) => n + 1);
+    void refreshInvalid();
+    void refreshIncomplete();
     const res = await fetch('/api/v1/models-table');
     if (res.ok) setModels(await res.json());
   }
@@ -349,6 +354,9 @@ export function HomeClient({
   );
   const [redownloadOpen, setRedownloadOpen] = useState(false);
   const redownloadPath = useRef<string | null>(null);
+  // Every file the open download replaces, root-relative: their audit
+  // verdicts describe the old copies and are dropped when it closes.
+  const redownloadedPaths = useRef<string[]>([]);
 
   const onRedownload = useCallback(
     (file: AuditResult) => {
@@ -359,6 +367,7 @@ export function HomeClient({
         return;
       }
       redownloadPath.current = file.hf.expectedPath; // where the file lands
+      redownloadedPaths.current = [file.hf.expectedPath];
       const req = {
         repoId: ref.repoId,
         branch: ref.branch,
@@ -393,6 +402,7 @@ export function HomeClient({
         else if (!ref && f.file.startsWith(`${anchor.repoId}/`))
           filePaths.push(f.file.slice(anchor.repoId.length + 1));
       }
+      redownloadedPaths.current = filePaths.map((p) => `${anchor.repoId}/${p}`);
       redownloadPath.current = null; // multi-file: refresh-all on close, no single re-audit
       setError(null);
       setRedownloadOpen(true);
@@ -411,6 +421,7 @@ export function HomeClient({
   const onDownloadRepoFiles = useCallback(
     (repoId: string, repoPaths: string[], branch = 'main') => {
       if (repoPaths.length === 0) return;
+      redownloadedPaths.current = repoPaths.map((p) => `${repoId}/${p}`);
       redownloadPath.current = null; // multi-file: refresh-all on close, no single re-audit
       setError(null);
       setRedownloadOpen(true);
@@ -428,12 +439,14 @@ export function HomeClient({
     redownload.reset();
     const path = redownloadPath.current;
     redownloadPath.current = null;
-    // Reflect the recovered file(s): refresh the listing, the invalid/incomplete
-    // flags, and re-audit a single recovered file when we know which it was.
+    forgetAudit(redownloadedPaths.current);
+    redownloadedPaths.current = [];
+    // Reflect the recovered file(s): refresh the listing (and with it the
+    // invalid/incomplete flags), and re-audit a single recovered weight file
+    // when we know which it was. A support file has no audit of its own: the
+    // refreshed flags are its verdict.
     void refreshModels();
-    void refreshInvalid();
-    void refreshIncomplete();
-    if (path && canRecover) void runAudit([path]);
+    if (path && canRecover && isWeightFile(path)) void runAudit([path]);
   };
 
   const onToggleSelected = useCallback((paths: string[]) => {
@@ -520,9 +533,7 @@ export function HomeClient({
     if (!recoverDest) return;
     const source = recoverySourceFor(f.file);
     if (!source) return;
-    await onRecoverFile(recoverDest, source);
-    void refreshInvalid();
-    void refreshIncomplete();
+    await onRecoverFile(recoverDest, source); // refreshes the table and flags
     if (auditPeer) void refreshPeerModels(auditPeer);
     if (canRecover) void runAudit([f.file]);
   };
@@ -619,6 +630,7 @@ export function HomeClient({
               peerModels={seededPeerModels}
               incompleteRepos={activeIncomplete}
               invalidRepos={activeInvalid}
+              refreshKey={diskRefresh}
               selected={selected}
               onToggleSelected={onToggleSelected}
               locations={locations}
