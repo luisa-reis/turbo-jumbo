@@ -16,6 +16,7 @@ import {
   localPeer,
 } from '@/lib/config';
 import {createHttpStorage} from '@/lib/storage/http-storage';
+import {createLocalStorage} from '@/lib/storage/local-storage';
 import type {Site} from '@/lib/storage/site';
 import {storage} from '@/lib/storage/storage-instance';
 import type {Storage} from '@/lib/storage/storage';
@@ -89,4 +90,29 @@ export function siteForName(name: string): Site | null {
  *  anything else is a real failure. */
 export function isUnconfiguredRoot(e: unknown): boolean {
   return e instanceof Error && / directory is configured/.test(e.message);
+}
+
+// One per mount path, for the same reason as `remotes`: the inventory cache
+// and in-flight walk sharing live on the Storage.
+const mounts = new Map<string, Storage>();
+
+/**
+ * A Storage over a peer's models root as mounted on this machine (its
+ * `models_mount`), or undefined when config gives it none. Plain local
+ * filesystem calls on a network share: a download job on it runs `hf` here and
+ * writes straight onto the peer's disk, and the sidecar and verification pass
+ * follow through the same mount. It has only a `models` root — what the peer
+ * holds anywhere else (cold, lemonade) is still the peer's to reach.
+ */
+export function mountStorageFor(peer: {
+  models_mount?: string;
+}): Storage | undefined {
+  const dir = peer.models_mount;
+  if (!dir) return undefined;
+  let s = mounts.get(dir);
+  if (!s) {
+    s = createLocalStorage({models: dir});
+    mounts.set(dir, s);
+  }
+  return s;
 }

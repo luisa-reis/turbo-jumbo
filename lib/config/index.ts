@@ -28,6 +28,10 @@ export interface Peer {
   // set, storage operations and transfers go to the agent instead of the full
   // app at `address` (see lib/storage/peer-storage.ts).
   agent_address?: string;
+  // Absolute path where this peer's models root is mounted on this machine
+  // (e.g. over NFS). When set, HF downloads to the peer run `hf` here and
+  // write straight into the mount (see the peer hf-download route).
+  models_mount?: string;
   // Set by the /api/v1/peers response for the peer that is this machine.
   isLocal?: boolean;
 }

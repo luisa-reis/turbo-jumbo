@@ -69,6 +69,8 @@ The audit verifies on-disk files against HuggingFace: resolves each file at its 
 
 HuggingFace downloads shell out to the `hf` CLI, which inherits the server's environment (`HF_TOKEN`, Xet acceleration via `HF_XET_HIGH_PERFORMANCE` — set in `.envrc` for dev and in the `Containerfile`); progress is tracked by polling bytes-on-disk (`lib/hf/hf-download*.ts`, `components/download-runner.tsx`). **Lemonade** is a separate model-server cache the app can browse and sync into (`lib/lemonade/`, `components/lemonade/`).
 
+Where a peer gives `models_mount` (its models root mounted on this machine, e.g. over NFS), the peer download route runs `hf` here and writes straight into the mount through a local `Storage` (`mountStorageFor` in `lib/storage/peer-storage.ts`); the optional send-to-cold step still runs on the peer (`DownloadTarget.coldVia`). Without it, an agent peer downloads on its own machine.
+
 ## UI conventions
 
 - Buttons that open a modal or dialog end their label with an ellipsis (`…`) — e.g. `"Delete…"`, `"Copy to…"`.

@@ -76,6 +76,10 @@ peers:
   #   address: 192.168.1.13:3000
   #   agent_address: 192.168.1.13:3900
   #   agent_token: change-me
+  #   # Where shelf's models root is mounted on this machine (NFS or similar).
+  #   # With it, Hugging Face downloads to shelf run `hf` here and write
+  #   # straight into the mount rather than on shelf itself.
+  #   models_mount: /mnt/models-shelf/turbo-jumbo
 
   # A peer whose name needs a slug spelled out, since one derived from it
   # would be unusable.

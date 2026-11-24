@@ -71,6 +71,7 @@ test('accepts all documented options', () => {
           lemonade_api_key: 'secret',
           agent_address: '192.0.2.5:3900',
           agent_token: 'secret-too',
+          models_mount: '/mnt/models-a/turbo-jumbo',
         },
       ],
     }),
@@ -223,4 +224,11 @@ test('selectModelPeers with no local peer lists everyone as remote', () => {
   expect(selectModelPeers([box], undefined, false)).toEqual([
     {...box, isLocal: false},
   ]);
+});
+
+test('rejects a models_mount that is not an absolute path', () => {
+  const err = validateRawConfig({
+    peers: [{...validPeer, models_mount: 'mnt/models-a'}],
+  });
+  expect(err).toContain('models_mount');
 });

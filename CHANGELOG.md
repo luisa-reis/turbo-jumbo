@@ -11,6 +11,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Downloads can write straight into a peer's mounted storage.** When a
+  peer's models directory is mounted on the machine running Turbo Jumbo (over
+  NFS, say), give it `models_mount` in `config.yaml`: Hugging Face downloads to
+  that peer then run here and land directly on its disk, instead of the peer
+  having to download them itself. Sending the result to cold storage still
+  happens on the peer. See `config.yaml.sample`.
+
 - **`tj` runs on machines without a checkout.** Every Turbo Jumbo server now
   hands out a standalone `tj` binary for Apple-silicon Macs at `/api/v1/cli/`,
   built from the same commit it runs, so a laptop can fetch it with `curl`,

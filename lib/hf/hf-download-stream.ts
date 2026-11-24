@@ -41,6 +41,14 @@ export interface DownloadTarget {
   cold: Site;
   hasModels: boolean;
   hasCold: boolean;
+  /**
+   * Who moves the finished files to cold storage, when not `storage` itself.
+   * A download into a peer's models root mounted on this host runs `hf` here,
+   * but the cold transfer is the peer's: its agent sees the same files, and a
+   * copy run here would pull every byte off one share and push it onto the
+   * other through this machine.
+   */
+  coldVia?: Pick<DownloadTarget, 'storage' | 'local' | 'cold'>;
 }
 
 const localTarget: DownloadTarget = {
@@ -174,7 +182,7 @@ const isMissing = (e: unknown) =>
   (e as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 async function moveToColdstorage(
-  target: DownloadTarget,
+  target: Pick<DownloadTarget, 'storage' | 'local' | 'cold'>,
   relPaths: string[],
   deleteAfterTransfer: boolean,
   enqueue: (s: string) => void,
@@ -465,7 +473,7 @@ export function streamHfDownload(
           }
           if (sendToCold && target.hasCold) {
             await moveToColdstorage(
-              target,
+              target.coldVia ?? target,
               relPaths,
               !!deleteAfterTransfer,
               enqueue,
