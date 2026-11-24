@@ -11,9 +11,14 @@
  * scrolls internally — which in turn lets the sticky <thead> pin (Astryx's
  * Table ships no sticky-header option). The Table drops a passed `className`,
  * so we scope off the LayoutContent's class, not the table's.
+ *
+ * Since Astryx 0.7 the wrapper is an inline-only scroll area (overflow-y:
+ * clip) unless row virtualization gives it a block viewport, so the vertical
+ * scroll has to be asked for here too.
  */
 .tj-models-pane .astryx-table-scroll-wrapper {
   height: 100%;
+  overflow-y: auto;
 }
 
 .tj-models-pane thead th {
@@ -32,12 +37,14 @@
  * pointer leaves the trigger. Interactive content inside a card gets pointer
  * events back — entering it still refires the card's mouseenter (the target
  * is inside the card subtree), so the card stays open while it's being used.
- * The popover wrapper has no stable class (StyleX hashes), hence :has().
+ * Since Astryx 0.7 the [popover] element is the card itself and carries the
+ * stable `astryx-hover-card` class (it used to be an unclassed wrapper around
+ * it, matched with :has()).
  */
-[popover]:has(> .astryx-hovercard) {
+.astryx-hover-card[popover] {
   pointer-events: none;
 }
 
-.astryx-hovercard :is(a, button, input, select, textarea, [role='button']) {
+.astryx-hover-card :is(a, button, input, select, textarea, [role='button']) {
   pointer-events: auto;
 }

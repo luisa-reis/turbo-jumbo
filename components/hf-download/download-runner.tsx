@@ -298,7 +298,9 @@ export function DownloadModal({
                         : 'warning'
                     }
                     title={notices[0].text}
-                    defaultIsExpanded={notices.length > 1}
+                    collapsible={{
+                      defaultIsOpen: notices.length > 1,
+                    }}
                   >
                     {notices.length > 1 && (
                       <VStack gap={1}>
