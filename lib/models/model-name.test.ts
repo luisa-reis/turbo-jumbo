@@ -35,12 +35,17 @@ test('modelDisplayName leaves a filename-derived name unchanged', () => {
 test('isMmprojFilename matches GGUF projector files', () => {
   expect(isMmprojFilename('mmproj-F16.gguf')).toBe(true);
   expect(isMmprojFilename('MMPROJ-BF16.GGUF')).toBe(true);
+  // Some repos lead with the model name: still a projector, not a BF16 quant.
+  expect(isMmprojFilename('Qwen3.8-27B-NariQ-mmproj-BF16.gguf')).toBe(true);
+  expect(isMmprojFilename('gemma-3-4b_mmproj.gguf')).toBe(true);
 });
 
 test('isMmprojFilename rejects non-projectors and non-gguf', () => {
   expect(isMmprojFilename('mmproj')).toBe(false);
   expect(isMmprojFilename('mmproj-readme.txt')).toBe(false);
   expect(isMmprojFilename('Qwen3-Q4_0.gguf')).toBe(false);
+  // A token, not a substring: a name that merely contains the letters isn't one.
+  expect(isMmprojFilename('notmmprojected-Q4_0.gguf')).toBe(false);
 });
 
 test('companionKind names the companions a weight is paired with', () => {

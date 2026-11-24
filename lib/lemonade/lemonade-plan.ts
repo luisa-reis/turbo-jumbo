@@ -2,6 +2,7 @@
 // repo files a model/checkpoint variant picks, grouped into per-repo jobs, and
 // which of those are still missing locally.
 
+import {isMmprojFilename} from '@/lib/models/model-name';
 import type {Model} from '@/lib/models/model-types';
 import type {
   Checkpoint,
@@ -50,8 +51,6 @@ export function planRepoJobs(checkpoints: Checkpoint[]): RepoJob[] {
   return order.map((repoId) => ({repoId, variants: byRepo.get(repoId)!}));
 }
 
-const isMmproj = (name: string) => name.toLowerCase().startsWith('mmproj');
-
 /**
  * The repo file paths a Lemonade model resolves to. An exact-filename variant
  * picks that file; a quant token picks the `.gguf` files carrying it
@@ -78,12 +77,12 @@ export function matchVariantFiles(
     picked = ggufs
       .filter((f) => {
         const name = f.path.split('/').pop() ?? f.path;
-        return !isMmproj(name) && name.toLowerCase().includes(needle);
+        return !isMmprojFilename(name) && name.toLowerCase().includes(needle);
       })
       .map((f) => f.path);
   } else {
     picked = ggufs
-      .filter((f) => !isMmproj(f.path.split('/').pop() ?? f.path))
+      .filter((f) => !isMmprojFilename(f.path.split('/').pop() ?? f.path))
       .map((f) => f.path);
   }
   if (mmproj) {
@@ -129,7 +128,11 @@ export function resolveCheckpointFiles(
   return files
     .filter((f) => {
       const name = baseName(f.path).toLowerCase();
-      return name.endsWith('.gguf') && !isMmproj(name) && name.includes(needle);
+      return (
+        name.endsWith('.gguf') &&
+        !isMmprojFilename(name) &&
+        name.includes(needle)
+      );
     })
     .map((f) => f.path);
 }

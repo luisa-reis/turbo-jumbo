@@ -50,13 +50,21 @@ export function compareByRepoName(a: string, b: string): number {
 }
 
 /**
- * A GGUF projector file (mmproj-F16.gguf, mmproj-BF16.gguf, …). Pass a
- * basename. Pure and client-safe, so both the table builders and the
- * server-only mmproj audit can share one definition.
+ * A GGUF projector file. Pass a basename. Pure and client-safe, so both the
+ * table builders and the server-only mmproj audit can share one definition.
+ *
+ * `mmproj` is matched as a whole name token anywhere, not just as a prefix:
+ * most repos name it `mmproj-F16.gguf`, but some lead with the model
+ * (`Qwen3.8-27B-NariQ-mmproj-BF16.gguf`), and read as a prefix-only match
+ * that one passed for a standalone BF16 quantization.
  */
+const MMPROJ_TOKEN_RE = /(?:^|[-_.])mmproj(?:[-_.]|$)/i;
+
 export function isMmprojFilename(basename: string): boolean {
-  const lower = basename.toLowerCase();
-  return lower.startsWith('mmproj') && lower.endsWith('.gguf');
+  return (
+    basename.toLowerCase().endsWith('.gguf') &&
+    MMPROJ_TOKEN_RE.test(basename.slice(0, -'.gguf'.length))
+  );
 }
 
 /**

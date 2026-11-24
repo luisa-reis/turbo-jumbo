@@ -148,3 +148,15 @@ test('an ordinary weight is not a companion', () => {
   expect(group.label).toBe('Q4_K_M');
   expect(group.companion).toBeNull();
 });
+
+test('a projector named after its model is offered as the projector, not a quant', () => {
+  // nari-labs/Qwen3.8-27B-NariQ-GGUF leads with the model name: read as a
+  // prefix-only match, this one used to list as a 931 MB "BF16" quantization.
+  const groups = quantGroups([
+    {path: 'Qwen3.8-27B-NariQ-3.0bpw.gguf', size: 10123626592},
+    {path: 'Qwen3.8-27B-NariQ-mmproj-BF16.gguf', size: 931145760},
+  ]);
+  const projector = groups.find((g) => g.paths[0].includes('mmproj'));
+  expect(projector?.companion).toBe('mmproj');
+  expect(projector?.label).toBe('mmproj (BF16)');
+});

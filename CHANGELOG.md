@@ -161,6 +161,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A vision projector named after its model is recognised as one.** A
+  projector file whose name leads with the model, like
+  `Qwen3.8-27B-NariQ-mmproj-BF16.gguf`, wasn't taken for a projector: the
+  Hugging Face picker offered it as a plain "BF16" quantization, the models
+  table listed it as a weight, and the projector checks overlooked it. Any
+  `.gguf` with `mmproj` in its name now counts as the projector, wherever the
+  word sits.
+
 - **The Audit column no longer says Pass for a model missing files.** The audit
   verifies a model's weights, so a model missing its tokenizer, config or ONNX
   graph still read Pass, with only a small tag by its name saying otherwise.

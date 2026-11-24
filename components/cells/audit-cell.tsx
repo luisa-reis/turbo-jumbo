@@ -6,6 +6,7 @@ import {Link} from '@astryxdesign/core/Link';
 import {Text} from '@astryxdesign/core/Text';
 import {Icon} from '@astryxdesign/core/Icon';
 import {Button} from '@astryxdesign/core/Button';
+import {isMmprojFilename} from '@/lib/models/model-name';
 import {Badge} from '@astryxdesign/core/Badge';
 import {HoverCard} from '@astryxdesign/core/HoverCard';
 import type {AuditResult, AuditStatus, UpdateResult} from '@/lib/audit/audit';
@@ -138,7 +139,7 @@ function AuditFailureContent({
         {failures.map((f) => {
           if (grouped && isRedownloadable.has(f.file)) {
             const name = f.file.split('/').pop() ?? f.file;
-            const isProjector = name.toLowerCase().startsWith('mmproj');
+            const isProjector = isMmprojFilename(name);
             return (
               <VStack
                 key={f.file}
@@ -172,7 +173,7 @@ function AuditFailureContent({
             );
           }
           const name = f.file.split('/').pop() ?? f.file;
-          const isProjector = name.toLowerCase().startsWith('mmproj');
+          const isProjector = isMmprojFilename(name);
           const detail = expectedDetail(f);
           const {label, variant} = AUDIT_BADGE[f.status];
           // Only non-cached misplaced files can be relocated server-side.

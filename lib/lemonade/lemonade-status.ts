@@ -2,6 +2,7 @@
 // weight scans across locations, whether a model / omni component / collection
 // is present and complete — and whether it sits in Lemonade's own cache.
 
+import {isMmprojFilename} from '@/lib/models/model-name';
 import type {Model, ModelFile} from '@/lib/models/model-types';
 import {isWeightFile} from '@/lib/models/weight-files';
 import type {
@@ -38,12 +39,12 @@ const groupComplete = (f: ModelFile): boolean =>
 function fileMatchesVariant(f: ModelFile, variant: string | null): boolean {
   const base = (groupFilename(f).split('/').pop() ?? '').toLowerCase();
   if (!base.endsWith('.gguf')) return false;
-  if (variant == null) return !base.startsWith('mmproj');
+  if (variant == null) return !isMmprojFilename(base);
   if (variant.toLowerCase().endsWith('.gguf')) {
     const v = variant.toLowerCase();
     return base === v || stripShard(base) === stripShard(v);
   }
-  if (base.startsWith('mmproj')) return false;
+  if (isMmprojFilename(base)) return false;
   const token = variant.toLowerCase();
   return f.quant.toLowerCase() === token || base.includes(token);
 }
