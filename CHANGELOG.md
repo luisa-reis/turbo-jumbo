@@ -168,6 +168,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A peer's tab no longer blanks to "No data" on a hiccup.** A single failed
+  refresh of a peer's model list, or a moment when it was reported
+  unreachable, emptied its tab until the next refresh, up to the peer check
+  interval later. The tab now keeps its last list through a failed refresh,
+  and reloads as soon as the peer is reported reachable again.
+
 - **Copies fix a model's outdated support files instead of spreading them.**
   When a repo updates a small file like `tokenizer_config.json`, older copies
   show as invalid. Re-downloading it on one machine now lets you copy the

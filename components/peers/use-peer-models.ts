@@ -78,10 +78,15 @@ export function usePeerModels() {
         })
         .catch((e: Error) => {
           clientLog('trace', `[http] GET ${url} → error: ${e.message}`);
-          lastPayloadRef.current.delete(peer.address);
-          setPeerModels((prev) =>
-            new Map(prev).set(peer.address, AsyncState.error(e.message)),
-          );
+          // One failed poll doesn't empty a tab that has data: a blip (a slow
+          // scan, the dev server recompiling) would otherwise blank it until
+          // the next poll. The data stays until the next poll replaces it; an
+          // unreachable peer is the monitor's to report (peer-down, below).
+          setPeerModels((prev) => {
+            if (prev.get(peer.address)?.type === 'value') return prev;
+            lastPayloadRef.current.delete(peer.address);
+            return new Map(prev).set(peer.address, AsyncState.error(e.message));
+          });
         });
     };
 
@@ -95,7 +100,19 @@ export function usePeerModels() {
 
     const interval = pollIntervalRef.current;
     const id = setInterval(() => peerList.forEach(fetchPeer), interval);
-    return () => clearInterval(id);
+    // A peer the monitor reports back up is fetched right away. Its
+    // peer-down replaced the table's data for it with an error, and waiting
+    // out the poll left its tab empty for up to a whole interval after it
+    // was already reachable again.
+    const unsubscribe = subscribeToPeerEvents((msg) => {
+      if (msg.type !== 'peer-up') return;
+      const peer = peerList.find((p) => p.address === msg.address);
+      if (peer) fetchPeer(peer);
+    });
+    return () => {
+      clearInterval(id);
+      unsubscribe();
+    };
   }, [activePeers]);
 
   useEffect(() => {
