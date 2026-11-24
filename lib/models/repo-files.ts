@@ -33,13 +33,19 @@ interface TreeFile {
 }
 const treeCache = new Map<string, {files: TreeFile[]; fetchedAt: number}>();
 
-async function repoTree(repoId: string, revision: string): Promise<TreeFile[]> {
+/** Every file in `repoId`'s HF tree at `revision`, with its size (the LFS
+ *  size for large files). Cached per repo and revision. */
+export async function repoTree(
+  repoId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<TreeFile[]> {
   const key = `${repoId}@${revision}`;
   const hit = treeCache.get(key);
   if (hit && Date.now() - hit.fetchedAt < TTL_MS) return hit.files;
   const res = await fetch(
     `https://huggingface.co/api/models/${repoId}/tree/${revision}?recursive=true`,
-    {headers: {'User-Agent': 'tj/1.0'}},
+    {headers: {'User-Agent': 'tj/1.0'}, signal},
   );
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const entries = (await res.json()) as Array<{

@@ -168,6 +168,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Copies fix a model's outdated support files instead of spreading them.**
+  When a repo updates a small file like `tokenizer_config.json`, older copies
+  show as invalid. Re-downloading it on one machine now lets you copy the
+  model to the others and to cold storage: a copy takes each support file from
+  whichever machine has the version matching Hugging Face (it used to take the
+  largest, often the stale one), and the Copy dialog no longer greys out a
+  destination as "already present" when that copy has invalid or missing
+  files.
+
 - **A vision projector named after its model is recognised as one.** A
   projector file whose name leads with the model, like
   `Qwen3.8-27B-NariQ-mmproj-BF16.gguf`, wasn't taken for a projector: the

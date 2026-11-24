@@ -709,6 +709,13 @@ export function HomeClient({
           hasColdStorage={hasColdStorage}
           onCopy={onCopy}
           onCancel={() => setConfirmingCopy(false)}
+          needsRepairAt={(location) => {
+            const flagged = [
+              ...(invalidByPeer.get(location) ?? []),
+              ...(incompleteByPeer.get(location) ?? []),
+            ];
+            return fileInfo.some((f) => flagged.includes(f.model));
+          }}
         />
       )}
       {pendingConflicts.length > 0 && (

@@ -3,10 +3,7 @@ import {fileSize} from '@/lib/storage/entries';
 import {siteForName} from '@/lib/storage/peer-storage';
 import {recordedSha256} from '@/lib/storage/recorded-digest';
 import {siteStorage} from '@/lib/storage/site';
-import {
-  resolveSupportFiles,
-  supportFileSources,
-} from '@/lib/storage/support-files';
+import {copySupportFiles} from '@/lib/storage/support-files';
 import {logger} from '@/lib/util/logger';
 import {isObject, isStringArray, readJsonBody} from '@/lib/util/request';
 
@@ -96,24 +93,20 @@ export async function POST(req: Request) {
   // files, and a whole-repo model copied without its support files can't be
   // loaded. Every tier is asked, not just the one each weight file resolved
   // to, since an archived model's cold copy routinely holds the weights alone
-  // (see resolveSupportFiles). The expanded list is both conflict-checked
+  // (see resolveSupportFiles), and a copy matching Hugging Face wins over a
+  // stale one left from before the repo changed. The expanded list is both conflict-checked
   // below and returned, so the client sends the same list to /api/v1/copy.
   const expandedFiles: SourceFile[] = [
     ...files,
-    ...(await resolveSupportFiles(
-      files.map((f) => f.path),
-      supportFileSources({
-        froms: files.map((f) => f.from),
-        localPeerAddr,
-        siteFor: siteForName,
-      }),
-      {
-        onError: (from, message) =>
-          logger.warn(
-            `[check] support-file expansion failed for ${from}: ${message}`,
-          ),
-      },
-    )),
+    ...(await copySupportFiles(files, {
+      localPeerAddr,
+      peers: config.peers.map((p) => p.address),
+      siteFor: siteForName,
+      onError: (from, message) =>
+        logger.warn(
+          `[check] support-file expansion failed for ${from}: ${message}`,
+        ),
+    })),
   ];
 
   const conflicts: Array<{

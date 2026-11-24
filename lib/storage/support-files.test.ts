@@ -207,3 +207,47 @@ test('expandSupportFiles accepts a storage site in place of a base path', async 
   expect(extra.map((f) => f.path)).toEqual(['org/m/config.json']);
   await fsp.rm(base, {recursive: true, force: true});
 });
+
+test('prefers the copy matching Hugging Face over a larger stale one', async () => {
+  // A repo rewrote tokenizer_config.json smaller upstream; the copy made
+  // before that is larger, and largest-wins would spread it to every copy.
+  const expected = new Map([['Qwen/Qwen3.6-27B/tokenizer_config.json', 9983]]);
+  const resolved = await resolveSupportFiles(
+    WEIGHTS,
+    [
+      src('cold-storage', [
+        {path: 'Qwen/Qwen3.6-27B/tokenizer_config.json', size: 16718},
+        {path: 'Qwen/Qwen3.6-27B/config.json', size: 12},
+      ]),
+      src('192.0.2.2:3000', [
+        {path: 'Qwen/Qwen3.6-27B/tokenizer_config.json', size: 9983},
+        {path: 'Qwen/Qwen3.6-27B/config.json', size: 3},
+      ]),
+    ],
+    {expectedSize: (p) => expected.get(p)},
+  );
+  expect(resolved).toEqual([
+    // No HF size for config.json: the largest copy still wins.
+    {path: 'Qwen/Qwen3.6-27B/config.json', from: 'cold-storage', size: 12},
+    {
+      path: 'Qwen/Qwen3.6-27B/tokenizer_config.json',
+      from: '192.0.2.2:3000',
+      size: 9983,
+    },
+  ]);
+});
+
+test('asks every other peer last', () => {
+  const anySite = {storage: {} as never, root: 'models'} as const;
+  const sources = supportFileSources({
+    froms: ['cold-storage'],
+    localPeerAddr: '192.0.2.1:3000',
+    peers: ['192.0.2.1:3000', '192.0.2.2:3000'],
+    siteFor: () => anySite,
+  });
+  expect(sources.map((s) => s.from)).toEqual([
+    'cold-storage',
+    '192.0.2.1:3000',
+    '192.0.2.2:3000',
+  ]);
+});

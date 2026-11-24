@@ -1,6 +1,8 @@
 import nodePath from 'path';
 import {isWeightFile} from '@/lib/models/weight-files';
 import {MODEL_SIDECAR_NAME, TJMETA_SUFFIX} from '@/lib/models/sidecar-types';
+import {modelRevision} from '@/lib/models/model-sidecar';
+import {repoTree} from '@/lib/models/repo-files';
 import {siteStorage, type Site} from '@/lib/storage/site';
 
 /**
@@ -78,8 +80,11 @@ function isContainedPath(p: string): boolean {
  * tokenizer, no safetensors index, so the model could not be loaded at the
  * destination.
  *
- * Each support file is therefore taken from whichever source actually has it,
- * with the **largest** copy winning and ties keeping the earlier source —
+ * Each support file is therefore taken from whichever source actually has it.
+ * A copy whose size matches Hugging Face's (`expectedSize`) wins: support files
+ * are small and do change upstream — a repo's tokenizer_config.json rewritten
+ * — and a copy made before that is the wrong one to spread, whatever its size.
+ * Otherwise the **largest** copy wins, ties keeping the earlier source —
  * matching `resolveSources`, and for the same reason: a truncated copy would be
  * skipped as "already there" at the destination and leave the file broken.
  *
@@ -90,10 +95,20 @@ function isContainedPath(p: string): boolean {
 export async function resolveSupportFiles(
   paths: string[],
   sources: SupportSource[],
-  opts: {onError?: (from: string, message: string) => void} = {},
+  opts: {
+    onError?: (from: string, message: string) => void;
+    /** Hugging Face's size for a path, when known. */
+    expectedSize?: (path: string) => number | undefined;
+  } = {},
 ): Promise<Array<{path: string; from: string; size: number}>> {
   const carried = new Set(paths);
   const best = new Map<string, {from: string; size: number}>();
+  const beats = (path: string, size: number, prev: {size: number}) => {
+    const want = opts.expectedSize?.(path);
+    if (want !== undefined && (size === want) !== (prev.size === want))
+      return size === want;
+    return size > prev.size;
+  };
 
   for (const source of sources) {
     let extra: Array<{path: string; size: number}>;
@@ -107,7 +122,7 @@ export async function resolveSupportFiles(
       if (typeof f?.path !== 'string' || typeof f?.size !== 'number') continue;
       if (carried.has(f.path) || !isContainedPath(f.path)) continue;
       const prev = best.get(f.path);
-      if (!prev || f.size > prev.size)
+      if (!prev || beats(f.path, f.size, prev))
         best.set(f.path, {from: source.from, size: f.size});
     }
   }
@@ -119,15 +134,18 @@ export async function resolveSupportFiles(
 
 /**
  * Where to look for a copy's support files, in preference order: the sources
- * the copy already reads its weights from, then cold storage and the local
- * models — which routinely hold what the resolved source is missing. Every
- * source is one `expandSupportFiles` over its site, a remote peer's models
- * included — the same directory listing whichever machine holds it. A tier
- * `siteFor` can't reach (null) is simply not asked.
+ * the copy already reads its weights from, then cold storage, the local
+ * models, and every other peer — any of which may hold what the resolved
+ * source is missing, or the one copy that is current. Every source is one
+ * `expandSupportFiles` over its site, a remote peer's models included — the
+ * same directory listing whichever machine holds it. A tier `siteFor` can't
+ * reach (null) is simply not asked.
  */
 export function supportFileSources(opts: {
   froms: Iterable<string>;
   localPeerAddr: string;
+  /** The other peers' addresses, asked last. */
+  peers?: Iterable<string>;
   /** The site a source name reads from; null for an unreachable tier. */
   siteFor: (from: string) => Site | null;
 }): SupportSource[] {
@@ -144,5 +162,74 @@ export function supportFileSources(opts: {
   for (const from of opts.froms) add(from);
   add('cold-storage');
   add(opts.localPeerAddr);
+  for (const peer of opts.peers ?? []) add(peer);
   return out;
+}
+
+/** How long a copy waits on Hugging Face for a repo's file sizes before
+ *  choosing support files by size alone. */
+const HF_SIZES_TIMEOUT_MS = 10_000;
+
+/**
+ * Hugging Face's size for every file of the repos `files` belong to, at the
+ * revision each model tracks (read from the sidecar where its first file is
+ * copied from). Best effort: a repo HF can't answer for — offline, gated,
+ * not an HF repo at all — contributes nothing, and the choice falls back to
+ * the largest copy.
+ */
+export async function hfFileSizes(
+  files: Array<{path: string; from: string}>,
+  siteFor: (from: string) => Site | null,
+): Promise<(path: string) => number | undefined> {
+  const repos = new Map<string, string>(); // repoId → a source holding it
+  for (const f of files) {
+    const [org, repo] = f.path.split('/');
+    if (!org || !repo || f.path.split('/').length < 3) continue;
+    const id = `${org}/${repo}`;
+    if (!repos.has(id)) repos.set(id, f.from);
+  }
+  const sizes = new Map<string, number>();
+  const signal = AbortSignal.timeout(HF_SIZES_TIMEOUT_MS);
+  await Promise.all(
+    [...repos].map(async ([repoId, from]) => {
+      try {
+        const site = siteFor(from);
+        const revision = site ? await modelRevision(site, repoId) : 'main';
+        for (const f of await repoTree(repoId, revision, signal))
+          sizes.set(`${repoId}/${f.path}`, f.size);
+      } catch {
+        // No answer for this repo: its support files go by size alone.
+      }
+    }),
+  );
+  return (path) => sizes.get(path);
+}
+
+/**
+ * The support files a copy of `files` carries (see `resolveSupportFiles`),
+ * looked for across every source `supportFileSources` names and chosen by
+ * Hugging Face's sizes where it can say. The one entry point for the copy
+ * route and its conflict check, so both expand a selection the same way.
+ */
+export async function copySupportFiles(
+  files: Array<{path: string; from: string}>,
+  opts: {
+    localPeerAddr: string;
+    peers: Iterable<string>;
+    siteFor: (from: string) => Site | null;
+    onError?: (from: string, message: string) => void;
+  },
+): Promise<Array<{path: string; from: string; size: number}>> {
+  const paths = files.map((f) => f.path);
+  const sources = supportFileSources({
+    froms: files.map((f) => f.from),
+    localPeerAddr: opts.localPeerAddr,
+    peers: opts.peers,
+    siteFor: opts.siteFor,
+  });
+  const expectedSize = await hfFileSizes(files, opts.siteFor);
+  return resolveSupportFiles(paths, sources, {
+    onError: opts.onError,
+    expectedSize,
+  });
 }

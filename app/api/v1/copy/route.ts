@@ -11,10 +11,7 @@ import {
 } from '@/lib/storage/peer-storage';
 import type {Site} from '@/lib/storage/site';
 import type {CopyResult, JobSpec} from '@/lib/storage/storage';
-import {
-  resolveSupportFiles,
-  supportFileSources,
-} from '@/lib/storage/support-files';
+import {copySupportFiles} from '@/lib/storage/support-files';
 import {runWithConcurrency} from '@/lib/util/concurrency';
 import {logger} from '@/lib/util/logger';
 import {isObject, readJsonBody} from '@/lib/util/request';
@@ -191,22 +188,18 @@ export async function POST(req: Request) {
   // Doing it in the copy itself covers every route in — the UI (whose
   // pre-check expanded the same list already, so this finds nothing new),
   // `tj copy`, which skips that check by design, and the cold-storage
-  // resume. Sources are the ones already validated above plus this host's
-  // own tiers, so this opens no new host to talk to.
-  const support = await resolveSupportFiles(
-    files.map((f) => f.path),
-    supportFileSources({
-      froms: files.map((f) => f.from),
-      localPeerAddr,
-      siteFor: siteForName,
-    }),
-    {
-      onError: (from, message) =>
-        logger.warn(
-          `[copy] support-file expansion failed for ${from}: ${message}`,
-        ),
-    },
-  );
+  // resume. Sources are the ones validated above, this host's own tiers
+  // and the configured peers (one may hold the only current copy), so this
+  // opens no host the config doesn't name.
+  const support = await copySupportFiles(files, {
+    localPeerAddr,
+    peers: config.peers.map((p) => p.address),
+    siteFor: siteForName,
+    onError: (from, message) =>
+      logger.warn(
+        `[copy] support-file expansion failed for ${from}: ${message}`,
+      ),
+  });
   const allFiles: SourceFile[] =
     support.length > 0 ? [...files, ...support] : files;
 

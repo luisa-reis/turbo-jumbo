@@ -14,7 +14,11 @@ import type {Peer} from '@/lib/config';
 import type {Model} from '@/lib/models/model-types';
 import {groupSelectedFiles} from '@/lib/models/selected-file-groups';
 import {allFilesPresent} from '@/lib/peers/peer-paths';
+import {COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
 import type {FileInfo} from '@/components/models/delete-modal';
+
+// A destination whose copy of the model has invalid or missing files.
+const REPAIR_NOTE = 'has invalid or missing files';
 
 export interface CopyDestinations {
   toColdStorage: boolean;
@@ -29,6 +33,11 @@ interface CopyModalProps {
   hasColdStorage: boolean;
   onCopy: (destinations: CopyDestinations) => void;
   onCancel: () => void;
+  // Whether the selection's model is flagged invalid or incomplete at a
+  // location (a peer address, or "cold-storage"). Such a destination is
+  // offered even when every weight file is already there: a copy is how a
+  // stale or missing support file gets replaced.
+  needsRepairAt?: (location: string) => boolean;
 }
 
 export function CopyModal({
@@ -37,6 +46,7 @@ export function CopyModal({
   hasColdStorage,
   onCopy,
   onCancel,
+  needsRepairAt = () => false,
 }: CopyModalProps) {
   const [peers, setPeers] = useState<Peer[] | null>(null);
   const [coldModels, setColdModels] = useState<Model[] | null>(null);
@@ -75,8 +85,9 @@ export function CopyModal({
   // The local peer is just another destination now (the server already leaves
   // it out when this host holds no models); only exclude the source.
   const availablePeers = (peers ?? []).filter((p) => p.address !== from);
+  const coldRepair = needsRepairAt(COLD_STORAGE_LOCATION);
   const coldAlreadyPresent =
-    coldModels !== null && allFilesPresent(files, coldModels);
+    !coldRepair && coldModels !== null && allFilesPresent(files, coldModels);
   const canCopy = toColdStorage || selectedPeers.size > 0;
 
   function togglePeer(addr: string) {
@@ -137,7 +148,11 @@ export function CopyModal({
                     <CheckboxInput
                       label="Cold storage"
                       description={
-                        coldAlreadyPresent ? 'already present' : undefined
+                        coldAlreadyPresent
+                          ? 'already present'
+                          : coldRepair
+                            ? REPAIR_NOTE
+                            : undefined
                       }
                       value={toColdStorage}
                       isDisabled={coldAlreadyPresent}
@@ -163,16 +178,21 @@ export function CopyModal({
                 ) : (
                   availablePeers.map((peer) => {
                     const peerModels = peerModelsMap.get(peer.address);
+                    const repair = needsRepairAt(peer.address);
                     const alreadyPresent =
+                      !repair &&
                       peerModels !== undefined &&
                       allFilesPresent(files, peerModels);
-                    const note = peer.isLocal
-                      ? alreadyPresent
-                        ? 'local · already present'
-                        : 'local'
-                      : alreadyPresent
-                        ? 'already present'
+                    const state = alreadyPresent
+                      ? 'already present'
+                      : repair
+                        ? REPAIR_NOTE
                         : undefined;
+                    const note = peer.isLocal
+                      ? state
+                        ? `local · ${state}`
+                        : 'local'
+                      : state;
                     return (
                       <CheckboxInput
                         key={peer.address}
