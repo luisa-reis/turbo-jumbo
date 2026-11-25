@@ -168,6 +168,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Two weight files sharing a quantization no longer merge into one row.**
+  A model such as a FastFlowLM one, whose `model.q4nx` and
+  `vision_weight.q4nx` are both Q4NX, showed one file with the other's
+  cold-storage size. A complete cold copy then read as Incomplete, and the
+  model's size was counted wrong.
+
+- **Fix for a partial cold-storage copy is offered on a viewer.** A machine
+  that holds no models of its own but has cold storage now shows Fix on an
+  incomplete cold copy, completing it from the fullest copy on a peer.
+
 - **A storage agent now accepts IPv6 connections.** It listened on IPv4
   only, so when a peer's name resolved to IPv6 addresses — as names answered
   on the local network often do — its connections were refused. The peer then

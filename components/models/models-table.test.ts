@@ -663,3 +663,17 @@ test("a cold copy is not claimed by a different repo's same-named GGUF", () => {
   const liquid = rows.find((r) => r.name === 'LiquidAI/LFM2-1.2B-GGUF')!;
   expect(liquid.quants[0].inColdStorage).toBe(true);
 });
+
+test('two weight files sharing a quant label keep their own rows and cold copies', () => {
+  // A FastFlowLM model: model.q4nx and vision_weight.q4nx are both Q4NX.
+  const files = [
+    comp('org/model-NPU2/vision_weight.q4nx', 'Q4NX', 100),
+    comp('org/model-NPU2/model.q4nx', 'Q4NX', 2200),
+  ];
+  const [row] = buildModelRows([], [{name: 'org/model-NPU2', files}]);
+  const byFile = new Map(row.quants.map((q) => [q.filename, q]));
+  expect(row.quants).toHaveLength(2);
+  expect(byFile.get('vision_weight.q4nx')?.coldTotalSize).toBe(100);
+  expect(byFile.get('model.q4nx')?.coldTotalSize).toBe(2200);
+  expect(row.quants.every((q) => q.inColdStorage && q.coldComplete)).toBe(true);
+});

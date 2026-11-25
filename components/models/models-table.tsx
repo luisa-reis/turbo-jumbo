@@ -118,14 +118,38 @@ export function buildModelRows(
     if (isDiffusersRepo(paths)) diffusersModels.add(m.name);
   }
 
+  // Quant labels several different files of one model share — a FastFlowLM
+  // model's model.q4nx and vision_weight.q4nx are both Q4NX. Keyed by label,
+  // those files would merge into one row: the first file's name with the
+  // last one's cold size, so one read as a wrong-sized cold copy and the other
+  // as missing from cold storage.
+  const sharedLabels = new Map<string, Set<string>>(); // model::quant → files
+  for (const m of [...localModels, ...coldModels]) {
+    for (const f of m.files) {
+      const base = f.isSplit ? f.representativeFilename : f.filename;
+      if (isMmprojFilename(base)) continue; // keyed by filename regardless
+      const key = `${m.name}::${f.quant}`;
+      (sharedLabels.get(key) ?? sharedLabels.set(key, new Set()).get(key)!).add(
+        base,
+      );
+    }
+  }
+
   // A projector (mmproj) is keyed by its filename, not its quant label, so a
-  // real F16 weight and mmproj-F16.gguf don't collide; a diffusers weight keys
-  // by its component folder; everything else keys by quant.
-  const fileLabel = (f: ModelFile, isDiffusers: boolean): string => {
+  // real F16 weight and mmproj-F16.gguf don't collide; so is a file whose
+  // label another file of its model shares. A diffusers weight keys by its
+  // component folder; everything else keys by quant.
+  const fileLabel = (
+    modelName: string,
+    f: ModelFile,
+    isDiffusers: boolean,
+  ): string => {
     const base = f.isSplit ? f.representativeFilename : f.filename;
     if (isMmprojFilename(base)) return base;
     if (isDiffusers && !f.isSplit)
       return diffusersComponentKey(f.path).component;
+    if ((sharedLabels.get(`${modelName}::${f.quant}`)?.size ?? 0) > 1)
+      return base;
     return f.quant;
   };
 
@@ -198,7 +222,7 @@ export function buildModelRows(
     const isDiffusers = diffusersModels.has(m.name);
     for (const f of m.files) {
       coldQuantSizes.set(
-        `${m.name}::${fileLabel(f, isDiffusers)}`,
+        `${m.name}::${fileLabel(m.name, f, isDiffusers)}`,
         f.isSplit ? f.totalSize : f.size,
       );
     }
@@ -212,7 +236,7 @@ export function buildModelRows(
   for (const m of localModels) {
     const isDiffusers = diffusersModels.has(m.name);
     for (const f of m.files) {
-      const key = `${m.name}::${fileLabel(f, isDiffusers)}`;
+      const key = `${m.name}::${fileLabel(m.name, f, isDiffusers)}`;
       const paths = f.isSplit ? f.files.map((s) => s.path) : [f.path];
       const prev = localPathsMap.get(key);
       localPathsMap.set(key, prev && isDiffusers ? [...prev, ...paths] : paths);
@@ -232,7 +256,7 @@ export function buildModelRows(
       rowMap.set(m.name, quantMap);
     }
     for (const f of m.files) {
-      const label = fileLabel(f, isDiffusers);
+      const label = fileLabel(m.name, f, isDiffusers);
       if (!quantMap.has(label)) {
         const quantKey = `${m.name}::${label}`;
         // Match each file to its cold copy by filename; size then decides

@@ -653,7 +653,7 @@ export function HomeClient({
               onShowRevisions={setRevisionsFile}
               redownloading={redownload.running}
               onFixColdIncomplete={
-                localPeerAddress ? onFixColdIncomplete : undefined
+                hasColdStorage ? onFixColdIncomplete : undefined
               }
               coldFixing={copying}
               copySourceLabelFor={canRecover ? copySourceLabelFor : undefined}
