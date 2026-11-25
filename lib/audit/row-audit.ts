@@ -134,6 +134,20 @@ export function redownloadableFailures(failures: AuditResult[]): AuditResult[] {
 }
 
 /**
+ * The order a row's hovercard lists its failures in: files flagged only for a
+ * gap in their shard set go last. They carry no action of their own, while the
+ * absent shard that fixes them does — and the list scrolls, so with a few
+ * intact shards ahead of it, its download button sat below the fold, unseen.
+ * Otherwise the order is kept.
+ */
+export function hovercardOrder(failures: AuditResult[]): AuditResult[] {
+  return [
+    ...failures.filter((f) => !f.shardGap),
+    ...failures.filter((f) => f.shardGap),
+  ];
+}
+
+/**
  * The "update available" results for a table row: the entries among the row's
  * paths whose update check came back `update`. Empty when no check has run or
  * none are behind. Mirrors `rowAudit`'s per-row aggregation so the table can

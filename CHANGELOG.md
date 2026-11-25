@@ -168,6 +168,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **An audit of a split model missing a shard shows its download button.**
+  The hovercard listed every present shard (each flagged for the gap) ahead
+  of the missing one, so its "Download missing file" button sat out of sight
+  below the card's scroll. The missing shard now comes first.
 - **A split model held only on a peer lists its shards.** Expanding its
   quantization showed nothing; it now lists each shard the peer holds, the
   same as for a model in local or cold storage.

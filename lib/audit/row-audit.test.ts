@@ -1,6 +1,7 @@
 import {test, expect} from 'bun:test';
 import {
   companionPaths,
+  hovercardOrder,
   redownloadableFailures,
   rowAudit,
   rowUpdates,
@@ -330,5 +331,20 @@ test('redownloadableFailures keeps a partially-downloaded file and drops other v
   ];
   expect(redownloadableFailures(failures).map((f) => f.file)).toEqual([
     'a.gguf',
+  ]);
+});
+
+test('hovercardOrder lists the absent shard ahead of the intact ones its gap flags', () => {
+  const failures = [
+    incomplete(shardPath(4), true),
+    incomplete(shardPath(1), true),
+    incomplete(shardPath(3), true),
+    incomplete(shardPath(2)),
+  ];
+  expect(hovercardOrder(failures).map((f) => f.file)).toEqual([
+    shardPath(2),
+    shardPath(4),
+    shardPath(1),
+    shardPath(3),
   ]);
 });

@@ -10,7 +10,11 @@ import {isMmprojFilename} from '@/lib/models/model-name';
 import {Badge} from '@astryxdesign/core/Badge';
 import {HoverCard} from '@astryxdesign/core/HoverCard';
 import type {AuditResult, AuditStatus, UpdateResult} from '@/lib/audit/audit';
-import {redownloadableFailures, type RowAudit} from '@/lib/audit/row-audit';
+import {
+  hovercardOrder,
+  redownloadableFailures,
+  type RowAudit,
+} from '@/lib/audit/row-audit';
 import type {RepoFile} from '@/lib/models/repo-files';
 import {formatSize} from '@/lib/models/model-row';
 
@@ -136,7 +140,7 @@ function AuditFailureContent({
   return (
     <VStack gap={3}>
       <VStack gap={3} xstyle={styles.fileList}>
-        {failures.map((f) => {
+        {hovercardOrder(failures).map((f) => {
           if (grouped && isRedownloadable.has(f.file)) {
             const name = f.file.split('/').pop() ?? f.file;
             const isProjector = isMmprojFilename(name);
