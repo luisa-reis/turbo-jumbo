@@ -26,6 +26,16 @@ async function probe(peer: Peer): Promise<Model[] | null> {
   return (await res.json()) as Model[];
 }
 
+/** A failed check's reason, with the network error fetch wraps in `cause`
+ *  (a reset, a refused connection, a failed lookup): "fetch failed" alone
+ *  says nothing. */
+function reason(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  if (!(e.cause instanceof Error)) return e.message;
+  const code = (e.cause as Error & {code?: string}).code;
+  return `${e.message}: ${e.cause.message}${code ? ` [${code}]` : ''}`;
+}
+
 async function checkPeer(peer: Peer): Promise<void> {
   const address = peer.address;
   try {
@@ -39,7 +49,7 @@ async function checkPeer(peer: Peer): Promise<void> {
       if (peerStatus.get(address) !== 'up') throw e;
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       models = await probe(peer);
-      logger.info(`[monitor] peer ${address} answered on retry`);
+      logger.info(`[monitor] peer ${address} answered on retry (${reason(e)})`);
     }
     // An agent answers liveness for almost nothing; the scan — a remote
     // walk — runs only on the transition to up, when the event needs it.
@@ -57,12 +67,12 @@ async function checkPeer(peer: Peer): Promise<void> {
       logger.info(`[monitor] peer up: ${address}`);
       publishPeerEvent({type: 'peer-up', address, models: models ?? []});
     }
-  } catch {
+  } catch (e) {
     const prev = peerStatus.get(address);
     peerStatus.set(address, 'down');
 
     if (prev === 'up') {
-      logger.info(`[monitor] peer down: ${address}`);
+      logger.info(`[monitor] peer down: ${address} (${reason(e)})`);
       publishPeerEvent({type: 'peer-down', address});
     }
   }
