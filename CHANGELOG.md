@@ -168,6 +168,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A download that won't fit stops before it starts.** Every download,
+  including redownloads and missing-file downloads from the table, now
+  checks free space at its destination first, and says how much it needs
+  and how much is free. Before, it ran until the disk filled and then failed
+  with a cryptic "Background writer channel closed" error from `hf`.
+
 - **The console is opaque again.** Since the last design-system update its
   background and top border had gone missing, leaving the page showing
   through the log.

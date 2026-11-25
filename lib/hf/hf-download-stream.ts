@@ -13,6 +13,7 @@ import {
   isValidRevision,
 } from '@/lib/hf/download-request';
 import {repoFileSizes, resolveHfFileByPath} from '@/lib/hf/hf-infer';
+import {downloadSpaceProblem} from '@/lib/hf/download-space';
 import {repoIdFromModelUrl} from '@/lib/models/model-name';
 import {
   clearMissingFlag,
@@ -400,6 +401,16 @@ export function streamHfDownload(
       void (async () => {
         let result: DownloadResult | null = null;
         try {
+          // Refuse up front a download the destination can't hold: run out
+          // of room mid-file, hf dies with an opaque writer error long after
+          // it started.
+          const noRoom = await downloadSpaceProblem(
+            target.storage,
+            repoId,
+            branch,
+            filePaths,
+          );
+          if (noRoom) throw new Error(noRoom);
           const job = await target.storage.start({
             kind: 'download',
             repoId,
