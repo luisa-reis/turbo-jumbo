@@ -20,6 +20,8 @@ import {
   type SidecarLocation,
   type SidecarSummary,
 } from '@/lib/models/sidecar-types';
+import {checkpointLabel} from '@/lib/lemonade/lemonade-status';
+import type {LemonadeEntryGap} from '@/lib/lemonade/lemonade-gaps';
 
 const styles = stylex.create({
   indent1: {paddingInlineStart: '1.5rem'},
@@ -242,6 +244,92 @@ function FileHover({row, children}: {row: DisplayRow; children: ReactNode}) {
 // Flags a file another catalog entry lists as one of its checkpoints — the
 // text encoder or VAE of an image model, say — which its own row can't show:
 // the file lives in a different repo from the model that needs it.
+// Every model Lemonade knows gets the lemon — catalog entries and FastFlowLM's
+// FLM models alike — so its absence always means "not a Lemonade model"; the
+// hovercard names the exact entries the repo backs, as Lemonade names them.
+// On a location's tab it also says which of those this location can serve: an
+// entry names several files (an MTP draft model, a projector) and Lemonade
+// lists it as downloaded only once every one is present, so it names what's
+// missing and offers to download it there.
+function LemonMarker({
+  names,
+  gaps,
+  onDownload,
+  downloading,
+}: {
+  names: string[];
+  gaps?: LemonadeEntryGap[];
+  onDownload?: (repoId: string, variants: Array<string | null>) => void;
+  downloading: boolean;
+}) {
+  const incomplete = (gaps ?? []).filter((g) => g.missing.length > 0);
+  const summary = `This repo backs the Lemonade ${
+    names.length === 1 ? 'model' : 'models'
+  }: ${names.join(', ')}`;
+  // One download per repo: the downloader fetches from one repo at a time.
+  const byRepo = new Map<string, Array<string | null>>();
+  for (const g of incomplete)
+    for (const cp of g.missing) {
+      const variants = byRepo.get(cp.repoId) ?? [];
+      if (!variants.includes(cp.variant)) variants.push(cp.variant);
+      byRepo.set(cp.repoId, variants);
+    }
+  const content =
+    gaps == null || gaps.length === 0 ? (
+      summary
+    ) : (
+      <VStack gap={2}>
+        <Text type="supporting">{summary}</Text>
+        {gaps.map((g) => (
+          <VStack key={g.name} gap={0}>
+            <HStack gap={2} vAlign="center">
+              <Text type="body">{g.name}</Text>
+              <Badge
+                label={g.missing.length === 0 ? 'ready' : 'incomplete'}
+                variant={g.missing.length === 0 ? 'success' : 'warning'}
+              />
+            </HStack>
+            {g.missing.length > 0 && (
+              <Text type="supporting">
+                Missing here: {g.missing.map(checkpointLabel).join(', ')}
+              </Text>
+            )}
+          </VStack>
+        ))}
+        {onDownload &&
+          [...byRepo].map(([repoId, variants]) => (
+            <HStack key={repoId}>
+              <Button
+                label={
+                  downloading
+                    ? 'Downloading…'
+                    : byRepo.size > 1
+                      ? `Download missing files from ${repoId}`
+                      : 'Download missing files'
+                }
+                variant="ghost"
+                size="sm"
+                isDisabled={downloading}
+                onClick={() => onDownload(repoId, variants)}
+              />
+            </HStack>
+          ))}
+      </VStack>
+    );
+  return (
+    <HoverCard content={content} placement="above" hideDelay={600}>
+      <HStack gap={1} vAlign="center">
+        <Text type="supporting" role="img" aria-label="A Lemonade model">
+          🍋
+        </Text>
+        {incomplete.length > 0 && (
+          <Icon icon="warning" size="sm" color="warning" />
+        )}
+      </HStack>
+    </HoverCard>
+  );
+}
+
 function DependencyBadge({dependents}: {dependents?: string[]}) {
   if (!dependents || dependents.length === 0) return null;
   return (
@@ -265,11 +353,23 @@ export function NameCell({
   incomplete = false,
   invalid = false,
   lemonadeNames,
+  lemonadeGaps,
+  onDownloadCheckpoints,
+  downloadingCheckpoints = false,
   dependents,
 }: {
   row: DisplayRow;
   isExpanded: boolean;
   onToggle: (key: string) => void;
+  // On a location's tab: what that location lacks of each Lemonade entry it
+  // holds part of (depth-0 rows only).
+  lemonadeGaps?: LemonadeEntryGap[];
+  // Download a repo's missing checkpoints onto that location.
+  onDownloadCheckpoints?: (
+    repoId: string,
+    variants: Array<string | null>,
+  ) => void;
+  downloadingCheckpoints?: boolean;
   // The model's local copy is present but missing files (depth-0 rows only).
   incomplete?: boolean;
   // The model has at least one local file that audits invalid (depth-0 rows).
@@ -410,19 +510,12 @@ export function NameCell({
         <Badge label={row.precisions.join(', ')} variant="neutral" />
       )}
       {lemonadeNames && lemonadeNames.length > 0 && (
-        // Every model Lemonade knows gets the lemon — catalog entries and
-        // FastFlowLM's FLM models alike — so its absence always means "not a
-        // Lemonade model"; the hovercard names the exact entries the repo
-        // backs, as Lemonade names them.
-        <HoverCard
-          content={`This repo backs the Lemonade ${
-            lemonadeNames.length === 1 ? 'model' : 'models'
-          }: ${lemonadeNames.join(', ')}`}
-        >
-          <Text type="supporting" role="img" aria-label="A Lemonade model">
-            🍋
-          </Text>
-        </HoverCard>
+        <LemonMarker
+          names={lemonadeNames}
+          gaps={lemonadeGaps}
+          onDownload={onDownloadCheckpoints}
+          downloading={downloadingCheckpoints}
+        />
       )}
       {incomplete && <Badge variant="error" label="incomplete" />}
       {invalid && (

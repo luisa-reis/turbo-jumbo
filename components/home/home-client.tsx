@@ -7,6 +7,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {Banner} from '@astryxdesign/core/Banner';
 import {peerSlug} from '@/lib/peers/peer-slug';
 import {COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
+import {checkpointRepoPaths} from '@/lib/lemonade/lemonade-gaps';
 import {isWeightFile} from '@/lib/models/weight-files';
 import type {Peer as PeerConfig} from '@/lib/config';
 import type {Model} from '@/lib/models/models';
@@ -430,6 +431,36 @@ export function HomeClient({
     [redownload],
   );
 
+  // Download the checkpoints a Lemonade entry still lacks at this location
+  // (from the lemon marker's hovercard): each catalog variant — a quant token
+  // or an exact file — resolved against the repo's file list, then fetched
+  // like any other repo files.
+  // Not a useCallback, like closeRedownload: the React Compiler memoizes it.
+  const onDownloadCheckpoints = (
+    repoId: string,
+    variants: Array<string | null>,
+  ) => {
+    checkpointRepoPaths(repoId, variants).then(
+      (paths) =>
+        paths.length > 0
+          ? onDownloadRepoFiles(repoId, paths, 'main')
+          : setError(
+              `No files in ${repoId} match ${variants.map((v) => v ?? 'the whole repo').join(', ')}.`,
+            ),
+      (e) => setError(e instanceof Error ? e.message : String(e)),
+    );
+  };
+
+  // The files of the location downloads land on — this host's own, or the
+  // audited peer's — so the lemon marker can say what each Lemonade entry
+  // still lacks there. Undefined where nothing can be downloaded to (All,
+  // cold storage).
+  const recoverModels = useMemo((): Model[] | undefined => {
+    if (auditLocation === 'local') return localPeerModels;
+    const lo = auditPeer ? seededPeerModels.get(auditPeer.address) : undefined;
+    return lo?.type === 'value' ? lo.value : undefined;
+  }, [auditLocation, localPeerModels, auditPeer, seededPeerModels]);
+
   // Not a useCallback: it closes over runAudit (from the audit hook), whose
   // identity the React Compiler can't reconcile with a manual deps array — so
   // let the compiler memoize it instead.
@@ -667,6 +698,10 @@ export function HomeClient({
               onRedownload={canRecover ? onRedownload : undefined}
               onRedownloadAll={canRecover ? onRedownloadAll : undefined}
               onDownloadRepoFiles={canRecover ? onDownloadRepoFiles : undefined}
+              locationModels={canRecover ? recoverModels : undefined}
+              onDownloadCheckpoints={
+                canRecover ? onDownloadCheckpoints : undefined
+              }
               onShowRevisions={setRevisionsFile}
               redownloading={redownload.running}
               onFixColdIncomplete={

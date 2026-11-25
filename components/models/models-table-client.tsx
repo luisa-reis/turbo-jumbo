@@ -19,6 +19,12 @@ import {
   dependentsForFile,
   type DependentRef,
 } from '@/lib/lemonade/checkpoint-dependents';
+import {
+  lemonadeEntriesByRepo,
+  lemonadeGaps,
+  type LemonadeEntry,
+} from '@/lib/lemonade/lemonade-gaps';
+import type {Model} from '@/lib/models/model-types';
 import type {
   LemonadeComponent,
   LemonadeModel,
@@ -86,6 +92,8 @@ export function ModelsTableClient({
   onRedownloadAll,
   redownloading = false,
   onDownloadRepoFiles,
+  locationModels,
+  onDownloadCheckpoints,
   onShowRevisions,
   onFixColdIncomplete,
   coldFixing = false,
@@ -133,6 +141,13 @@ export function ModelsTableClient({
     repoPaths: string[],
     branch?: string,
   ) => void;
+  // The active location's files, when it's one a download can land on — the
+  // lemon marker then says what each Lemonade entry still lacks there.
+  locationModels?: Model[];
+  onDownloadCheckpoints?: (
+    repoId: string,
+    variants: Array<string | null>,
+  ) => void;
   onShowRevisions?: (file: AuditResult) => void;
   onFixColdIncomplete?: (paths: string[]) => void;
   coldFixing?: boolean;
@@ -159,6 +174,11 @@ export function ModelsTableClient({
   const [lemonadeDeps, setLemonadeDeps] = useState<Map<string, DependentRef[]>>(
     new Map(),
   );
+  // Catalog entries by the repos their checkpoints live in, to judge what the
+  // active location lacks of each.
+  const [lemonadeEntries, setLemonadeEntries] = useState<
+    Map<string, LemonadeEntry[]>
+  >(new Map());
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -189,6 +209,7 @@ export function ModelsTableClient({
         if (!cancelled) {
           setLemonadeNames(map);
           setLemonadeDeps(checkpointDependents(data));
+          setLemonadeEntries(lemonadeEntriesByRepo(data));
         }
       } catch {
         /* no catalog, no hints */
@@ -381,6 +402,16 @@ export function ModelsTableClient({
           lemonadeNames={
             item.depth === 0 ? lemonadeNames.get(item.parentName) : undefined
           }
+          lemonadeGaps={
+            item.depth === 0 && locationModels
+              ? lemonadeGaps(
+                  lemonadeEntries.get(item.parentName) ?? [],
+                  locationModels,
+                )
+              : undefined
+          }
+          onDownloadCheckpoints={onDownloadCheckpoints}
+          downloadingCheckpoints={redownloading}
           dependents={
             item.depth === 1
               ? dependentsForFile(

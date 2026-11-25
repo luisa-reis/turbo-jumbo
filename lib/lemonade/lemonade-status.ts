@@ -310,7 +310,7 @@ export interface CheckpointStatusRow {
 
 // How a checkpoint reads in a row of its own: an exact file by its basename,
 // a quant token in Lemonade's own `repo:variant` notation, a whole repo by id.
-function checkpointLabel(cp: Checkpoint): string {
+export function checkpointLabel(cp: Checkpoint): string {
   if (cp.variant == null) return cp.repoId;
   if (FILENAME_VARIANT_RE.test(cp.variant)) return baseName(cp.variant);
   return `${cp.repoId}:${cp.variant}`;

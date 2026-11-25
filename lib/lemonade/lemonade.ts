@@ -7,3 +7,4 @@ export * from '@/lib/lemonade/lemonade-types';
 export * from '@/lib/lemonade/lemonade-parse';
 export * from '@/lib/lemonade/lemonade-plan';
 export * from '@/lib/lemonade/lemonade-status';
+export * from '@/lib/lemonade/lemonade-gaps';

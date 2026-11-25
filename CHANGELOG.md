@@ -11,6 +11,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The 🍋 marker says what a machine still needs to run each Lemonade model.**
+  Lemonade lists a model as downloaded only once every file its catalog entry
+  names is present — an MTP draft model, a particular projector — so a repo
+  can sit on a machine in full and Lemonade still not offer it. On a
+  machine's tab the marker now gains a ⚠ when that's the case; its card names
+  the missing files for each entry and downloads them there with **Download
+  missing files**.
+
 - **Downloads can write straight into a peer's mounted storage.** When a
   peer's models directory is mounted on the machine running Turbo Jumbo (over
   NFS, say), give it `models_mount` in `config.yaml`: Hugging Face downloads to
