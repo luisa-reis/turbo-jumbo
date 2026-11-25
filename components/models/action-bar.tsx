@@ -35,6 +35,7 @@ interface ActionBarProps {
   checking?: boolean;
   checkProgress?: CheckProgress | null;
   onCancelCheck?: () => void;
+  onCancelCopy?: () => void;
   onAudit?: () => void;
   auditing?: boolean;
   auditSupported?: boolean;
@@ -55,6 +56,7 @@ export function ActionBar({
   checking,
   checkProgress,
   onCancelCheck,
+  onCancelCopy,
   onAudit,
   auditing = false,
   auditSupported = false,
@@ -111,6 +113,17 @@ export function ActionBar({
                 variant="secondary"
                 size="sm"
                 onClick={onCancelCheck}
+              />
+            )}
+            {/* A copy can run for hours; cancelling stops every transfer still
+                running. Files already copied stay, and a partly copied one
+                resumes when copied again. */}
+            {copying && onCancelCopy && (
+              <Button
+                label="Cancel copy"
+                variant="secondary"
+                size="sm"
+                onClick={onCancelCopy}
               />
             )}
             <Button

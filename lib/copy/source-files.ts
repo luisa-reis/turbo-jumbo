@@ -78,3 +78,21 @@ export function buildSourceFiles(
   }
   return out;
 }
+
+/**
+ * Sources for a copy started from one location's tab: each path the location
+ * holds is read from there, whatever its size elsewhere; any other path falls
+ * back to `everywhere` (see `resolveSources`). The user picked the files on
+ * that tab, so its copies are the ones meant — and "largest wins" would get an
+ * updated file backwards when the update shrank it, copying the old version
+ * from another machine instead of the new one from here. `at` is that
+ * location's own index (`resolveSources` over just its models).
+ */
+export function preferLocation(
+  at: SourceIndex,
+  everywhere: SourceIndex,
+): SourceIndex {
+  const merged = new Map(everywhere.entries());
+  for (const [path, entry] of at.entries()) merged.set(path, entry);
+  return merged;
+}

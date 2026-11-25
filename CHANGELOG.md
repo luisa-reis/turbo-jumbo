@@ -168,6 +168,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **An updated file can be copied over an older version elsewhere.** A file
+  whose copy on the destination is larger than the source — for example an
+  upstream update that shrank it, downloaded on one machine but not another —
+  showed that destination as "already present" and couldn't be copied there.
+  Only a same-size copy counts as present now; a different one goes through
+  the usual overwrite check. And a copy started from a location's tab now
+  sends that location's files: it used to send the largest copy found
+  anywhere, which for a shrunken update was the old version.
+- **A copy can be cancelled.** A **Cancel copy** button sits beside the
+  progress while a copy runs. It stops every transfer still in flight; files
+  already copied stay, a partly copied one resumes when copied again, and a
+  move deletes nothing from its source.
 - **An out-of-date file can be brought current from its Update badge.** The
   badge's card gains a **Download latest** button that fetches the newer
   version in place — for example, one shard of a split model left at an older

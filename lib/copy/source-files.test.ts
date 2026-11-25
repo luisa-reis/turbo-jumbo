@@ -1,5 +1,9 @@
 import {test, expect} from 'bun:test';
-import {buildSourceFiles, resolveSources} from '@/lib/copy/source-files';
+import {
+  buildSourceFiles,
+  preferLocation,
+  resolveSources,
+} from '@/lib/copy/source-files';
 import type {Model} from '@/lib/models/model-types';
 
 const single = (path: string, size: number): Model =>
@@ -74,4 +78,26 @@ test('buildSourceFiles pairs each path with its source', () => {
 test('a path with no known copy is dropped rather than passed on', () => {
   const idx = resolveSources({cold: [single('a.gguf', 10)]});
   expect(buildSourceFiles(idx, ['a.gguf', 'ghost.gguf'])).toHaveLength(1);
+});
+
+test('a copy from a tab reads that location even when a larger old copy exists', () => {
+  // An upstream update shrank the file: the tab's peer has the new, smaller
+  // one; cold storage still holds the old, larger one. Copying from the tab
+  // must send the new file, not "the largest" old one.
+  const everywhere = resolveSources({
+    cold: [single('m.gguf', 200)],
+    peers: [
+      {address: 'peer-a', models: [single('m.gguf', 150)]},
+      {address: 'peer-b', models: [single('other.gguf', 5)]},
+    ],
+  });
+  const at = resolveSources({
+    peers: [{address: 'peer-a', models: [single('m.gguf', 150)]}],
+  });
+  const idx = preferLocation(at, everywhere);
+  expect(buildSourceFiles(idx, ['m.gguf', 'other.gguf'])).toEqual([
+    {path: 'm.gguf', from: 'peer-a', size: 150},
+    // Not on the tab's location: falls back to wherever it is.
+    {path: 'other.gguf', from: 'peer-b', size: 5},
+  ]);
 });

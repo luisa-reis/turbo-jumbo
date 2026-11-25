@@ -436,9 +436,10 @@ test('allFilesPresent: a destination copy of equal size is present', () => {
   expect(allFilesPresent(selected, dest)).toBe(true);
 });
 
-test('allFilesPresent: a destination copy larger than the source is present', () => {
-  // Equal-or-larger counts as present — only a strictly smaller copy is the
-  // incomplete case we re-enable copying for.
+test('allFilesPresent: a destination copy larger than the source is not present', () => {
+  // A larger copy is a different version of the file — an upstream update
+  // that shrank it, copied here from a machine with the newer one. Copying
+  // over it must stay available; the conflict check asks first.
   const dest: Model[] = [
     {
       name: 'unsloth/Jan-nano-GGUF',
@@ -450,7 +451,7 @@ test('allFilesPresent: a destination copy larger than the source is present', ()
   const selected = [
     {model: 'Jan-nano', filename: 'Jan-nano-Q6_K.gguf', size: 50},
   ];
-  expect(allFilesPresent(selected, dest)).toBe(true);
+  expect(allFilesPresent(selected, dest)).toBe(false);
 });
 
 test('allFilesPresent matches a specific gguf across differently-named hosts', () => {

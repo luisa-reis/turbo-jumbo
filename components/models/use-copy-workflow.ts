@@ -19,9 +19,11 @@ import {type CopyDestinations} from '@/components/models/copy-modal';
 import {type ConflictItem} from '@/components/models/conflicts-modal';
 import {
   buildSourceFiles,
+  preferLocation,
   resolveSources,
   type SourceFile,
 } from '@/lib/copy/source-files';
+import {COLD_STORAGE_LOCATION} from '@/lib/storage/locations';
 
 /**
  * The copy workflow: the conflict-check → optional conflicts-modal → copy
@@ -39,6 +41,7 @@ export function useCopyWorkflow({
   coldModels,
   localPeerAddress,
   seededPeerModels,
+  activeLocation,
 }: {
   selected: Set<string>;
   setSelected: Dispatch<SetStateAction<Set<string>>>;
@@ -48,6 +51,8 @@ export function useCopyWorkflow({
   coldModels: Model[];
   localPeerAddress: string | null;
   seededPeerModels: Map<string, AsyncState<Model[]>>;
+  // The tab the copy is started from: `all`, `cold-storage`, or a peer address.
+  activeLocation: string;
 }) {
   const [confirmingCopy, setConfirmingCopy] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -63,6 +68,10 @@ export function useCopyWorkflow({
   // the request is aborted, so a check that turned out to need real hashing
   // can be abandoned instead of waited out.
   const checkAbort = useRef<AbortController | null>(null);
+  // Aborts the running copy. The server cancels every transfer still in
+  // flight when the request goes away, and deletes no sources (a move's
+  // deletes run only after all transfers finish).
+  const copyAbort = useRef<AbortController | null>(null);
   const [pendingConflicts, setPendingConflicts] = useState<ConflictItem[]>([]);
   const [pendingDestinations, setPendingDestinations] =
     useState<CopyDestinations | null>(null);
@@ -105,8 +114,27 @@ export function useCopyWorkflow({
     return buildSourceFiles(pathPresence, paths);
   }
 
+  // The selection's sources for a copy the user starts: from a location's tab,
+  // that location's own copies (see `preferLocation`); from All, the most
+  // complete copy anywhere.
+  const selectionSources = useMemo(() => {
+    if (activeLocation === 'all') return pathPresence;
+    const at =
+      activeLocation === COLD_STORAGE_LOCATION
+        ? resolveSources({cold: coldModels})
+        : (() => {
+            const lo = seededPeerModels.get(activeLocation);
+            return lo?.type === 'value'
+              ? resolveSources({
+                  peers: [{address: activeLocation, models: lo.value}],
+                })
+              : null;
+          })();
+    return at ? preferLocation(at, pathPresence) : pathPresence;
+  }, [activeLocation, coldModels, seededPeerModels, pathPresence]);
+
   function sourceFilesForSelection() {
-    return buildSourceFilesFor(selected);
+    return buildSourceFiles(selectionSources, selected);
   }
 
   async function onCopy(destinations: CopyDestinations) {
@@ -178,6 +206,31 @@ export function useCopyWorkflow({
 
   // Abandon a running check. The copy never starts: the user asked to stop.
   const cancelCheck = () => checkAbort.current?.abort();
+  const cancelCopy = () => copyAbort.current?.abort();
+
+  // POST a copy and follow its progress stream to the end. Resolves true when
+  // it ran to completion, false when it was cancelled; any other failure
+  // throws.
+  async function runCopyRequest(body: object): Promise<boolean> {
+    const abort = new AbortController();
+    copyAbort.current = abort;
+    try {
+      const res = await fetch('/api/v1/copy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+        signal: abort.signal,
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      await readCopyAndReportErrors(res, setCopyProgress, setError);
+      return true;
+    } catch (e) {
+      if (abort.signal.aborted) return false;
+      throw e;
+    } finally {
+      if (copyAbort.current === abort) copyAbort.current = null;
+    }
+  }
 
   async function onConflictsConfirm(
     skip: Array<{file: string; destination: string}>,
@@ -200,19 +253,12 @@ export function useCopyWorkflow({
     setCopyProgress(null);
     setError(null);
     try {
-      const res = await fetch('/api/v1/copy', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          files,
-          ...destinations,
-          skip,
-        }),
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await readCopyAndReportErrors(res, setCopyProgress, setError);
-      setSelected(new Set());
-      resetAudit();
+      const finished = await runCopyRequest({files, ...destinations, skip});
+      // A cancelled copy keeps the selection, so copying it again resumes.
+      if (finished) {
+        setSelected(new Set());
+        resetAudit();
+      }
       await refreshModels();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -241,19 +287,13 @@ export function useCopyWorkflow({
     setCopyProgress(null);
     setError(null);
     try {
-      const res = await fetch('/api/v1/copy', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          files,
-          toColdStorage: true,
-          toPeers: [],
-          deleteAfterCopy: false,
-          skip: [],
-        }),
+      await runCopyRequest({
+        files,
+        toColdStorage: true,
+        toPeers: [],
+        deleteAfterCopy: false,
+        skip: [],
       });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await readCopyAndReportErrors(res, setCopyProgress, setError);
       await refreshModels();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -284,19 +324,13 @@ export function useCopyWorkflow({
     setCopyProgress(null);
     setError(null);
     try {
-      const res = await fetch('/api/v1/copy', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          files: [source],
-          toColdStorage: false,
-          toPeers: [destAddress],
-          deleteAfterCopy: false,
-          skip: [],
-        }),
+      await runCopyRequest({
+        files: [source],
+        toColdStorage: false,
+        toPeers: [destAddress],
+        deleteAfterCopy: false,
+        skip: [],
       });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await readCopyAndReportErrors(res, setCopyProgress, setError);
       await refreshModels();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -318,6 +352,7 @@ export function useCopyWorkflow({
     checking,
     checkProgress,
     cancelCheck,
+    cancelCopy,
     confirmingCopy,
     setConfirmingCopy,
     pendingConflicts,

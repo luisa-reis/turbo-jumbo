@@ -58,9 +58,12 @@ export function peerFileKeys(models: Model[]): Set<string> {
  * on `fileJoinKey`, so generic and mmproj basenames are qualified by model — a
  * destination holding a different model's `mmproj-F16.gguf` doesn't count this
  * model's projector as already present. A file carrying its source `size`
- * counts as present only when the destination copy is at least that large: a
- * smaller copy is an incomplete transfer (e.g. one interrupted partway), so
- * re-copying it must stay available. Gates a copy destination checkbox.
+ * counts as present only when the destination copy is exactly that size: a
+ * smaller copy is an incomplete transfer (e.g. one interrupted partway), and a
+ * larger or otherwise different one is another version of the file (an
+ * updated upload on one machine but not the other), so copying must stay
+ * available either way — the conflict check then asks before overwriting.
+ * Gates a copy destination checkbox.
  */
 export function allFilesPresent(
   files: Array<{model: string; filename: string; size?: number}>,
@@ -70,7 +73,7 @@ export function allFilesPresent(
   return files.every((f) => {
     const destSize = destSizes.get(fileJoinKey(f.model, f.filename));
     if (destSize === undefined) return false;
-    return f.size == null || destSize >= f.size;
+    return f.size == null || destSize === f.size;
   });
 }
 

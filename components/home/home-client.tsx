@@ -484,6 +484,7 @@ export function HomeClient({
     checking,
     checkProgress,
     cancelCheck,
+    cancelCopy,
     confirmingCopy,
     setConfirmingCopy,
     pendingConflicts,
@@ -503,6 +504,7 @@ export function HomeClient({
     coldModels,
     localPeerAddress,
     seededPeerModels,
+    activeLocation,
   });
 
   // The audited location as a copy destination — the config peer address behind
@@ -577,8 +579,23 @@ export function HomeClient({
     for (const lo of seededPeerModels.values()) {
       if (lo.type === 'value') merge(lo.value);
     }
+    // From a location's tab the copy reads that location's own files (see
+    // `preferLocation`), so their sizes are the ones to compare — an update
+    // that shrank a file would otherwise compare as the old, larger copy and
+    // mark a machine holding that old copy as already up to date.
+    const here =
+      activeLocation === 'all'
+        ? null
+        : activeLocation === COLD_STORAGE_LOCATION
+          ? coldModels
+          : (() => {
+              const lo = seededPeerModels.get(activeLocation);
+              return lo?.type === 'value' ? lo.value : null;
+            })();
+    if (here)
+      for (const [key, size] of fileSizesByKey(here)) max.set(key, size);
     return max;
-  }, [coldModels, localPeerModels, seededPeerModels]);
+  }, [coldModels, localPeerModels, seededPeerModels, activeLocation]);
 
   const fileInfo = useMemo(
     () => selectedFileInfo(augmentedModels, selected, sourceSizeByKey),
@@ -686,6 +703,7 @@ export function HomeClient({
                 checking={checking}
                 checkProgress={checkProgress}
                 onCancelCheck={cancelCheck}
+                onCancelCopy={cancelCopy}
                 onAudit={onAudit}
                 auditing={auditing}
                 auditSupported={auditLocation !== null}
