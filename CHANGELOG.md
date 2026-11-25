@@ -168,6 +168,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The console is opaque again.** Since the last design-system update its
+  background and top border had gone missing, leaving the page showing
+  through the log.
+
 - **Two weight files sharing a quantization no longer merge into one row.**
   A model such as a FastFlowLM one, whose `model.q4nx` and
   `vision_weight.q4nx` are both Q4NX, showed one file with the other's

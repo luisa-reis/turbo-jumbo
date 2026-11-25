@@ -33,9 +33,14 @@ const styles = stylex.create({
     zIndex: 40,
     height: '50vh',
     overflowY: 'auto',
-    background: '#0c1a0c',
+    // Longhands, not `background` / `borderTop`: the StyleX compiler emits no
+    // rule at all for those shorthands, which left the console see-through
+    // with no top edge.
+    backgroundColor: '#0c1a0c',
     fontFamily: 'monospace',
-    borderTop: '1px solid #1a3a1a',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: '#1a3a1a',
     padding: '8px 16px 72px',
   },
   empty: {color: '#3a6a3a'},
