@@ -172,7 +172,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   refresh of a peer's model list, or a moment when it was reported
   unreachable, emptied its tab until the next refresh, up to the peer check
   interval later. The tab now keeps its last list through a failed refresh,
-  and reloads as soon as the peer is reported reachable again.
+  and reloads as soon as the peer is reported reachable again. A peer that
+  misses one reachability check is asked again a moment later before it is
+  reported unreachable.
 
 - **Copies fix a model's outdated support files instead of spreading them.**
   When a repo updates a small file like `tokenizer_config.json`, older copies

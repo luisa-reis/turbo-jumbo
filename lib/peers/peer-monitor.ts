@@ -6,29 +6,48 @@ import {logger} from '@/lib/util/logger';
 
 const peerStatus = new Map<string, 'up' | 'down'>();
 
+/** How long a failed check waits before asking the peer once more. */
+const RETRY_DELAY_MS = 2000;
+
+/** Whether the peer answers: its agent's liveness, or its app's model list
+ *  (returned, since the event carries it). Throws when it doesn't. */
+async function probe(peer: Peer): Promise<Model[] | null> {
+  if (peer.agent_address) {
+    const res = await fetch(`http://${peer.agent_address}/`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return null;
+  }
+  const res = await fetch(`http://${peer.address}/api/v1/local-models`, {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as Model[];
+}
+
 async function checkPeer(peer: Peer): Promise<void> {
   const address = peer.address;
   try {
-    let models: Model[] | null = null;
-    if (peer.agent_address) {
-      // An agent answers liveness for almost nothing; the scan — a remote
-      // walk — runs only on the transition to up, when the event needs it.
-      const res = await fetch(`http://${peer.agent_address}/`, {
-        signal: AbortSignal.timeout(5000),
+    let models: Model[] | null;
+    try {
+      models = await probe(peer);
+    } catch (e) {
+      // A peer that was up gets one more chance before it is reported down:
+      // a single missed check (a stalled connection, a slow lookup) would
+      // otherwise blank its tab in every open browser for a whole interval.
+      if (peerStatus.get(address) !== 'up') throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      models = await probe(peer);
+      logger.info(`[monitor] peer ${address} answered on retry`);
+    }
+    // An agent answers liveness for almost nothing; the scan — a remote
+    // walk — runs only on the transition to up, when the event needs it.
+    if (peer.agent_address && peerStatus.get(address) !== 'up') {
+      models = await scanModels({
+        storage: storageForPeer(address),
+        root: 'models',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (peerStatus.get(address) !== 'up') {
-        models = await scanModels({
-          storage: storageForPeer(address),
-          root: 'models',
-        });
-      }
-    } else {
-      const res = await fetch(`http://${address}/api/v1/local-models`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      models = await res.json();
     }
 
     const prev = peerStatus.get(address);
