@@ -168,6 +168,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A split model held only on a peer lists its shards.** Expanding its
+  quantization showed nothing; it now lists each shard the peer holds, the
+  same as for a model in local or cold storage.
+
 - **A download that won't fit stops before it starts.** Every download,
   including redownloads and missing-file downloads from the table, now
   checks free space at its destination first, and says how much it needs

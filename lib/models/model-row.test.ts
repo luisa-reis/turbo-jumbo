@@ -467,3 +467,35 @@ test('on All, a host with no model storage sizes a model by its known copies', (
   const host = buildDisplayRows({...withPeer, models: [peerOnly]});
   expect(host.find((r) => r.depth === 0)!.size).toBe(0);
 });
+
+test('a peer-only split quant lists the shards the peer holds', () => {
+  const dir = 'org/Big-GGUF/Q4';
+  const peers = new Map([
+    [
+      '192.0.2.2:3000',
+      AsyncState.value([
+        peerModel('org/Big-GGUF', [
+          {
+            isSplit: true,
+            representativeFilename: 'Big-Q4-00001-of-00003.gguf',
+            // Out of order, and shard 2 missing, as a peer reports them.
+            files: [
+              {path: `${dir}/Big-Q4-00003-of-00003.gguf`, size: 30},
+              {path: `${dir}/Big-Q4-00001-of-00003.gguf`, size: 10},
+            ],
+            quant: 'Q4_K_M',
+            totalShards: 3,
+            presentShards: 2,
+            missingIndices: [2],
+            totalSize: 40,
+          },
+        ]),
+      ]),
+    ],
+  ]);
+  const [row] = augmentWithPeerOnlyQuants([], peers);
+  expect(row.quants[0].shards).toEqual([
+    {filename: 'Big-Q4-00001-of-00003.gguf', size: 10},
+    {filename: 'Big-Q4-00003-of-00003.gguf', size: 30},
+  ]);
+});

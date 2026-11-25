@@ -251,6 +251,7 @@ export function augmentWithPeerOnlyQuants(
     displayName: string;
     size: number;
     paths: string[];
+    shards: ShardInfo[];
     totalShards: number;
     presentShards: number;
     missingIndices: number[];
@@ -283,6 +284,14 @@ export function augmentWithPeerOnlyQuants(
           displayName: f.isSplit ? f.representativeFilename : f.filename,
           size: f.isSplit ? f.totalSize : f.size,
           paths,
+          // Each shard the peer holds, for the split row's expansion — the
+          // same list a local or cold quant shows. A missing shard has no row;
+          // the quant's "missing" badge names it.
+          shards: f.isSplit
+            ? [...f.files]
+                .sort((a, b) => a.path.localeCompare(b.path))
+                .map((s) => ({filename: fileBasename(s.path), size: s.size}))
+            : [],
           totalShards: f.isSplit ? f.totalShards : 0,
           presentShards: f.isSplit ? f.presentShards : 0,
           missingIndices: f.isSplit ? f.missingIndices : [],
@@ -310,7 +319,7 @@ export function augmentWithPeerOnlyQuants(
       localSize: 0, // peer-only: nothing on local storage
       paths: p.paths,
       coldPaths: [],
-      shards: [],
+      shards: p.shards,
       totalShards: p.totalShards,
       presentShards: p.presentShards,
       missingIndices: p.missingIndices,
