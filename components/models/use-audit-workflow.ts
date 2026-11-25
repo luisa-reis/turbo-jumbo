@@ -106,28 +106,32 @@ export function useAuditWorkflow({
     });
   }, []);
 
-  // Network-only "is there a newer version on HF?" pass over the location's
-  // files. Streams per-file verdicts; only files behind their repo head are
-  // reported as updates. Failures are non-fatal — cached verdicts stay.
-  const checkUpdates = useCallback(async () => {
-    if (!auditLocation) return;
-    setCheckingUpdates(true);
-    try {
-      const res = await fetch('/api/v1/audit/updates', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({location: auditLocation}),
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await readNdjson<UpdateResult>(res, (event) => {
-        setUpdateResults((prev) => new Map(prev).set(event.file, event));
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCheckingUpdates(false);
-    }
-  }, [auditLocation, setError]);
+  // Network-only "is there a newer version on HF?" pass over `files`, or the
+  // whole location without them. Streams per-file verdicts; only files behind
+  // their repo head are reported as updates. Failures are non-fatal — cached
+  // verdicts stay.
+  const checkUpdates = useCallback(
+    async (files?: string[]) => {
+      if (!auditLocation) return;
+      setCheckingUpdates(true);
+      try {
+        const res = await fetch('/api/v1/audit/updates', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({location: auditLocation, files}),
+        });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        await readNdjson<UpdateResult>(res, (event) => {
+          setUpdateResults((prev) => new Map(prev).set(event.file, event));
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setCheckingUpdates(false);
+      }
+    },
+    [auditLocation, setError],
+  );
 
   const runAudit = useCallback(
     async (paths: string[]) => {
@@ -211,7 +215,7 @@ export function useAuditWorkflow({
       // latest — a split set whose shards come from different revisions, say.
       // The verdict alone doesn't show that; the update check marks it, with
       // the download that brings it current.
-      void checkUpdates();
+      void checkUpdates(paths);
     },
     [auditLocation, setError, checkUpdates],
   );

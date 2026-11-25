@@ -17,9 +17,15 @@ const CONCURRENCY = 8;
  * head commit — no local hashing. Files with no sidecar / no resolved source /
  * no recorded commit are skipped (they emit nothing). Mirrors the NDJSON
  * streaming and peer-proxying of `app/api/v1/audit/route.ts`.
+ *
+ * With `files`, only those (paths relative to the storage root) are checked —
+ * the files an audit was run on; without it, every file at the location.
  */
 export async function POST(req: Request) {
-  const body = await readJsonBody<{location?: string}>(req, isObject);
+  const body = await readJsonBody<{location?: string; files?: string[]}>(
+    req,
+    isObject,
+  );
   if (body instanceof Response) return body;
 
   const target = resolveAuditLocation(body.location);
@@ -45,13 +51,15 @@ export async function POST(req: Request) {
   });
   const {signal} = abortController;
 
+  const only = Array.isArray(body.files) ? new Set(body.files) : null;
   const models = await scanModels(basePath);
   const relPaths: string[] = [];
   for (const model of models) {
     for (const file of model.files) {
       if (file.isSplit) {
-        for (const shard of file.files) relPaths.push(shard.path);
-      } else {
+        for (const shard of file.files)
+          if (!only || only.has(shard.path)) relPaths.push(shard.path);
+      } else if (!only || only.has(file.path)) {
         relPaths.push(file.path);
       }
     }
