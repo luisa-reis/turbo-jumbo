@@ -34,7 +34,7 @@ async fn main() -> ExitCode {
     }
 
     let roots: Vec<&str> = cfg.roots.names();
-    let listener = match tokio::net::TcpListener::bind(("0.0.0.0", cfg.port)).await {
+    let listener = match listen(cfg.port).await {
         Ok(listener) => listener,
         Err(e) => {
             eprintln!("agent: cannot listen on :{}: {e}", cfg.port);
@@ -58,6 +58,32 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// A listener on `port` for both address families. A name callers resolve can
+/// come back with IPv6 addresses (LLMNR answers with every address the host
+/// has), and a listener on IPv4 alone refuses those connections, so the agent
+/// looks down whenever a lookup prefers them. Dual-stack is asked for
+/// explicitly rather than left to the host's `bindv6only` default, which would
+/// otherwise turn this into an IPv6-only listener. A host without IPv6 gets
+/// an IPv4 listener.
+async fn listen(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    match dual_stack(port) {
+        Ok(listener) => tokio::net::TcpListener::from_std(listener),
+        Err(_) => tokio::net::TcpListener::bind(("0.0.0.0", port)).await,
+    }
+}
+
+fn dual_stack(port: u16) -> std::io::Result<std::net::TcpListener> {
+    use socket2::{Domain, Socket, Type};
+    let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
+    socket.set_only_v6(false)?;
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    let addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port));
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    Ok(socket.into())
 }
 
 /// Resolve on SIGINT or SIGTERM, letting in-flight requests finish.

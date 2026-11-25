@@ -168,6 +168,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A storage agent now accepts IPv6 connections.** It listened on IPv4
+  only, so when a peer's name resolved to IPv6 addresses — as names answered
+  on the local network often do — its connections were refused. The peer then
+  briefly showed as unreachable and its tab went blank. Redeploy your agents
+  to pick this up.
+
 - **A peer's tab no longer blanks to "No data" on a hiccup.** A single failed
   refresh of a peer's model list, or a moment when it was reported
   unreachable, emptied its tab until the next refresh, up to the peer check

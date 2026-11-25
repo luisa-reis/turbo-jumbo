@@ -26,6 +26,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # saphyr) once one is picked deliberately rather than by guess.
 serde_yaml = "0.9"
 sha2 = "0.10"
+# Already in the tree under tokio; named here to open the listener dual-stack
+# (IPv6 with IPv4 mapped in), which tokio's own bind can't ask for.
+socket2 = "0.6"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tracing = "0.1"
