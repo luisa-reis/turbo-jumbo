@@ -560,7 +560,13 @@ export function ModelsTableClient({
                     onCopyFrom={onCopyFrom}
                     recovering={recovering}
                   />
-                  {updates.length > 0 && <UpdateBadge updates={updates} />}
+                  {updates.length > 0 && (
+                    <UpdateBadge
+                      updates={updates}
+                      onDownloadFiles={onDownloadRepoFiles}
+                      downloading={redownloading}
+                    />
+                  )}
                 </HStack>
               );
             },

@@ -98,12 +98,36 @@ export function useAuditWorkflow({
     };
     setAuditResults(drop);
     setAuditProgress(drop);
+    setUpdateResults(drop);
     setAuditedPaths((prev) => {
       const next = new Set(prev);
       for (const p of paths) next.delete(p);
       return next;
     });
   }, []);
+
+  // Network-only "is there a newer version on HF?" pass over the location's
+  // files. Streams per-file verdicts; only files behind their repo head are
+  // reported as updates. Failures are non-fatal — cached verdicts stay.
+  const checkUpdates = useCallback(async () => {
+    if (!auditLocation) return;
+    setCheckingUpdates(true);
+    try {
+      const res = await fetch('/api/v1/audit/updates', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({location: auditLocation}),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      await readNdjson<UpdateResult>(res, (event) => {
+        setUpdateResults((prev) => new Map(prev).set(event.file, event));
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }, [auditLocation, setError]);
 
   const runAudit = useCallback(
     async (paths: string[]) => {
@@ -177,13 +201,19 @@ export function useAuditWorkflow({
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        return;
       } finally {
         setAuditing(false);
         setAuditProgress(new Map());
         setAuditStarted(new Set());
       }
+      // A file can pass while matching an older revision than the repo's
+      // latest — a split set whose shards come from different revisions, say.
+      // The verdict alone doesn't show that; the update check marks it, with
+      // the download that brings it current.
+      void checkUpdates();
     },
-    [auditLocation, setError],
+    [auditLocation, setError, checkUpdates],
   );
 
   // Fold cached verdicts into the audit state without clobbering fresh
@@ -209,29 +239,6 @@ export function useAuditWorkflow({
       void loadCachedAudits();
     }
   };
-
-  // Network-only "is there a newer version on HF?" pass over the location's
-  // files. Streams per-file verdicts; only files behind their repo head are
-  // reported as updates. Failures are non-fatal — cached verdicts stay.
-  async function checkUpdates() {
-    if (!auditLocation) return;
-    setCheckingUpdates(true);
-    try {
-      const res = await fetch('/api/v1/audit/updates', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({location: auditLocation}),
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await readNdjson<UpdateResult>(res, (event) => {
-        setUpdateResults((prev) => new Map(prev).set(event.file, event));
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCheckingUpdates(false);
-    }
-  }
 
   async function loadCachedAudits() {
     if (!auditLocation) return;

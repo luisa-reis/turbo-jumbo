@@ -162,3 +162,26 @@ export function rowUpdates(
     .map((p) => updateResults.get(p))
     .filter((r): r is UpdateResult => r?.status === 'update');
 }
+
+/**
+ * The download that brings a row's out-of-date files to their repo's latest:
+ * the repo paths of every update that names its source, from the first such
+ * update's repo and branch (a row's files share both). Null when none does —
+ * an update from a server that predates the source fields.
+ */
+export function updateDownload(
+  updates: UpdateResult[],
+): {repoId: string; branch: string; repoPaths: string[]} | null {
+  const anchor = updates.find((u) => u.repoId && u.repoPath);
+  if (!anchor?.repoId) return null;
+  const branch = anchor.branch ?? 'main';
+  const repoPaths = updates
+    .filter(
+      (u) =>
+        u.repoId === anchor.repoId &&
+        (u.branch ?? 'main') === branch &&
+        u.repoPath,
+    )
+    .map((u) => u.repoPath as string);
+  return {repoId: anchor.repoId, branch, repoPaths};
+}

@@ -168,6 +168,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **An out-of-date file can be brought current from its Update badge.** The
+  badge's card gains a **Download latest** button that fetches the newer
+  version in place — for example, one shard of a split model left at an older
+  revision than the rest. The badge also now appears after an audit of
+  selected files, not only after loading cached results; such a file passes
+  its audit (it matches a real revision), so the badge was the only sign.
 - **An audit of a split model missing a shard shows its download button.**
   The hovercard listed every present shard (each flagged for the gap) ahead
   of the missing one, so its "Download missing file" button sat out of sight

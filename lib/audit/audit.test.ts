@@ -1780,6 +1780,9 @@ test('auditFileUpdate: update when the head commit differs from the recorded one
       latestCommit: 'newcommit',
       latestCommitDate: '2026-01-01T00:00:00.000Z',
       latestCommitUrl: 'https://huggingface.co/o/r/blob/newcommit/m.gguf',
+      repoId: 'o/r',
+      repoPath: 'm.gguf',
+      branch: 'main',
       localCommitDate: '2024-01-01T00:00:00.000Z',
     });
   } finally {
@@ -1835,6 +1838,9 @@ test('auditFileUpdate: update omits localCommitDate when the sidecar has none', 
       latestCommit: 'newcommit',
       latestCommitDate: '2026-01-01T00:00:00.000Z',
       latestCommitUrl: 'https://huggingface.co/o/r/blob/newcommit/m.gguf',
+      repoId: 'o/r',
+      repoPath: 'm.gguf',
+      branch: 'main',
     });
     expect(r).not.toHaveProperty('localCommitDate');
   } finally {

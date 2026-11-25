@@ -161,6 +161,11 @@ export interface UpdateResult {
   latestCommitDate?: string; // ISO 8601
   latestCommitUrl?: string; // blob page pinned to the head commit
   localCommitDate?: string; // ISO 8601 — recorded source-commit date of the local file
+  // Where the newer version is fetched from — set on an `update`, so the
+  // badge's download action needs no second lookup.
+  repoId?: string;
+  repoPath?: string;
+  branch?: string;
 }
 
 /**
@@ -180,11 +185,8 @@ export async function auditFileUpdate(
   const ref = parseHfFileUrl(meta.originUrl);
   if (!ref) return null;
 
-  const head = await resolveHfFileByPath(
-    ref.repoId,
-    canonicalBranch(ref.branch),
-    ref.repoPath,
-  );
+  const branch = canonicalBranch(ref.branch);
+  const head = await resolveHfFileByPath(ref.repoId, branch, ref.repoPath);
   if (!head?.commit) return {file: relPath, status: 'unknown'};
 
   const status = decideUpdate(meta.sourceCommit, head.commit);
@@ -192,6 +194,9 @@ export async function auditFileUpdate(
   return {
     file: relPath,
     status,
+    repoId: ref.repoId,
+    repoPath: ref.repoPath,
+    branch,
     latestCommit: head.commit,
     ...(head.commitDate ? {latestCommitDate: head.commitDate} : {}),
     latestCommitUrl: `https://huggingface.co/${ref.repoId}/blob/${head.commit}/${ref.repoPath}`,

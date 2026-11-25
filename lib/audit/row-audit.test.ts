@@ -1,6 +1,7 @@
 import {test, expect} from 'bun:test';
 import {
   companionPaths,
+  updateDownload,
   hovercardOrder,
   redownloadableFailures,
   rowAudit,
@@ -347,4 +348,27 @@ test('hovercardOrder lists the absent shard ahead of the intact ones its gap fla
     shardPath(1),
     shardPath(3),
   ]);
+});
+
+test('updateDownload fetches every out-of-date file of the row from its repo', () => {
+  const update = (repoPath: string): UpdateResult => ({
+    file: `org/repo/${repoPath}`,
+    status: 'update',
+    repoId: 'org/repo',
+    repoPath,
+    branch: 'main',
+  });
+  expect(
+    updateDownload([update('Q4/m-00001-of-00002.gguf'), update('mmproj.gguf')]),
+  ).toEqual({
+    repoId: 'org/repo',
+    branch: 'main',
+    repoPaths: ['Q4/m-00001-of-00002.gguf', 'mmproj.gguf'],
+  });
+});
+
+test('updateDownload has nothing to fetch when no update names its source', () => {
+  expect(updateDownload([{file: 'org/repo/a.gguf', status: 'update'}])).toBe(
+    null,
+  );
 });

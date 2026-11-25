@@ -13,6 +13,7 @@ import type {AuditResult, AuditStatus, UpdateResult} from '@/lib/audit/audit';
 import {
   hovercardOrder,
   redownloadableFailures,
+  updateDownload,
   type RowAudit,
 } from '@/lib/audit/row-audit';
 import type {RepoFile} from '@/lib/models/repo-files';
@@ -339,8 +340,22 @@ function AuditFailureContent({
 
 // Shown in the Audit column when a row has at least one file whose repo head
 // commit is newer than the file's recorded source commit. The hovercard lists
-// each behind file with a link to the newer commit.
-export function UpdateBadge({updates}: {updates: UpdateResult[]}) {
+// each behind file with a link to the newer commit, and — where the location
+// can take a download — fetches the newer versions in place.
+export function UpdateBadge({
+  updates,
+  onDownloadFiles,
+  downloading = false,
+}: {
+  updates: UpdateResult[];
+  onDownloadFiles?: (
+    repoId: string,
+    repoPaths: string[],
+    branch: string,
+  ) => void;
+  downloading?: boolean;
+}) {
+  const download = onDownloadFiles ? updateDownload(updates) : null;
   return (
     <HoverCard
       placement="above"
@@ -373,6 +388,29 @@ export function UpdateBadge({updates}: {updates: UpdateResult[]}) {
               </VStack>
             );
           })}
+          {download && (
+            <HStack>
+              <Button
+                label={
+                  downloading
+                    ? 'Downloading…'
+                    : download.repoPaths.length > 1
+                      ? `Download latest (${download.repoPaths.length})`
+                      : 'Download latest'
+                }
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  onDownloadFiles?.(
+                    download.repoId,
+                    download.repoPaths,
+                    download.branch,
+                  )
+                }
+                isDisabled={downloading}
+              />
+            </HStack>
+          )}
         </VStack>
       }
     >
