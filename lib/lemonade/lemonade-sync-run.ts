@@ -43,6 +43,10 @@ import {
   lemonadeHeaders,
   type FlmSource,
 } from '@/lib/lemonade/flm';
+import {
+  cacheChanged,
+  refreshLemonadeList,
+} from '@/lib/lemonade/lemonade-list-refresh';
 import {scanModels} from '@/lib/models/models';
 import type {Site} from '@/lib/storage/site';
 import {storage} from '@/lib/storage/storage-instance';
@@ -257,6 +261,9 @@ export async function runSync(target: SyncTarget = localTarget): Promise<{
   /** Whether Lemonade was told about new flm links. Absent when none were
    *  made. */
   flmRefresh?: FlmRefresh;
+  /** Whether Lemonade was made to re-read its cache. Absent when the sync
+   *  left the cache as it was. */
+  listRefresh?: {ok: boolean; message?: string};
 } | null> {
   if (!target.hasModels || !target.hasLemonade) return null;
   const {catalog, listed, registry} = await lemonadeKnowledge();
@@ -281,11 +288,17 @@ export async function runSync(target: SyncTarget = localTarget): Promise<{
     plans,
     flm.filter((f) => f.status === 'link'),
   );
+  // Lemonade keeps its downloaded flags until its list is rebuilt, so links
+  // just made in its cache stay "not downloaded" without this.
+  const listRefresh = cacheChanged(results, placement)
+    ? await refreshLemonadeList(target.storage)
+    : undefined;
   return {
     results,
     placement: placement.filter((p) => p.status !== 'in-place'),
     extra,
     flm,
     ...(flmRefresh ? {flmRefresh} : {}),
+    ...(listRefresh ? {listRefresh} : {}),
   };
 }

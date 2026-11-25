@@ -165,14 +165,21 @@ export function LemonadeSyncModal({
         extra?: ExtraChange[];
         flm?: FlmStoreChange[];
         flmRefresh?: {ok: boolean; message?: string};
+        listRefresh?: {ok: boolean; message?: string};
       };
       setResults(data.results ?? []);
       setPlacement(data.placement ?? []);
       setExtra(data.extra ?? []);
       setFlm(data.flm ?? []);
+      const failed =
+        data.flmRefresh?.ok === false
+          ? data.flmRefresh
+          : data.listRefresh?.ok === false
+            ? data.listRefresh
+            : undefined;
       setFlmNotice(
-        data.flmRefresh && !data.flmRefresh.ok
-          ? `Lemonade was not told about the new links (${data.flmRefresh.message ?? 'unknown reason'}); it will list them after its next restart.`
+        failed
+          ? `Lemonade was not told about the new links (${failed.message ?? 'unknown reason'}); it will list them after its next restart.`
           : null,
       );
       setPhase('done');

@@ -176,6 +176,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Models the sync links into Lemonade show as downloaded right away.**
+  Lemonade decides which models are downloaded only when it builds its model
+  list, so a model whose files the sync had just linked in kept reading as not
+  downloaded until Lemonade restarted. The sync now has Lemonade rebuild the
+  list whenever it changes the cache.
 - **A peer's tab lists every shard the peer holds, and a cold copy short of
   one can be completed.** On a machine holding no models of its own, a split
   model's rows were built from its cold-storage copy, so a shard missing from
