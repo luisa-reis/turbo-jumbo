@@ -168,6 +168,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A peer's tab lists every shard the peer holds, and a cold copy short of
+  one can be completed.** On a machine holding no models of its own, a split
+  model's rows were built from its cold-storage copy, so a shard missing from
+  cold storage was missing from every peer's tab too: the cold copy read
+  Complete, and its "Copy to cold storage" action had nothing to send. The
+  peer's own shards now fill its tab, the cold copy reads Incomplete, and
+  both its Fix and "Copy to cold storage" send the missing shard.
 - **An updated file can be copied over an older version elsewhere.** A file
   whose copy on the destination is larger than the source — for example an
   upstream update that shrank it, downloaded on one machine but not another —

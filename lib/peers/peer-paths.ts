@@ -1,5 +1,6 @@
 import type {Model} from '@/lib/models/models';
-import type {ModelRow} from '@/lib/models/model-row';
+import type {ModelRow, QuantInfo} from '@/lib/models/model-row';
+import {coldStorageRollup} from '@/lib/storage/cold-storage-rollup';
 import {isMmprojFilename} from '@/lib/models/model-name';
 import {isGenericWeightName} from '@/lib/models/weight-files';
 
@@ -93,7 +94,8 @@ export function withPeerPaths(
   models: ModelRow[],
   peerModels: Model[],
 ): ModelRow[] {
-  const byKey = new Map<string, string[]>();
+  type PeerFile = Model['files'][number];
+  const byKey = new Map<string, Array<{path: string; file: PeerFile}>>();
   for (const m of peerModels) {
     for (const f of m.files) {
       const paths = f.isSplit ? f.files.map((s) => s.path) : [f.path];
@@ -101,20 +103,49 @@ export function withPeerPaths(
         const key = fileJoinKey(m.name, fileBasename(p));
         const prev = byKey.get(key);
         if (prev) {
-          prev.push(p);
+          prev.push({path: p, file: f});
         } else {
-          byKey.set(key, [p]);
+          byKey.set(key, [{path: p, file: f}]);
         }
       }
     }
   }
-  return models.map((m) => ({
-    ...m,
-    quants: m.quants.map((q) => {
-      const peerPaths = q.paths.flatMap(
+  return models.map((m) => {
+    const quants = m.quants.map((q): QuantInfo => {
+      const hits = q.paths.flatMap(
         (p) => byKey.get(fileJoinKey(m.name, fileBasename(p))) ?? [],
       );
-      return peerPaths.length > 0 ? {...q, paths: peerPaths} : q;
-    }),
-  }));
+      if (hits.length === 0) return q;
+      const split = hits.find((h) => h.file.isSplit)?.file;
+      if (!split?.isSplit) return {...q, paths: hits.map((h) => h.path)};
+      // A split quant takes the peer's whole shard set. The row may have been
+      // built from another location's copy (cold storage, on a viewer) that
+      // lacks shards the peer holds — matching only that copy's shards would
+      // hide the rest, and leave out of the row's paths exactly the shard a
+      // copy to cold storage needs to send.
+      const shards = [...split.files].sort((a, b) =>
+        a.path.localeCompare(b.path),
+      );
+      const known = new Map(q.shards.map((s) => [s.filename, s]));
+      const coldBases = new Set(q.coldPaths.map(fileBasename));
+      const coldLacksShard =
+        q.inColdStorage &&
+        shards.some((s) => !coldBases.has(fileBasename(s.path)));
+      return {
+        ...q,
+        paths: shards.map((s) => s.path),
+        shards: shards.map((s) => {
+          const filename = fileBasename(s.path);
+          const provenance = known.get(filename)?.provenance;
+          return {filename, size: s.size, ...(provenance ? {provenance} : {})};
+        }),
+        size: split.totalSize,
+        totalShards: split.totalShards,
+        presentShards: split.presentShards,
+        missingIndices: split.missingIndices,
+        coldComplete: q.coldComplete && !coldLacksShard,
+      };
+    });
+    return {...m, quants, ...coldStorageRollup(quants)};
+  });
 }

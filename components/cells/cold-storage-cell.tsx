@@ -32,19 +32,24 @@ export function ColdStorageCell({
     }
     // Present by name but a different size — a partial/mismatched cold copy.
     const incomplete = <Badge label="Incomplete" variant="orange" />;
-    if (row.coldSize == null) return incomplete;
-    // The partial cold copy can be completed by re-running the local → cold
-    // copy, which resumes from the verified prefix already there.
+    // A split's cold copy is short of shards (or holds a partial one); a
+    // single file's is just smaller. Either way it's an incomplete transfer.
+    const detail = !row.isSingleFile
+      ? 'The cold copy is missing shards, or holds a partial one.'
+      : row.coldSize != null
+        ? `Cold copy ${formatSize(row.coldSize)} — expected ${formatSize(row.size)}`
+        : null;
+    if (detail == null) return incomplete;
+    // The partial cold copy can be completed by re-running the copy to cold
+    // storage, which sends what's missing and resumes a partial file from the
+    // verified prefix already there.
     const canFix = onFixIncomplete != null && row.paths.length > 0;
     return (
       <HoverCard
         placement="above"
         content={
           <VStack gap={2}>
-            <Text type="supporting">
-              Cold copy {formatSize(row.coldSize)} — expected{' '}
-              {formatSize(row.size)}
-            </Text>
+            <Text type="supporting">{detail}</Text>
             {canFix && (
               <HStack>
                 <Button

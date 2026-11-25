@@ -481,3 +481,50 @@ test('fileJoinKey qualifies the generic FLM weight names by model', () => {
     'FastFlowLM/A-NPU2 vision_weight.q4nx',
   );
 });
+
+test("withPeerPaths gives a split quant the peer's whole shard set, and flags a cold copy short of it", () => {
+  // A viewer builds the row from cold storage, which holds shards 1, 2 and 4.
+  // The peer holds all four: its tab must list shard 3 and carry it in the
+  // row's paths, and the cold copy is no longer complete.
+  const shard = (n: number) => `org/M-GGUF/Q4/M-Q4-0000${n}-of-00004.gguf`;
+  const cold = [1, 2, 4].map(shard);
+  const fromCold: QuantInfo = {
+    ...quant('Q4', cold),
+    isSingleFile: false,
+    inColdStorage: true,
+    coldComplete: true,
+    coldPaths: cold,
+    shards: cold.map((p) => ({filename: p.split('/').pop()!, size: 10})),
+    totalShards: 4,
+    presentShards: 3,
+    missingIndices: [3],
+  };
+  const models = [{...row('org/M-GGUF', [fromCold]), allInColdStorage: true}];
+  const peer: Model[] = [
+    {
+      name: 'org/M-GGUF',
+      files: [
+        {
+          isSplit: true,
+          representativeFilename: 'M-Q4-00001-of-00004.gguf',
+          files: [4, 1, 3, 2].map((n) => ({path: shard(n), size: 10})),
+          quant: 'Q4',
+          totalShards: 4,
+          presentShards: 4,
+          missingIndices: [],
+          totalSize: 40,
+        },
+      ],
+    } as unknown as Model,
+  ];
+  const [m] = withPeerPaths(models, peer);
+  const q = m.quants[0];
+  expect(q.paths).toEqual([1, 2, 3, 4].map(shard));
+  expect(q.shards.map((s) => s.filename)).toEqual(
+    [1, 2, 3, 4].map((n) => `M-Q4-0000${n}-of-00004.gguf`),
+  );
+  expect(q.missingIndices).toEqual([]);
+  expect(q.size).toBe(40);
+  expect(q.coldComplete).toBe(false);
+  expect(m.allInColdStorage).toBe(false);
+});
