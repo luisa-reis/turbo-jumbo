@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     '.next/**',
     // The isolated verify/capture server's dist dir (bin/verify-server.sh).
     '.next-verify/**',
+    // bin/deploy.sh's build dir.
+    '.next-deploy/**',
     'out/**',
     'build/**',
     'next-env.d.ts',
